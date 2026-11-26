@@ -77,7 +77,7 @@ One **Project**, one **Run** going Developer (Claude) → **Checks** → pull re
     - abandoning closes the pull request if there is one, and keeps the branch and the worktree;
     - polling moves Approved Runs to Merged or Closed;
     - Merged, Closed and Abandoned Runs free their Project slot.
-- [ ] `m1-07` **Concurrency limit and queue**: the human can line up Runs without overloading a Project.
+- [x] `m1-07` **Concurrency limit and queue**: the human can line up Runs without overloading a Project.
   - Spec: `docs/specs/m1-walking-skeleton.md`
   - Blocked by: `m1-06`
   - Acceptance:
@@ -90,7 +90,7 @@ One **Project**, one **Run** going Developer (Claude) → **Checks** → pull re
   - Blocked by: `m1-05`, `m1-06` (PR polling to resume on startup)
   - Acceptance:
     - when the Quota is exhausted, the Run goes Paused with its reset time and restarts its current Step after the reset;
-    - on Forgequor startup, Running Runs restart their current Step and Approved Runs resume PR polling;
+    - on Forgequor startup, Running Runs restart their current Step, Approved Runs resume PR polling, and each Project starts the Queued Runs that fit its free slots (a Run Queued before a restart must not stay stuck);
     - a Runner failure opens an Escalation with the error;
     - a Step running longer than a configurable timeout has its Runner process killed and opens an Escalation saying so;
     - killing a timed-out Step or Check ends its whole process group, so no child process (such as a headless engine) survives it;

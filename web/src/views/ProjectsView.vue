@@ -7,10 +7,24 @@ const path = ref("");
 const error = ref("");
 /** Check commands being edited, one per line, by Project id. */
 const drafts = ref<Record<number, string>>({});
+/** Max concurrent Runs being edited, by Project id. */
+const limits = ref<Record<number, number>>({});
 
 async function load() {
   projects.value = await getJson("/api/projects");
   drafts.value = Object.fromEntries(projects.value.map((p) => [p.id, p.checks.join("\n")]));
+  limits.value = Object.fromEntries(projects.value.map((p) => [p.id, p.maxConcurrentRuns]));
+}
+
+async function saveLimit(p: Project) {
+  error.value = "";
+  try {
+    const saved = await putJson<Project>(`/api/projects/${p.id}/concurrency`, { max: Number(limits.value[p.id]) });
+    p.maxConcurrentRuns = saved.maxConcurrentRuns;
+    limits.value[p.id] = saved.maxConcurrentRuns;
+  } catch (e: any) {
+    error.value = e.message;
+  }
 }
 
 async function saveChecks(p: Project) {
@@ -60,6 +74,13 @@ onMounted(load);
           :aria-label="`Checks of ${p.name}`"
         />
         <button type="submit">Save Checks</button>
+      </form>
+      <form @submit.prevent="saveLimit(p)">
+        <label>
+          Max concurrent Runs
+          <input v-model.number="limits[p.id]" type="number" min="1" step="1" :aria-label="`Max concurrent Runs of ${p.name}`" />
+        </label>
+        <button type="submit">Save limit</button>
       </form>
     </li>
   </ul>

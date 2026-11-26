@@ -6,6 +6,7 @@ export interface Project {
   remoteName: string;
   defaultBranch: string;
   checks: string[];
+  maxConcurrentRuns: number;
 }
 export interface CheckResult {
   id: number;

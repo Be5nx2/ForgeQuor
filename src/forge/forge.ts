@@ -112,7 +112,12 @@ export interface Forge {
   listProjects(): Promise<Project[]>;
   /** Replaces a Project's ordered Check commands (blank ones are dropped). Applies to Runs started afterwards. */
   setChecks(projectId: number, checks: string[]): Promise<Project>;
-  /** Creates a Run and starts it in the background; follow it with `getRun`. */
+  /** Sets how many Runs of a Project may work at once (at least 1). Raising it starts Queued Runs that now fit. */
+  setMaxConcurrentRuns(projectId: number, max: number): Promise<Project>;
+  /**
+   * Creates a Run and starts it in the background; follow it with `getRun`. A Project already at its concurrent Runs
+   * limit leaves the new Run Queued; it starts by itself, in creation order, when a slot frees up.
+   */
   startRun(input: { projectId: number; task: string; title?: string; trackerRef?: string }): Promise<Run>;
   getRun(id: number): Promise<RunDetail>;
   listRuns(filter?: { projectId?: number; state?: RunState }): Promise<Run[]>;
@@ -210,6 +215,8 @@ const MAX_DEVELOPER_ATTEMPTS = 3;
 /** States a Run cannot leave. A Run in one of them no longer holds its Project's slot. */
 const OVER: RunState[] = ["merged", "closed", "abandoned"];
 const ACTIVE: RunState[] = ["queued", "running", "waiting", "paused", "approved"];
+/** States that hold one of their Project's slots. A Queued Run does not. */
+const HOLDING_A_SLOT: RunState[] = ["running", "waiting", "paused", "approved"];
 
 function toGate(r: Record<string, any>): Gate {
   return {
@@ -255,11 +262,55 @@ export function createForge(deps: ForgeDeps): Forge {
     return rows[0]?.state === "running";
   }
 
+  /** Starts `run` in the background. */
+  function launch(run: Run, project: Project) {
+    const work = execute(run, project).finally(() => inFlight.delete(work));
+    inFlight.add(work);
+  }
+
+  /**
+   * Starts the Project's oldest Queued Runs while it has free slots. The Project row is locked meanwhile, so Runs
+   * created or freed at the same time can never push the Project past its limit.
+   */
+  async function promote(projectId: number) {
+    const client = await pool.connect();
+    let project: Project;
+    let started: Run[];
+    try {
+      await client.query("BEGIN");
+      const found = await client.query(`SELECT ${COLUMNS} FROM projects WHERE id = $1 FOR UPDATE`, [projectId]);
+      project = toProject(found.rows[0]);
+      const held = await client.query("SELECT count(*)::int AS n FROM runs WHERE project_id = $1 AND state = ANY($2)", [
+        projectId,
+        HOLDING_A_SLOT,
+      ]);
+      const free = project.maxConcurrentRuns - held.rows[0].n;
+      started = [];
+      if (free > 0) {
+        const moved = await client.query(
+          `UPDATE runs SET state = 'running', updated_at = now()
+           WHERE id IN (SELECT id FROM runs WHERE project_id = $1 AND state = 'queued' ORDER BY id LIMIT $2)
+           RETURNING ${RUN_COLUMNS}`,
+          [projectId, free],
+        );
+        started = moved.rows.map(toRun).sort((a, b) => a.id - b.id);
+      }
+      await client.query("COMMIT");
+    } catch (e) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw e;
+    } finally {
+      client.release();
+    }
+    for (const run of started) launch(run, project);
+  }
+
   async function settle(runId: number, state: "abandoned" | "merged" | "closed", from: RunState[]): Promise<boolean> {
+    let projectId: number;
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
-      const moved = await client.query("UPDATE runs SET state = $2, updated_at = now() WHERE id = $1 AND state = ANY($3) RETURNING id", [
+      const moved = await client.query("UPDATE runs SET state = $2, updated_at = now() WHERE id = $1 AND state = ANY($3) RETURNING project_id", [
         runId,
         state,
         from,
@@ -272,13 +323,16 @@ export function createForge(deps: ForgeDeps): Forge {
         await client.query("UPDATE gates SET decided_at = now(), decision = 'abandon' WHERE run_id = $1 AND decided_at IS NULL", [runId]);
       }
       await client.query("COMMIT");
-      return true;
+      projectId = Number(moved.rows[0].project_id);
     } catch (e) {
       await client.query("ROLLBACK").catch(() => {});
       throw e;
     } finally {
       client.release();
     }
+    // The Run is over, so its slot is free for the next Queued Run.
+    await promote(projectId);
+    return true;
   }
 
   async function abandon(runId: number): Promise<RunDetail> {
@@ -435,18 +489,25 @@ export function createForge(deps: ForgeDeps): Forge {
     },
 
     async startRun({ projectId, task, title, trackerRef }) {
-      const { rows: found } = await pool.query(`SELECT ${COLUMNS} FROM projects WHERE id = $1`, [projectId]);
+      const { rows: found } = await pool.query(`SELECT id FROM projects WHERE id = $1`, [projectId]);
       if (!found[0]) throw new Error(`No Project ${projectId}.`);
       if (!task.trim()) throw new Error("A Run needs a task.");
       const { rows } = await pool.query(
         `INSERT INTO runs (project_id, title, task, tracker_ref, state)
-         VALUES ($1, $2, $3, $4, 'running') RETURNING ${RUN_COLUMNS}`,
+         VALUES ($1, $2, $3, $4, 'queued') RETURNING id`,
         [projectId, title?.trim() || deriveTitle(task), task.trim(), trackerRef?.trim() || null],
       );
-      const run = toRun(rows[0]);
-      const work = execute(run, toProject(found[0])).finally(() => inFlight.delete(work));
-      inFlight.add(work);
-      return run;
+      await promote(projectId);
+      const { rows: current } = await pool.query(`SELECT ${RUN_COLUMNS} FROM runs WHERE id = $1`, [rows[0].id]);
+      return toRun(current[0]);
+    },
+
+    async setMaxConcurrentRuns(projectId, max) {
+      if (!Number.isInteger(max) || max < 1) throw new Error("Max concurrent Runs must be a whole number of at least 1.");
+      const { rows } = await pool.query(`UPDATE projects SET max_concurrent_runs = $2 WHERE id = $1 RETURNING ${COLUMNS}`, [projectId, max]);
+      if (!rows[0]) throw new Error(`No Project ${projectId}.`);
+      await promote(projectId);
+      return toProject(rows[0]);
     },
 
     async getRun(id) {

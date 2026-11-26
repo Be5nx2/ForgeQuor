@@ -522,6 +522,7 @@ describe("abandoning a Run", () => {
 describe("detecting a merge or close", () => {
   it("moves Approved Runs to Merged or Closed, and leaves the others alone", async () => {
     const { project } = await projectWithRemote();
+    await forge.setMaxConcurrentRuns(project.id, 4);
     const merged = await approvedRun(project);
     const closed = await approvedRun(project);
     const open = await approvedRun(project);
@@ -552,5 +553,136 @@ describe("detecting a merge or close", () => {
     codeHost.failStateReads(null);
     await forge.checkPullRequests();
     expect((await forge.getRun(second.id)).state).toBe("merged");
+  });
+});
+
+/** A Developer that blocks until released, so Runs can be held in the Running state. */
+function gatedDeveloper() {
+  const waiters: Array<() => void> = [];
+  runner.use(async (step) => {
+    await new Promise<void>((r) => waiters.push(r));
+    developerCommits(step);
+  });
+  return {
+    releaseAll: () => waiters.splice(0).forEach((r) => r()),
+    started: async (n: number) => {
+      for (let i = 0; i < 200 && waiters.length < n; i++) await new Promise((r) => setTimeout(r, 10));
+      expect(waiters.length).toBeGreaterThanOrEqual(n);
+    },
+  };
+}
+
+describe("the concurrency limit and the queue", () => {
+  it("queues a Run over the Project's limit and starts it when a slot frees up", async () => {
+    const { project } = await projectWithRemote();
+    const gate = gatedDeveloper();
+    const a = await forge.startRun({ projectId: project.id, task: "A" });
+    const b = await forge.startRun({ projectId: project.id, task: "B" });
+    const c = await forge.startRun({ projectId: project.id, task: "C" });
+    await gate.started(2);
+
+    expect(a.state).toBe("running");
+    expect(b.state).toBe("running");
+    expect(c.state).toBe("queued");
+    expect((await forge.getRun(c.id)).worktreePath).toBeNull();
+
+    gate.releaseAll();
+    await forge.whenIdle();
+    expect((await forge.getRun(c.id)).state).toBe("queued");
+    await forge.abandonRun(a.id);
+    await gate.started(1);
+    gate.releaseAll();
+    await forge.whenIdle();
+
+    expect((await forge.getRun(c.id)).state).toBe("waiting");
+  });
+
+  it.each([
+    ["Merged", async (id: number) => (codeHost.setState(id, "merged"), forge.checkPullRequests())],
+    ["Closed", async (id: number) => (codeHost.setState(id, "closed"), forge.checkPullRequests())],
+    ["Abandoned", async (id: number, runId: number) => void (await forge.abandonRun(runId))],
+  ])("a Run becoming %s frees its slot and starts the next Queued Run", async (_name, free) => {
+    const { project } = await projectWithRemote();
+    await forge.setMaxConcurrentRuns(project.id, 1);
+    const first = await approvedRun(project);
+    runner.use(() => {});
+    const next = await forge.startRun({ projectId: project.id, task: "Next" });
+    await forge.whenIdle();
+    expect((await forge.getRun(next.id)).state).toBe("queued");
+
+    await free(first.prNumber!, first.id);
+    await forge.whenIdle();
+
+    expect((await forge.getRun(next.id)).state).toBe("waiting");
+  });
+
+  it("starts Queued Runs in creation order", async () => {
+    const { project } = await projectWithRemote();
+    await forge.setMaxConcurrentRuns(project.id, 1);
+    const first = await approvedRun(project);
+    runner.use(() => {});
+    const second = await forge.startRun({ projectId: project.id, task: "Second" });
+    const third = await forge.startRun({ projectId: project.id, task: "Third" });
+
+    await forge.abandonRun(first.id);
+    await forge.whenIdle();
+
+    expect((await forge.getRun(second.id)).state).toBe("waiting");
+    expect((await forge.getRun(third.id)).state).toBe("queued");
+  });
+
+  it("does not count Queued Runs, and keeps each Project's slots apart", async () => {
+    const one = await projectWithRemote();
+    const two = await projectWithRemote();
+    await forge.setMaxConcurrentRuns(one.project.id, 1);
+    await runToEnd(one.project);
+
+    const queued = await forge.startRun({ projectId: one.project.id, task: "Waits" });
+    const other = await runToEnd(two.project);
+
+    expect(queued.state).toBe("queued");
+    expect(other.state).toBe("waiting");
+  });
+
+  it("can abandon a Queued Run, which never starts", async () => {
+    const { project } = await projectWithRemote();
+    await forge.setMaxConcurrentRuns(project.id, 1);
+    const first = await runToEnd(project);
+    const queued = await forge.startRun({ projectId: project.id, task: "Never" });
+
+    expect((await forge.abandonRun(queued.id)).state).toBe("abandoned");
+    await forge.abandonRun(first.id);
+    await forge.whenIdle();
+
+    expect((await forge.getRun(queued.id)).state).toBe("abandoned");
+    expect((await forge.getRun(queued.id)).attempts).toEqual([]);
+  });
+
+  it("starts Queued Runs when the limit is raised, and rejects a limit below 1", async () => {
+    const { project } = await projectWithRemote();
+    await forge.setMaxConcurrentRuns(project.id, 1);
+    await runToEnd(project);
+    const queued = await forge.startRun({ projectId: project.id, task: "Later" });
+
+    const saved = await forge.setMaxConcurrentRuns(project.id, 2);
+    await forge.whenIdle();
+
+    expect(saved.maxConcurrentRuns).toBe(2);
+    expect((await forge.getRun(queued.id)).state).toBe("waiting");
+    await expect(forge.setMaxConcurrentRuns(project.id, 0)).rejects.toThrow(/at least 1/);
+    await expect(forge.setMaxConcurrentRuns(project.id, 1.5)).rejects.toThrow(/at least 1/);
+  });
+
+  it("never starts more Runs than the limit when many are created at once", async () => {
+    const { project } = await projectWithRemote();
+    const gate = gatedDeveloper();
+
+    const runs = await Promise.all([1, 2, 3, 4, 5].map((n) => forge.startRun({ projectId: project.id, task: `Run ${n}` })));
+    await gate.started(2);
+
+    expect(runs.filter((r) => r.state === "running")).toHaveLength(2);
+    expect((await forge.listRuns({ projectId: project.id, state: "queued" })).length).toBe(3);
+    gate.releaseAll();
+    await forge.whenIdle();
   });
 });
