@@ -28,6 +28,24 @@ export interface Asset extends AssetRequest {
   status: "pending" | "generating" | "waiting" | "approved";
   /** Colours outside the Art Direction's palette in the current version; a warning, never a failure. */
   warnings: string[];
+  /** The versions the human saw, oldest first, each with the Feedback it got; the last is the current one. */
+  versions: AssetVersion[];
+}
+export interface AssetVersion {
+  id: number;
+  iteration: number;
+  attempt: number;
+  feedback: string | null;
+}
+export interface Verdict {
+  assetId: number;
+  action: "approve" | "reject";
+  feedback?: string;
+}
+export interface GateVerdict {
+  assetId: number;
+  verdict: "approve" | "reject";
+  feedback: string | null;
 }
 export interface CheckResult {
   id: number;
@@ -76,14 +94,15 @@ export interface Gate {
   evidence: string | null;
   actions: GateAction[];
   decidedAt: string | null;
-  decision: GateAction | null;
+  decision: "approve" | "reject" | "abandon" | null;
   feedback: string | null;
+  verdicts: GateVerdict[];
 }
-export type GateAction = "approve" | "reject" | "abandon";
+export type GateAction = "approve" | "reject" | "abandon" | "judge";
 
 /** Records the human's decision at a Gate and returns the updated Run. */
-export function decideGate(gateId: number, action: GateAction, feedback?: string): Promise<RunDetail> {
-  return postJson(`/api/gates/${gateId}/decision`, { action, feedback });
+export function decideGate(gateId: number, action: GateAction, feedback?: string, verdicts?: Verdict[]): Promise<RunDetail> {
+  return postJson(`/api/gates/${gateId}/decision`, { action, feedback, verdicts });
 }
 export interface Iteration {
   number: number;

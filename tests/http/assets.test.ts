@@ -101,6 +101,32 @@ describe("refusing bad input", () => {
     expect(decided.status).toBe(409);
   });
 
+  it("passes a version to the image route, and the verdicts of an Asset Gate to the Forge core", async () => {
+    const file = join(folder, "old.png");
+    writeFileSync(file, Buffer.concat([Buffer.from("89504e470d0a1a0a", "hex"), Buffer.from("old")]));
+    const asked: unknown[] = [];
+    let decided: any;
+    const address = await serve({
+      async assetImage(...args) {
+        asked.push(args);
+        return file;
+      },
+      async decideGate(input) {
+        decided = input;
+        return { id: 1 } as any;
+      },
+    });
+    const verdicts = [{ assetId: 1, action: "approve" }, { assetId: 2, action: "reject", feedback: "Greener." }];
+
+    expect((await fetch(`${address}/api/runs/3/assets/1/image?version=7`)).status).toBe(200);
+    expect((await fetch(`${address}/api/runs/3/assets/1/image?version=../x`)).status).toBe(404);
+    const res = await post(`${address}/api/gates/5/decision`, { action: "judge", verdicts });
+
+    expect(asked).toEqual([[3, 1, 7]]);
+    expect(res.status).toBe(200);
+    expect(decided).toMatchObject({ gateId: 5, action: "judge", verdicts });
+  });
+
   it("answers 400 to a Project's art settings outside the repository", async () => {
     const address = await serve({
       async setArt() {

@@ -34,7 +34,7 @@ onUnmounted(() => stopFollowing?.());
       <div class="muted">{{ g.projectName }} · {{ g.reason }}</div>
       <pre v-if="g.evidence">{{ g.evidence }}</pre>
       <div v-if="g.kind === 'asset' && runs[g.runId]" @click.stop>
-        <AssetGallery :run-id="g.runId" :iteration="runs[g.runId]!.iteration" :assets="runs[g.runId]!.assets" />
+        <AssetGallery :run-id="g.runId" :iteration="runs[g.runId]!.iteration" :assets="runs[g.runId]!.assets" :gate="g" @decided="load" />
       </div>
       <GateActions :gate="g" @decided="load" />
     </li>

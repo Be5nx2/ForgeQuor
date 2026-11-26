@@ -71,7 +71,13 @@ onUnmounted(() => stopFollowing?.());
 
     <template v-if="run.assets.length">
       <h3>Assets</h3>
-      <AssetGallery :run-id="run.id" :iteration="run.iteration" :assets="run.assets" />
+      <AssetGallery
+        :run-id="run.id"
+        :iteration="run.iteration"
+        :assets="run.assets"
+        :gate="run.gates.find((g) => g.kind === 'asset' && !g.decidedAt)"
+        @decided="load"
+      />
     </template>
 
     <h3>Iterations</h3>
@@ -88,7 +94,7 @@ onUnmounted(() => stopFollowing?.());
     <ul>
       <li v-for="g in run.gates" :key="g.id">
         <strong>{{ g.kind === "final" ? "Final Gate" : g.kind === "asset" ? "Asset Gate" : "Escalation" }}</strong>:
-        {{ g.kind === "asset" && g.decidedAt ? `${run.assets.length} ${run.assets.length === 1 ? "Asset" : "Assets"} judged.` : g.reason }}
+        {{ g.kind === "asset" && g.decidedAt ? `${g.verdicts.length} ${g.verdicts.length === 1 ? "Asset" : "Assets"} judged.` : g.reason }}
         <pre v-if="g.evidence">{{ g.evidence }}</pre>
         <div v-if="g.decidedAt" class="muted">
           {{ g.decision === "approve" ? "Approved" : g.decision === "reject" ? "Rejected" : "Abandoned" }} · {{ new Date(g.decidedAt).toLocaleString() }}

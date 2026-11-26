@@ -12,6 +12,7 @@ import {
   type AssetRequest,
   type Forge,
   type GateAction,
+  type Verdict,
   type RunState,
 } from "../forge/forge.js";
 import type { ToolReport } from "../startup/preflight.js";
@@ -119,11 +120,14 @@ export async function createServer(deps: {
     }
   });
   // An Asset's image: the ids pick what the Forge core recorded, the request never names a path.
-  app.get<{ Params: { runId: string; assetId: string } }>("/api/runs/:runId/assets/:assetId/image", async (req, reply) => {
+  app.get<{ Params: { runId: string; assetId: string }; Querystring: { version?: string } }>("/api/runs/:runId/assets/:assetId/image", async (req, reply) => {
     const { runId, assetId } = req.params;
-    if (!/^\d+$/.test(runId) || !/^\d+$/.test(assetId)) return reply.code(404).send({ error: "No such Asset." });
+    const version = req.query.version;
+    if (!/^\d{1,15}$/.test(runId) || !/^\d{1,15}$/.test(assetId) || (version !== undefined && !/^\d{1,15}$/.test(version))) {
+      return reply.code(404).send({ error: "No such Asset." });
+    }
     try {
-      const image = await readFile(await deps.forge.assetImage(Number(runId), Number(assetId)));
+      const image = await readFile(await deps.forge.assetImage(Number(runId), Number(assetId), version === undefined ? undefined : Number(version)));
       // An Asset's file changes between Iterations at the same URL.
       return reply.type("image/png").header("cache-control", "no-store").send(image);
     } catch (e) {
@@ -148,13 +152,13 @@ export async function createServer(deps: {
     });
   });
   app.get("/api/gates", async () => deps.forge.listOpenGates());
-  app.post<{ Params: { id: string }; Body: { action?: GateAction; feedback?: string } }>("/api/gates/:id/decision", async (req, reply) => {
-    const { action, feedback } = req.body ?? {};
-    if (action !== "approve" && action !== "reject" && action !== "abandon") {
-      return reply.code(400).send({ error: "action must be approve, reject or abandon." });
+  app.post<{ Params: { id: string }; Body: { action?: GateAction; feedback?: string; verdicts?: Verdict[] } }>("/api/gates/:id/decision", async (req, reply) => {
+    const { action, feedback, verdicts } = req.body ?? {};
+    if (action !== "approve" && action !== "reject" && action !== "abandon" && action !== "judge") {
+      return reply.code(400).send({ error: "action must be approve, reject, judge or abandon." });
     }
     try {
-      return await deps.forge.decideGate({ gateId: Number(req.params.id), action, feedback });
+      return await deps.forge.decideGate({ gateId: Number(req.params.id), action, feedback, verdicts });
     } catch (e) {
       if (e instanceof InvalidInputError) return reply.code(400).send({ error: e.message });
       if (e instanceof GateError) return reply.code(409).send({ error: e.message });

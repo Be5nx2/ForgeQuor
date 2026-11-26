@@ -130,6 +130,14 @@ _Avoid_: Asset test, lint, Check (a **Check** is a command the **Project** decla
 The **Gate** where the human approves each **Asset** of a batch, or rejects it with its own **Feedback** so the **Artist** redoes only the rejected ones.
 _Avoid_: Art review, gallery gate
 
+**Verdict**:
+The human's decision on one **Asset** at an **Asset Gate**: approve, or reject with its own **Feedback**. The Gate takes one for every **Asset** waiting for one, all at once.
+_Avoid_: Review, vote
+
+**Asset Version**:
+What the **Artist** delivered for an **Asset** in one **Iteration** (its last attempt that passed the **Asset Checks**), kept so the human can look at past versions beside the **Feedback** each got.
+_Avoid_: Revision, draft
+
 **Art Direction**:
 The document inside a game **Project** that fixes its visual style (palette, resolution, sprite sizes) for the **Artist**.
 _Avoid_: Style guide, art bible

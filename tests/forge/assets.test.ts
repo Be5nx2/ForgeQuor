@@ -95,6 +95,22 @@ function write(step: StepRequest, bytes: Buffer | string) {
   writeFileSync(file, bytes);
 }
 
+/**
+ * The human's verdicts at the Run's open Asset Gate: for each waiting Asset by name, "approve" or the Feedback that rejects
+ * it; Assets not named are approved.
+ */
+async function judge(run: { id: number }, verdicts: Record<string, string> = {}) {
+  const current = await forge.getRun(run.id);
+  const gate = current.gates.find((g) => g.kind === "asset" && !g.decidedAt)!;
+  return forge.decideGate({
+    gateId: gate.id,
+    action: "judge",
+    verdicts: current.assets
+      .filter((a) => a.status === "waiting")
+      .map((a) => (verdicts[a.name] && verdicts[a.name] !== "approve" ? { assetId: a.id, action: "reject" as const, feedback: verdicts[a.name] } : { assetId: a.id, action: "approve" as const })),
+  });
+}
+
 async function startAssets(project: Project, assets: AssetRequest[] = [hero, grass], extra: { title?: string } = {}) {
   const started = await forge.startRun({ projectId: project.id, workflow: "assets", assets, ...extra });
   await forge.whenIdle();
@@ -198,7 +214,7 @@ describe("the assets Workflow", () => {
       { step: "artist", attempt: 1, runner: "codex", model: "gpt-test", status: "succeeded" },
     ]);
     expect(run.assets.map((a) => a.status)).toEqual(["waiting", "waiting"]);
-    expect(run.gates).toMatchObject([{ kind: "asset", actions: ["approve", "abandon"], decision: null }]);
+    expect(run.gates).toMatchObject([{ kind: "asset", actions: ["judge", "abandon"], decision: null }]);
     expect(existsSync(join(run.worktreePath!, "assets/art/sprites/hero-idle.png"))).toBe(true);
   });
 
@@ -244,8 +260,9 @@ describe("the assets Workflow", () => {
     const run = await startAssets(project, [hero]);
 
     const trace = join(run.worktreePath!, ".forgequor", "assets");
-    expect(readdirSync(trace)).toHaveLength(1);
-    expect(readFileSync(join(trace, readdirSync(trace)[0]!))).toEqual(PNG);
+    const traces = readdirSync(trace).filter((name) => name.endsWith(".png"));
+    expect(traces).toHaveLength(1);
+    expect(readFileSync(join(trace, traces[0]!))).toEqual(PNG);
     const status = git(run.worktreePath!, "status", "--porcelain", "-uall");
     expect(status).toContain("assets/art/sprites/hero-idle.png");
     expect(status).not.toContain(".forgequor");
@@ -433,12 +450,13 @@ describe("the Asset Checks", () => {
 });
 
 describe("the Asset Gate", () => {
-  it("offers approve and abandon, never reject", async () => {
+  it("takes a verdict for the Assets or an abandon, never a plain approve or reject", async () => {
     const { project } = await projectWithRemote();
     artist.use(drawing());
     const run = await startAssets(project, [hero]);
 
     await expect(forge.decideGate({ gateId: run.gates[0]!.id, action: "reject", feedback: "Redo." })).rejects.toThrow(/cannot be rejected/);
+    await expect(forge.decideGate({ gateId: run.gates[0]!.id, action: "approve" })).rejects.toThrow(/cannot be approved/);
 
     expect((await forge.getRun(run.id)).state).toBe("waiting");
   });
@@ -477,7 +495,7 @@ describe("approving the Asset Gate", () => {
       writeFileSync(join(step.cwd, "stray.txt"), "left behind\n");
     });
     const waiting = await startAssets(project, assets);
-    const run = await forge.decideGate({ gateId: waiting.gates[0]!.id, action: "approve" });
+    const run = await judge(waiting, {});
     await forge.whenIdle();
     return { project, remote, waiting, run: await forge.getRun(run.id) };
   }
@@ -578,5 +596,163 @@ describe("serving an Asset's image", () => {
     rmSync(link);
     writeFileSync(link, "<html>not an image</html>");
     await expect(forge.assetImage(run.id, second!.id)).rejects.toThrow(/No such Asset/);
+  });
+});
+
+describe("the human's verdicts at the Asset Gate", () => {
+  /** An Artist whose pixels change with each Step, so every version of an Asset has its own bytes. */
+  function drawingAnew() {
+    return (step: StepRequest) => drawing((x) => [artist.steps.length * 10, x, 0, 255])(step);
+  }
+  const rejectedVersionOf = (step: StepRequest) => /Rejected version \(reference[^)]*\): (\S+)/.exec(step.prompt)?.[1];
+
+  it("redoes only the rejected Assets, with the Feedback and the rejected version as a reference, and keeps the approved ones", async () => {
+    const { project } = await projectWithRemote();
+    let targetAtStart: boolean | null = null;
+    artist.use((step) => {
+      if (artist.steps.length === 3) targetAtStart = existsSync(join(step.cwd, targetOf(step)));
+      drawingAnew()(step);
+    });
+    const first = await startAssets(project);
+    const keptGrass = readFileSync(join(first.worktreePath!, "assets/art/tiles/grass.png"));
+    const firstHero = readFileSync(join(first.worktreePath!, "assets/art/sprites/hero-idle.png"));
+
+    await judge(first, { "Hero Idle": "Make the hero taller." });
+    await forge.whenIdle();
+    const run = await forge.getRun(first.id);
+
+    expect(run.state).toBe("waiting");
+    expect(run.iteration).toBe(2);
+    expect(artist.steps).toHaveLength(3);
+    const redo = artist.steps[2]!;
+    expect(targetOf(redo)).toBe("assets/art/sprites/hero-idle.png");
+    expect(redo.prompt).toContain("Make the hero taller.");
+    expect(targetAtStart).toBe(false);
+    expect(readFileSync(join(run.worktreePath!, rejectedVersionOf(redo)!))).toEqual(firstHero);
+    expect(readFileSync(join(run.worktreePath!, "assets/art/tiles/grass.png"))).toEqual(keptGrass);
+    expect(run.assets.map((a) => [a.name, a.status])).toEqual([["Hero Idle", "waiting"], ["grass", "approved"]]);
+    expect(run.attempts.filter((a) => a.iteration === 2).map((a) => [a.step, a.attempt])).toEqual([["artist", 1]]);
+    expect(run.iterations).toHaveLength(2);
+    expect(run.gates).toMatchObject([
+      { kind: "asset", decision: "reject", verdicts: [{ verdict: "reject", feedback: "Make the hero taller." }, { verdict: "approve", feedback: null }] },
+      { kind: "asset", decision: null, actions: ["judge", "abandon"] },
+    ]);
+    expect(run.gates[1]!.reason).toContain("1 Asset");
+  });
+
+  it("shows each Asset's past versions with their Feedback, and serves the old image by version", async () => {
+    const { project } = await projectWithRemote();
+    artist.use(drawingAnew());
+    const first = await startAssets(project, [hero]);
+    const firstBytes = readFileSync(join(first.worktreePath!, "assets/art/sprites/hero-idle.png"));
+    await judge(first, { "Hero Idle": "More blue." });
+    await forge.whenIdle();
+    const run = await forge.getRun(first.id);
+
+    const [old, current] = run.assets[0]!.versions;
+
+    expect(run.assets[0]!.versions).toHaveLength(2);
+    expect(old).toMatchObject({ iteration: 1, feedback: "More blue." });
+    expect(current).toMatchObject({ iteration: 2, feedback: null });
+    expect(readFileSync(await forge.assetImage(run.id, run.assets[0]!.id, old!.id))).toEqual(firstBytes);
+    expect(readFileSync(await forge.assetImage(run.id, run.assets[0]!.id))).not.toEqual(firstBytes);
+    await expect(forge.assetImage(run.id, run.assets[0]!.id, 999_999)).rejects.toThrow(/No such Asset/);
+  });
+
+  it("goes on for as many Iterations as the human wants, handing the Artist all the Feedback so far", async () => {
+    const { project } = await projectWithRemote();
+    artist.use(drawingAnew());
+    const first = await startAssets(project, [hero]);
+    for (const feedback of ["One.", "Two.", "Three."]) {
+      await judge(first, { "Hero Idle": feedback });
+      await forge.whenIdle();
+    }
+
+    const run = await forge.getRun(first.id);
+
+    expect(run.iteration).toBe(4);
+    expect(run.state).toBe("waiting");
+    expect(artist.steps.at(-1)!.prompt).toMatch(/1\. One\.\n2\. Two\.\n3\. Three\./);
+    expect(run.assets[0]!.versions.map((v) => v.feedback)).toEqual(["One.", "Two.", "Three.", null]);
+  });
+
+  it("gives each Iteration a fresh budget of Asset Check attempts", async () => {
+    const { project } = await projectWithRemote();
+    artist.use((step) => write(step, artist.steps.length === 2 ? makePng(8, 8) : makePng(...sizeOf(step))));
+    const first = await startAssets(project, [hero]);
+    await judge(first, { "Hero Idle": "Again." });
+    await forge.whenIdle();
+
+    const run = await forge.getRun(first.id);
+
+    expect(run.gates.at(-1)).toMatchObject({ kind: "asset", decidedAt: null });
+    expect(run.attempts.filter((a) => a.iteration === 2).map((a) => a.attempt)).toEqual([1, 2]);
+  });
+
+  it("refuses a partial set of verdicts, an unknown or repeated Asset, and a rejection without Feedback, leaving the Gate open", async () => {
+    const { project } = await projectWithRemote();
+    artist.use(drawing());
+    const run = await startAssets(project);
+    const [a, b] = run.assets;
+    const gateId = run.gates[0]!.id;
+    const decide = (verdicts: any) => forge.decideGate({ gateId, action: "judge", verdicts });
+
+    await expect(decide(undefined)).rejects.toThrow(/verdict/);
+    await expect(decide([null])).rejects.toThrow(/names an Asset/);
+    await expect(decide([])).rejects.toThrow(/every Asset/);
+    await expect(decide([{ assetId: a!.id, action: "approve" }])).rejects.toThrow(/every Asset/);
+    await expect(decide([{ assetId: a!.id, action: "approve" }, { assetId: a!.id, action: "approve" }])).rejects.toThrow(/once/);
+    await expect(decide([{ assetId: a!.id, action: "approve" }, { assetId: 999_999, action: "approve" }])).rejects.toThrow(/not waiting/);
+    await expect(decide([{ assetId: a!.id, action: "approve" }, { assetId: b!.id, action: "reject", feedback: "  " }])).rejects.toThrow(/Feedback/);
+    await expect(decide([{ assetId: a!.id, action: "approve" }, { assetId: b!.id, action: "maybe" }])).rejects.toThrow(/approve or reject/);
+
+    const after = await forge.getRun(run.id);
+    expect(after.state).toBe("waiting");
+    expect(after.gates[0]!.decidedAt).toBeNull();
+    expect(after.assets.map((x) => x.status)).toEqual(["waiting", "waiting"]);
+  });
+
+  it("refuses verdicts at a Gate that is not an Asset Gate", async () => {
+    const { project } = await projectWithRemote();
+    artist.use(() => ({ status: "failed", error: "nope" }));
+    const run = await startAssets(project, [hero]);
+
+    await expect(forge.decideGate({ gateId: run.gates[0]!.id, action: "judge", verdicts: [] })).rejects.toThrow(/only be abandoned/);
+  });
+
+  it("commits everything once the last Iteration is approved, and lists the Feedback behind each Asset in the Review Brief", async () => {
+    const { project } = await projectWithRemote();
+    artist.use(drawingAnew());
+    const first = await startAssets(project);
+    await judge(first, { "Hero Idle": "Make the hero taller.", grass: "Greener." });
+    await forge.whenIdle();
+    await judge(first, { grass: "Even greener." });
+    await forge.whenIdle();
+    await judge(first, {});
+    await forge.whenIdle();
+
+    const run = await forge.getRun(first.id);
+
+    expect(run.state).toBe("approved");
+    expect(git(run.worktreePath!, "log", "--format=%s", "origin/main..HEAD")).toBe("feat(art): add 2 assets");
+    expect(codeHost.pullRequests).toHaveLength(1);
+    const [brief] = codeHost.pullRequests[0]!.comments;
+    expect(codeHost.pullRequests[0]!.comments).toHaveLength(1);
+    expect(brief).toContain("Make the hero taller.");
+    expect(brief).toMatch(/Greener\.[\s\S]*Even greener\./);
+    expect(run.assets.map((a) => a.status)).toEqual(["approved", "approved"]);
+  });
+
+  it("can still abandon the Run after a rejection", async () => {
+    const { project } = await projectWithRemote();
+    artist.use(drawing());
+    const first = await startAssets(project, [hero]);
+    await judge(first, { "Hero Idle": "Again." });
+    await forge.whenIdle();
+    const waiting = await forge.getRun(first.id);
+
+    const run = await forge.decideGate({ gateId: waiting.gates.at(-1)!.id, action: "abandon" });
+
+    expect(run.state).toBe("abandoned");
   });
 });
