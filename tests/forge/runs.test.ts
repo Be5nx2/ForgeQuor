@@ -1069,3 +1069,62 @@ describe("following a Run live", () => {
     expect(updates).toEqual([]);
   });
 });
+
+describe("a Project's setup commands", () => {
+  it("run in the new worktree, in order, before the Developer", async () => {
+    const { project } = await projectWithRemote();
+    await forge.setSetup(project.id, ["echo one > setup.log", "echo two >> setup.log"]);
+    runner.use((step) => {
+      writeFileSync(join(step.cwd, "seen-by-developer.txt"), readFileSync(join(step.cwd, "setup.log"), "utf8"));
+    });
+
+    const run = await runToEnd(project);
+
+    expect(run.state).toBe("waiting");
+    expect(run.gates).toMatchObject([{ kind: "final" }]);
+    expect(readFileSync(join(run.worktreePath!, "seen-by-developer.txt"), "utf8")).toBe("one\ntwo\n");
+  });
+
+  it("open an Escalation with their output when one fails, and the Developer never starts", async () => {
+    const { project, remote } = await projectWithRemote();
+    await forge.setSetup(project.id, ["echo installing", "echo no network >&2; exit 4", "touch third-ran"]);
+
+    const run = await runToEnd(project);
+
+    expect(runner.steps).toHaveLength(0);
+    expect(run.state).toBe("waiting");
+    expect(run.gates).toMatchObject([
+      { kind: "escalation", actions: ["abandon"], evidence: expect.stringContaining("no network") },
+    ]);
+    expect(run.gates[0]!.evidence).toContain("status 4");
+    expect(existsSync(join(run.worktreePath!, "third-ran"))).toBe(false);
+    expect(codeHost.pullRequests).toHaveLength(0);
+    expect(git(remote.bare, "branch", "--list", run.branch!)).toBe("");
+  });
+
+  it("are not run again when a Run restarts its Developer after a Quota pause", async () => {
+    const { project } = await projectWithRemote();
+    await forge.setSetup(project.id, ["echo x >> setup-count.txt"]);
+    let calls = 0;
+    runner.use((step) => {
+      if (++calls === 1) return { status: "quota_exhausted", resetsAt: new Date(Date.now() + 1000) };
+      writeFileSync(join(step.cwd, "ok.txt"), "ok");
+    });
+    const started = await forge.startRun({ projectId: project.id, task: "Do it." });
+    await forge.whenIdle();
+    fakeNow = new Date(Date.now() + 3600_000);
+    await forge.resumePausedRuns();
+    await forge.whenIdle();
+
+    const run = await forge.getRun(started.id);
+    expect(run.state).toBe("waiting");
+    expect(readFileSync(join(run.worktreePath!, "setup-count.txt"), "utf8")).toBe("x\n");
+  });
+
+  it("can be edited, and blank lines are dropped", async () => {
+    const { project } = await projectWithRemote();
+
+    expect((await forge.setSetup(project.id, ["npm ci", " ", "scripts/link-skills.sh"])).setup).toEqual(["npm ci", "scripts/link-skills.sh"]);
+    expect((await forge.listProjects()).find((p) => p.id === project.id)?.setup).toEqual(["npm ci", "scripts/link-skills.sh"]);
+  });
+});

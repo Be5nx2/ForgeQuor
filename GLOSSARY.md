@@ -44,6 +44,10 @@ _Avoid_: Agent files, scratch files, handoff files
 A command a **Project** declares to validate a **Run**'s **Deliverables** automatically; a **Run** cannot reach its final **Gate** while a **Check** fails.
 _Avoid_: Test, CI, validation
 
+**Setup**:
+A command a **Project** declares to prepare a **Run**'s new worktree (installing dependencies, linking skills) before the **Developer** starts; a failing one opens an **Escalation** and the **Developer** never starts.
+_Avoid_: Bootstrap, install step, init
+
 **Review Brief**:
 The comment a **Run** posts on its pull request for the final **Gate**: what the change does, where to look closely, and what to test.
 _Avoid_: PR summary, PR description, review comment

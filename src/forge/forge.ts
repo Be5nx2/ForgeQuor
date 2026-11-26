@@ -109,6 +109,8 @@ export interface Project {
   remoteName: string;
   defaultBranch: string;
   checks: string[];
+  /** Commands run in a Run's new worktree, in order, before the Developer. */
+  setup: string[];
   maxConcurrentRuns: number;
 }
 
@@ -124,6 +126,8 @@ export interface Forge {
   listProjects(): Promise<Project[]>;
   /** Replaces a Project's ordered Check commands (blank ones are dropped). Applies to Runs started afterwards. */
   setChecks(projectId: number, checks: string[]): Promise<Project>;
+  /** Replaces a Project's ordered setup commands (blank ones are dropped). A failing one opens an Escalation and the Developer never starts. */
+  setSetup(projectId: number, commands: string[]): Promise<Project>;
   /** Sets how many Runs of a Project may work at once (at least 1). Raising it starts Queued Runs that now fit. */
   setMaxConcurrentRuns(projectId: number, max: number): Promise<Project>;
   /**
@@ -175,7 +179,7 @@ export interface ForgeDeps {
   now?: () => Date;
 }
 
-const COLUMNS = "id, name, local_path, remote_owner, remote_name, default_branch, checks, max_concurrent_runs";
+const COLUMNS = "id, name, local_path, remote_owner, remote_name, default_branch, checks, setup, max_concurrent_runs";
 
 function toProject(r: Record<string, any>): Project {
   return {
@@ -186,6 +190,7 @@ function toProject(r: Record<string, any>): Project {
     remoteName: r.remote_name,
     defaultBranch: r.default_branch,
     checks: r.checks,
+    setup: r.setup,
     maxConcurrentRuns: r.max_concurrent_runs,
   };
 }
@@ -528,6 +533,15 @@ export function createForge(deps: ForgeDeps): Forge {
       await pool.query("UPDATE runs SET branch = $2, worktree_path = $3 WHERE id = $1", [run.id, branch, worktreePath]);
       changed(run.id);
 
+      const { rows: prepared } = await pool.query("SELECT setup_done FROM runs WHERE id = $1", [run.id]);
+      if (!prepared[0].setup_done) {
+        const outcomes = await runChecks(project.setup, worktreePath, { timeoutMs: deps.checkTimeoutMs, signal: stop });
+        if (!(await stillRunning(run.id))) return;
+        const failed = outcomes.find((c) => !passed(c));
+        if (failed) return openGate(run.id, "escalation", "A setup command failed, so the Developer did not start.", describeFailure(failed));
+        await pool.query("UPDATE runs SET setup_done = true WHERE id = $1", [run.id]);
+      }
+
       let { attempt, failedCheck, skipDeveloper, checksDone } = await resumePoint(pool, run.id, project.checks.length);
       while (!checksDone) {
         if (attempt > MAX_DEVELOPER_ATTEMPTS) {
@@ -636,6 +650,13 @@ export function createForge(deps: ForgeDeps): Forge {
         projectId,
         JSON.stringify(clean),
       ]);
+      if (!rows[0]) throw new Error(`No Project ${projectId}.`);
+      return toProject(rows[0]);
+    },
+
+    async setSetup(projectId, commands) {
+      const clean = commands.map((c) => c.trim()).filter(Boolean);
+      const { rows } = await pool.query(`UPDATE projects SET setup = $2 WHERE id = $1 RETURNING ${COLUMNS}`, [projectId, JSON.stringify(clean)]);
       if (!rows[0]) throw new Error(`No Project ${projectId}.`);
       return toProject(rows[0]);
     },

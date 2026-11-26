@@ -7,12 +7,15 @@ const path = ref("");
 const error = ref("");
 /** Check commands being edited, one per line, by Project id. */
 const drafts = ref<Record<number, string>>({});
+/** Setup commands being edited, one per line, by Project id. */
+const setupDrafts = ref<Record<number, string>>({});
 /** Max concurrent Runs being edited, by Project id. */
 const limits = ref<Record<number, number>>({});
 
 async function load() {
   projects.value = await getJson("/api/projects");
   drafts.value = Object.fromEntries(projects.value.map((p) => [p.id, p.checks.join("\n")]));
+  setupDrafts.value = Object.fromEntries(projects.value.map((p) => [p.id, p.setup.join("\n")]));
   limits.value = Object.fromEntries(projects.value.map((p) => [p.id, p.maxConcurrentRuns]));
 }
 
@@ -22,6 +25,17 @@ async function saveLimit(p: Project) {
     const saved = await putJson<Project>(`/api/projects/${p.id}/concurrency`, { max: Number(limits.value[p.id]) });
     p.maxConcurrentRuns = saved.maxConcurrentRuns;
     limits.value[p.id] = saved.maxConcurrentRuns;
+  } catch (e: any) {
+    error.value = e.message;
+  }
+}
+
+async function saveSetup(p: Project) {
+  error.value = "";
+  try {
+    const saved = await putJson<Project>(`/api/projects/${p.id}/setup`, { setup: setupDrafts.value[p.id]!.split("\n") });
+    p.setup = saved.setup;
+    setupDrafts.value[p.id] = saved.setup.join("\n");
   } catch (e: any) {
     error.value = e.message;
   }
@@ -66,6 +80,15 @@ onMounted(load);
       <strong>{{ p.name }}</strong>
       <span class="muted"> {{ p.remoteOwner }}/{{ p.remoteName }} · {{ p.defaultBranch }}</span>
       <div class="muted">{{ p.localPath }}</div>
+      <form class="stack" @submit.prevent="saveSetup(p)">
+        <textarea
+          v-model="setupDrafts[p.id]"
+          rows="2"
+          placeholder="Setup: one shell command per line, run in a new worktree before the Developer (e.g. npm ci)"
+          :aria-label="`Setup of ${p.name}`"
+        />
+        <button type="submit">Save Setup</button>
+      </form>
       <form class="stack" @submit.prevent="saveChecks(p)">
         <textarea
           v-model="drafts[p.id]"

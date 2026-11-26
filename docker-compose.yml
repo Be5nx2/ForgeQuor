@@ -1,3 +1,6 @@
+# A fixed name, so every checkout or Run worktree reuses the one PostgreSQL instead of starting a second one on the same port.
+name: forgequor
+
 services:
   postgres:
     image: postgres:17

@@ -36,6 +36,7 @@ describe("registering a Project", () => {
       defaultBranch: "main",
       maxConcurrentRuns: 2,
       checks: [],
+      setup: [],
     });
   });
 

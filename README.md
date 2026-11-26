@@ -52,7 +52,16 @@ docker compose down
 
 To inspect what the Developer did, open the Run's worktree. The path is shown in the Run detail. Its `.forgequor/` folder holds the Run Notes, including the Review Brief. Git ignores that folder.
 
-> M1 is in progress. Progress is not shown live (`m1-09`): refresh the Run page to see it. Declare a Project's Checks (shell commands run after the Developer, in order) on the Projects screen; without any, a Run goes straight to the pull request. See [ROADMAP.md](ROADMAP.md).
+> M1 is in progress. The Run page shows the Developer's progress live. On the Projects screen, declare a Project's **Setup** (shell commands run in each new worktree before the Developer, in order; a failing one opens an Escalation and the Developer never starts) and its **Checks** (run after the Developer, in order; without any, a Run goes straight to the pull request). See [ROADMAP.md](ROADMAP.md).
+
+#### Registering Forgequor itself
+
+To let Forgequor run its own roadmap items, register this repository as a Project with:
+
+- Setup: `npm ci`, then `scripts/link-skills.sh`
+- Checks: `npm run typecheck`, then `npm test`
+
+The Docker Compose project has a fixed name (`forgequor`), so tests run from a Run's worktree reuse the one PostgreSQL instance instead of starting a second one on the same port.
 
 > Agents run with Claude Code's permission prompts bypassed, with your rights on this machine ([ADR 0005](docs/adr/0005-agents-bypass-runner-permissions.md)). Tools that wait for a human (asking a question, plan mode) are disabled, so an Agent never stalls on one. Only register Projects you trust.
 

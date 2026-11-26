@@ -37,6 +37,18 @@ export async function createServer(deps: {
     }
   });
 
+  app.put<{ Params: { id: string }; Body: { setup?: unknown } }>("/api/projects/:id/setup", async (req, reply) => {
+    const setup = req.body?.setup;
+    if (!Array.isArray(setup) || setup.some((c) => typeof c !== "string")) {
+      return reply.code(400).send({ error: "setup must be a list of commands." });
+    }
+    try {
+      return await deps.forge.setSetup(Number(req.params.id), setup);
+    } catch (e: any) {
+      return reply.code(404).send({ error: e.message });
+    }
+  });
+
   app.put<{ Params: { id: string }; Body: { max?: unknown } }>("/api/projects/:id/concurrency", async (req, reply) => {
     const max = req.body?.max;
     if (typeof max !== "number" || !Number.isInteger(max) || max < 1) {
