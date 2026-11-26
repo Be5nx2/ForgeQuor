@@ -26,6 +26,7 @@ export interface Run {
   worktreePath: string | null;
   prNumber: number | null;
   prUrl: string | null;
+  resumeAt: string | null;
   createdAt: string;
 }
 export interface StepAttempt {

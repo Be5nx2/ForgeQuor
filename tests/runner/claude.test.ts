@@ -2,6 +2,7 @@ import { mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { killAllProcessGroups } from "../../src/process-group.js";
 import { createClaudeRunner } from "../../src/runner/claude.js";
 import type { RunnerEvent, StepRequest } from "../../src/runner/runner.js";
 import { createFakeClaude, type FakeClaudeScript } from "../harness/fake-claude.js";
@@ -160,5 +161,60 @@ describe("Claude Runner", () => {
     const fake = createFakeClaude({ stdout: [resultOk] });
     const result = await createClaudeRunner({ env: fake.env }).run({ ...step(), cwd: "/nonexistent/worktree" }, () => {});
     expect(result).toMatchObject({ status: "failed", error: expect.stringContaining("working directory") });
+  });
+
+  describe("cancelling a Step", () => {
+    async function waitFor<T>(read: () => T | null | false): Promise<T> {
+      for (let i = 0; i < 300; i++) {
+        const value = read();
+        if (value) return value;
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      throw new Error("timed out waiting");
+    }
+    const alive = (pid: number) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    it("kills claude and everything it started, then reports a failure", async () => {
+      const fake = createFakeClaude({ stdout: [], hang: true });
+      const controller = new AbortController();
+      const running = createClaudeRunner({ env: fake.env }).run({ ...step(), signal: controller.signal }, () => {});
+      const grandchild = await waitFor(() => fake.grandchildPid());
+      expect(alive(grandchild)).toBe(true);
+
+      controller.abort();
+      const result = await running;
+
+      expect(result.status).toBe("failed");
+      await waitFor(() => !alive(grandchild));
+    });
+
+    it("is ended with Forgequor: a detached claude does not get Forgequor's Ctrl-C", async () => {
+      const fake = createFakeClaude({ stdout: [], hang: true });
+      const running = createClaudeRunner({ env: fake.env }).run(step(), () => {});
+      const grandchild = await waitFor(() => fake.grandchildPid());
+
+      killAllProcessGroups();
+
+      expect((await running).status).toBe("failed");
+      await waitFor(() => !alive(grandchild));
+    });
+
+    it("does not start claude at all when already cancelled", async () => {
+      const fake = createFakeClaude({ stdout: [], hang: true });
+      const controller = new AbortController();
+      controller.abort();
+
+      const result = await createClaudeRunner({ env: fake.env }).run({ ...step(), signal: controller.signal }, () => {});
+
+      expect(result.status).toBe("failed");
+      expect(fake.grandchildPid()).toBeNull();
+    });
   });
 });

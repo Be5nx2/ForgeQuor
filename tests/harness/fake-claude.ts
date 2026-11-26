@@ -9,6 +9,8 @@ export interface FakeClaudeScript {
   exitCode?: number;
   /** Kill the process with this signal after printing, instead of exiting. */
   killWith?: NodeJS.Signals;
+  /** Start a long-lived grandchild process (its pid is readable through `grandchildPid`), then never finish on its own. */
+  hang?: boolean;
 }
 
 export interface Invocation {
@@ -22,6 +24,8 @@ export interface FakeClaude {
   env: NodeJS.ProcessEnv;
   /** What the fake was last called with. */
   lastInvocation(): Invocation;
+  /** Pid of the grandchild a `hang` script started, or null until it exists. */
+  grandchildPid(): number | null;
 }
 
 const SCRIPT = `#!/usr/bin/env node
@@ -30,6 +34,12 @@ const dir = process.env.FAKE_CLAUDE_DIR;
 const script = JSON.parse(fs.readFileSync(dir + "/script.json", "utf8"));
 const stdin = fs.readFileSync(0, "utf8");
 fs.writeFileSync(dir + "/invocation.json", JSON.stringify({ cwd: process.cwd(), args: process.argv.slice(2), stdin }));
+if (script.hang) {
+  const child = require("node:child_process").spawn("sleep", ["60"], { stdio: "ignore" });
+  fs.writeFileSync(dir + "/grandchild.pid", String(child.pid));
+  setInterval(() => {}, 1000);
+  return;
+}
 for (const line of script.stdout) process.stdout.write(line + "\\n");
 if (script.stderr) process.stderr.write(script.stderr);
 if (script.killWith) process.kill(process.pid, script.killWith);
@@ -46,5 +56,12 @@ export function createFakeClaude(script: FakeClaudeScript): FakeClaude {
   return {
     env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, FAKE_CLAUDE_DIR: dir },
     lastInvocation: () => JSON.parse(readFileSync(join(dir, "invocation.json"), "utf8")),
+    grandchildPid: () => {
+      try {
+        return Number(readFileSync(join(dir, "grandchild.pid"), "utf8"));
+      } catch {
+        return null;
+      }
+    },
   };
 }

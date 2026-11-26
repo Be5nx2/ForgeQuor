@@ -85,7 +85,7 @@ One **Project**, one **Run** going Developer (Claude) → **Checks** → pull re
     - a Run over the limit is Queued;
     - Queued Runs start automatically, in creation order, when a slot frees up;
     - a test shows that a Run becoming Merged, Closed or Abandoned frees its slot and starts the next Queued Run (left untested by m1-06).
-- [ ] `m1-08` **Quota pause, restart recovery, Runner failures**: no Run fails or gets stuck for a temporary reason.
+- [x] `m1-08` **Quota pause, restart recovery, Runner failures**: no Run fails or gets stuck for a temporary reason.
   - Spec: `docs/specs/m1-walking-skeleton.md`
   - Blocked by: `m1-05`, `m1-06` (PR polling to resume on startup)
   - Acceptance:

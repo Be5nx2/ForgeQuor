@@ -2,14 +2,18 @@ import { existsSync, readFileSync, realpathSync, writeFileSync, mkdirSync, mkdte
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { createForge, type Forge, type Project } from "../../src/forge/forge.js";
+import type pg from "pg";
+import { createForge, type Forge, type ForgeDeps, type Project } from "../../src/forge/forge.js";
 import { createTestDatabase } from "../harness/database.js";
 import { createFakeCodeHost } from "../harness/fake-codehost.js";
 import { createFakeRunner } from "../harness/fake-runner.js";
 import { createRepoWithBareRemote, git, type TempRemote, type TempRepo } from "../harness/git.js";
 
 let forge: Forge;
+let pool: pg.Pool;
 let drop: () => Promise<void>;
+/** The Forge's clock; the real time when null. */
+let fakeNow: Date | null = null;
 let worktrees: string;
 const runner = createFakeRunner();
 const codeHost = createFakeCodeHost();
@@ -19,15 +23,27 @@ let counter = 0;
 beforeAll(async () => {
   const db = await createTestDatabase();
   drop = db.drop;
+  pool = db.pool;
   worktrees = mkdtempSync(join(tmpdir(), "forgequor-worktrees-"));
-  forge = createForge({ pool: db.pool, runner, codeHost, worktreesRoot: worktrees });
+  forge = forgeWith({});
 });
+/** Another Forge on the same database, such as the one a restart creates, or one with other timeouts. */
+function forgeWith(overrides: Partial<ForgeDeps>): Forge {
+  const created = createForge({ pool, runner, codeHost, worktreesRoot: worktrees, now: () => fakeNow ?? new Date(), ...overrides });
+  others.push(created);
+  return created;
+}
+const others: Forge[] = [];
 afterAll(async () => {
+  await Promise.all(others.map((f) => f.whenIdle()));
   await forge.whenIdle();
   await drop();
   rmSync(worktrees, { recursive: true, force: true });
 });
-afterEach(() => {
+afterEach(async () => {
+  // Paused Runs of one test must not be resumed by another test's clock.
+  await pool.query("UPDATE runs SET state = 'abandoned' WHERE state = 'paused'");
+  fakeNow = null;
   runner.use(() => {});
   runner.steps.length = 0;
   codeHost.pullRequests.length = 0;
@@ -688,5 +704,291 @@ describe("the concurrency limit and the queue", () => {
     expect((await forge.listRuns({ projectId: project.id, state: "queued" })).length).toBe(3);
     gate.releaseAll();
     await forge.whenIdle();
+  });
+});
+
+/** Waits until `read` returns something truthy (a file written by a child process, a process gone...). */
+async function eventually<T>(read: () => T | null | false | undefined): Promise<T> {
+  for (let i = 0; i < 250; i++) {
+    const value = read();
+    if (value) return value;
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  throw new Error("timed out waiting");
+}
+const isAlive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+/** A Developer that waits to be cancelled, like a Runner whose process gets killed. */
+const waitsForCancel = (onCancel: () => void = () => {}) => async (step: { signal?: AbortSignal }) => {
+  await new Promise<void>((r) => (step.signal!.aborted ? r() : step.signal!.addEventListener("abort", () => r(), { once: true })));
+  onCancel();
+  return { status: "failed" as const, error: "cancelled" };
+};
+
+describe("a Runner whose Quota is exhausted", () => {
+  const RESET = new Date("2030-01-01T12:00:00Z");
+
+  it("pauses the Run with the reset time, then restarts the Step once the reset has passed", async () => {
+    const { project } = await projectWithRemote();
+    fakeNow = new Date("2030-01-01T10:00:00Z");
+    runner.use(() => ({ status: "quota_exhausted", resetsAt: RESET }));
+    const started = await forge.startRun({ projectId: project.id, task: "Do the thing." });
+    await forge.whenIdle();
+
+    const paused = await forge.getRun(started.id);
+    expect(paused.state).toBe("paused");
+    expect(paused.resumeAt).toEqual(RESET);
+    expect(paused.gates).toEqual([]);
+    expect(paused.attempts).toMatchObject([{ step: "developer", attempt: 1, status: "quota_exhausted", quotaResetsAt: RESET }]);
+
+    await forge.resumePausedRuns();
+    await forge.whenIdle();
+    expect((await forge.getRun(started.id)).state).toBe("paused");
+    expect(runner.steps).toHaveLength(1);
+
+    fakeNow = new Date("2030-01-01T12:00:01Z");
+    runner.use(() => {});
+    await forge.resumePausedRuns();
+    await forge.whenIdle();
+
+    const resumed = await forge.getRun(started.id);
+    expect(resumed.state).toBe("waiting");
+    expect(resumed.resumeAt).toBeNull();
+    expect(runner.steps).toHaveLength(2);
+    expect(runner.steps[1]!.cwd).toBe(resumed.worktreePath);
+    expect(resumed.gates).toMatchObject([{ kind: "final" }]);
+  });
+
+  it("tries again after a while when the Runner did not say when the Quota comes back", async () => {
+    const { project } = await projectWithRemote();
+    fakeNow = new Date("2030-01-01T10:00:00Z");
+    runner.use(() => ({ status: "quota_exhausted", resetsAt: null }));
+    const started = await forge.startRun({ projectId: project.id, task: "Do the thing." });
+    await forge.whenIdle();
+
+    const paused = await forge.getRun(started.id);
+    expect(paused.state).toBe("paused");
+    expect(paused.resumeAt!.getTime()).toBeGreaterThan(fakeNow.getTime());
+    expect(paused.resumeAt!.getTime() - fakeNow.getTime()).toBeLessThanOrEqual(60 * 60 * 1000);
+  });
+
+  it("restarts the Step it was in, with the failed Check's output, not the first one", async () => {
+    const { project } = await projectWithRemote();
+    await forge.setChecks(project.id, ["test -f jump.txt || { echo missing-jump >&2; exit 1; }"]);
+    fakeNow = new Date("2030-01-01T10:00:00Z");
+    runner.use(() => (runner.steps.length === 2 ? { status: "quota_exhausted", resetsAt: RESET } : undefined));
+    const started = await forge.startRun({ projectId: project.id, task: "Do the thing." });
+    await forge.whenIdle();
+    expect((await forge.getRun(started.id)).state).toBe("paused");
+
+    fakeNow = new Date("2030-01-01T12:00:01Z");
+    runner.use((step) => void writeFileSync(join(step.cwd, "jump.txt"), "jump\n"));
+    await forge.resumePausedRuns();
+    await forge.whenIdle();
+
+    const run = await forge.getRun(started.id);
+    expect(runner.steps[2]!.prompt).toContain("missing-jump");
+    expect(run.attempts.map((a) => [a.attempt, a.status])).toEqual([
+      [1, "succeeded"],
+      [2, "quota_exhausted"],
+      [2, "succeeded"],
+    ]);
+  });
+
+  it("keeps its Project slot while Paused", async () => {
+    const { project } = await projectWithRemote();
+    await forge.setMaxConcurrentRuns(project.id, 1);
+    runner.use(() => ({ status: "quota_exhausted", resetsAt: RESET }));
+    const paused = await forge.startRun({ projectId: project.id, task: "First" });
+    const queued = await forge.startRun({ projectId: project.id, task: "Second" });
+    await forge.whenIdle();
+
+    expect((await forge.getRun(paused.id)).state).toBe("paused");
+    expect((await forge.getRun(queued.id)).state).toBe("queued");
+  });
+
+  it("can be abandoned while Paused, and then never resumes", async () => {
+    const { project } = await projectWithRemote();
+    fakeNow = new Date("2030-01-01T10:00:00Z");
+    runner.use(() => ({ status: "quota_exhausted", resetsAt: RESET }));
+    const started = await forge.startRun({ projectId: project.id, task: "Do the thing." });
+    await forge.whenIdle();
+    await forge.abandonRun(started.id);
+
+    fakeNow = new Date("2030-01-02T00:00:00Z");
+    await forge.resumePausedRuns();
+    await forge.whenIdle();
+
+    expect((await forge.getRun(started.id)).state).toBe("abandoned");
+    expect(runner.steps).toHaveLength(1);
+  });
+});
+
+describe("a Developer that fails or takes too long", () => {
+  it("opens an Escalation with the Runner's error", async () => {
+    const { project } = await projectWithRemote();
+    runner.use(() => ({ status: "failed", error: "claude exited with code 1: out of memory" }));
+
+    const run = await runToEnd(project);
+
+    expect(run.state).toBe("waiting");
+    expect(run.gates).toMatchObject([{ kind: "escalation", actions: ["abandon"], evidence: "claude exited with code 1: out of memory" }]);
+  });
+
+  it("kills a Step that runs past the timeout and opens an Escalation saying so", async () => {
+    const { project } = await projectWithRemote();
+    const patient = forgeWith({ stepTimeoutMs: 150 });
+    let cancelled = false;
+    runner.use(waitsForCancel(() => (cancelled = true)));
+
+    const started = await patient.startRun({ projectId: project.id, task: "Takes forever." });
+    await patient.whenIdle();
+
+    const run = await patient.getRun(started.id);
+    expect(cancelled).toBe(true);
+    expect(run.state).toBe("waiting");
+    expect(run.gates).toMatchObject([{ kind: "escalation", actions: ["abandon"], reason: expect.stringMatching(/timed out/i) }]);
+  });
+});
+
+describe("killing what a Run started", () => {
+  const pidFile = () => join(worktrees, `pids-${++counter}.txt`);
+  const pidsIn = (file: string) => (existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean).map(Number) : []);
+  /** A Check that leaves a background process behind, like a build tool's child. */
+  const checkWithChild = (file: string) => `sleep 60 & echo $! >> ${file}; wait`;
+
+  it("ends a timed out Check's whole process group", async () => {
+    const { project } = await projectWithRemote();
+    const file = pidFile();
+    await forge.setChecks(project.id, [checkWithChild(file)]);
+    const quick = forgeWith({ checkTimeoutMs: 300 });
+
+    const started = await quick.startRun({ projectId: project.id, task: "Do the thing." });
+    await quick.whenIdle();
+
+    const run = await quick.getRun(started.id);
+    expect(run.gates).toMatchObject([{ kind: "escalation", reason: expect.stringMatching(/Check still fails/) }]);
+    expect(run.checks.every((c) => c.exitStatus === null)).toBe(true);
+    const pids = pidsIn(file);
+    expect(pids).toHaveLength(3);
+    for (const pid of pids) await eventually(() => !isAlive(pid));
+  });
+
+  it("kills the Developer as soon as the Run is abandoned", async () => {
+    const { project } = await projectWithRemote();
+    let cancelled!: () => void;
+    const wasCancelled = new Promise<void>((r) => (cancelled = r));
+    let started!: () => void;
+    const inStep = new Promise<void>((r) => (started = r));
+    const wait = waitsForCancel(cancelled);
+    runner.use((step) => {
+      started();
+      return wait(step);
+    });
+    const { id } = await forge.startRun({ projectId: project.id, task: "Slow work." });
+    await inStep;
+
+    await forge.abandonRun(id);
+
+    await wasCancelled;
+    await forge.whenIdle();
+    const run = await forge.getRun(id);
+    expect(run.state).toBe("abandoned");
+    expect(run.gates).toEqual([]);
+  });
+
+  it("kills a running Check, and everything it started, when the Run is abandoned", async () => {
+    const { project } = await projectWithRemote();
+    const file = pidFile();
+    await forge.setChecks(project.id, [checkWithChild(file)]);
+    const { id } = await forge.startRun({ projectId: project.id, task: "Do the thing." });
+    const pid = await eventually(() => pidsIn(file)[0]);
+    expect(isAlive(pid)).toBe(true);
+
+    await forge.abandonRun(id);
+
+    await eventually(() => !isAlive(pid));
+    await forge.whenIdle();
+    const run = await forge.getRun(id);
+    expect(run.state).toBe("abandoned");
+    expect(run.checks).toEqual([]);
+    expect(runner.steps).toHaveLength(1);
+  });
+});
+
+describe("after Forgequor restarts", () => {
+  /** What a crash leaves behind: a Run recorded in `state`, with whatever the Step had written so far. */
+  async function crashedRun(project: Project, state: string, interruptedStep = false): Promise<number> {
+    const { rows } = await pool.query(
+      "INSERT INTO runs (project_id, title, task, state) VALUES ($1, 'Crashed', 'Finish the job.', $2) RETURNING id",
+      [project.id, state],
+    );
+    if (interruptedStep) {
+      await pool.query("INSERT INTO step_attempts (run_id, step, attempt, runner, status) VALUES ($1, 'developer', 1, 'claude', 'running')", [
+        rows[0].id,
+      ]);
+    }
+    return Number(rows[0].id);
+  }
+
+  it("restarts the current Step of every Running Run, keeping a note of the interrupted attempt", async () => {
+    const { project } = await projectWithRemote();
+    const id = await crashedRun(project, "running", true);
+    const restarted = forgeWith({});
+
+    await restarted.recoverAfterRestart();
+    await restarted.whenIdle();
+
+    const run = await restarted.getRun(id);
+    expect(run.state).toBe("waiting");
+    expect(run.attempts.map((a) => a.status)).toEqual(["failed", "succeeded"]);
+    expect(run.attempts[0]!.error).toMatch(/restart/i);
+    expect(run.gates).toMatchObject([{ kind: "final" }]);
+  });
+
+  it("starts the Queued Runs that fit the free slots", async () => {
+    const { project } = await projectWithRemote();
+    const first = await crashedRun(project, "queued");
+    const second = await crashedRun(project, "queued");
+    const third = await crashedRun(project, "queued");
+    const restarted = forgeWith({});
+
+    await restarted.recoverAfterRestart();
+    await restarted.whenIdle();
+
+    expect((await restarted.getRun(first)).state).toBe("waiting");
+    expect((await restarted.getRun(second)).state).toBe("waiting");
+    expect((await restarted.getRun(third)).state).toBe("queued");
+  });
+
+  it("follows the pull request of Approved Runs again", async () => {
+    const { project } = await projectWithRemote();
+    const approved = await approvedRun(project);
+    codeHost.setState(approved.prNumber!, "merged");
+    const restarted = forgeWith({});
+
+    await restarted.recoverAfterRestart();
+
+    expect((await restarted.getRun(approved.id)).state).toBe("merged");
+  });
+
+  it("leaves Waiting and Paused Runs as they are", async () => {
+    const { project } = await projectWithRemote();
+    const waiting = await runToEnd(project);
+    const paused = await crashedRun(project, "paused");
+    const restarted = forgeWith({});
+
+    await restarted.recoverAfterRestart();
+    await restarted.whenIdle();
+
+    expect((await restarted.getRun(waiting.id)).state).toBe("waiting");
+    expect((await restarted.getRun(paused)).state).toBe("paused");
+    expect(runner.steps).toHaveLength(1);
   });
 });

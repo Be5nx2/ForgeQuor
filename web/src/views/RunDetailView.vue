@@ -45,6 +45,9 @@ onUnmounted(() => clearInterval(timer));
   <p v-if="error" class="error">{{ error }}</p>
   <template v-if="run">
     <h2>{{ run.title }} <span class="badge">{{ run.state }}</span></h2>
+    <p v-if="run.state === 'paused' && run.resumeAt" class="muted">
+      The Runner's Quota is used up. This Run restarts its current Step after {{ new Date(run.resumeAt).toLocaleString() }}.
+    </p>
     <p v-if="!OVER.includes(run.state)">
       <button type="button" class="secondary" :disabled="abandoning" @click="abandon">Abandon Run</button>
     </p>

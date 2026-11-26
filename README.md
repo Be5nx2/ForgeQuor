@@ -66,6 +66,7 @@ All settings are optional environment variables. Set them in the shell that runs
 | `FORGEQUOR_DATABASE_URL` | `postgres://forgequor:forgequor@localhost:5433/forgequor` | PostgreSQL connection |
 | `FORGEQUOR_WORKTREES` | `~/.forgequor/worktrees` | Where Run worktrees are created |
 | `FORGEQUOR_DEVELOPER_MODEL` | Claude Code's default | Model used by the Developer Agent |
+| `FORGEQUOR_STEP_TIMEOUT_MINUTES` | `60` | A Developer Step running longer is killed and escalated |
 
 ### Tests
 

@@ -6,6 +6,7 @@ import { createGhCodeHost } from "./codehost/gh.js";
 import { createForge } from "./forge/forge.js";
 import { createClaudeRunner } from "./runner/claude.js";
 import { createServer } from "./http/server.js";
+import { killAllProcessGroups } from "./process-group.js";
 import { loadEnvFile } from "./startup/env.js";
 import { checkTools } from "./startup/preflight.js";
 import { createPool, DEFAULT_DATABASE_URL, migrate } from "./store/db.js";
@@ -33,15 +34,37 @@ console.log(applied.length ? `Applied migrations: ${applied.join(", ")}` : "Data
 const tools = await checkTools();
 for (const t of tools) console.log(`${t.status === "ok" ? "✓" : "✗"} ${t.tool}: ${t.detail}`);
 
+/** FORGEQUOR_STEP_TIMEOUT_MINUTES in milliseconds; the default applies when unset, and a bad value is refused. */
+function stepTimeoutMs(): number | undefined {
+  const raw = process.env.FORGEQUOR_STEP_TIMEOUT_MINUTES;
+  if (!raw) return undefined;
+  const minutes = Number(raw);
+  if (!Number.isFinite(minutes) || minutes <= 0) {
+    console.error(`FORGEQUOR_STEP_TIMEOUT_MINUTES must be a positive number of minutes, got "${raw}".`);
+    process.exit(1);
+  }
+  return minutes * 60_000;
+}
+
 const forge = createForge({
   pool,
   runner: createClaudeRunner(),
   codeHost: createGhCodeHost(),
   worktreesRoot: process.env.FORGEQUOR_WORKTREES ?? join(homedir(), ".forgequor", "worktrees"),
   developerModel: process.env.FORGEQUOR_DEVELOPER_MODEL,
+  stepTimeoutMs: stepTimeoutMs(),
 });
 const POLL_MS = Number(process.env.FORGEQUOR_PR_POLL_SECONDS ?? 60) * 1000;
-setInterval(() => forge.checkPullRequests().catch((e) => console.error("Pull request check failed:", e)), POLL_MS).unref();
+// Runs that were Running restart their Step, Queued Runs start, Approved Runs are followed again.
+forge.recoverAfterRestart().catch((e) => console.error("Recovery after restart failed:", e));
+setInterval(() => {
+  forge.checkPullRequests().catch((e) => console.error("Pull request check failed:", e));
+  forge.resumePausedRuns().catch((e) => console.error("Resuming Paused Runs failed:", e));
+}, POLL_MS).unref();
 const app = await createServer({ forge, tools, webRoot: `${root}web/dist` });
 await app.listen({ host: "127.0.0.1", port });
 console.log(`Forgequor on http://127.0.0.1:${port}`);
+
+// Agents and Checks run in their own process groups, so they would outlive Forgequor: end them with it.
+process.on("exit", killAllProcessGroups);
+for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => process.exit(0));

@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
+import { forgetProcessGroup, killProcessGroup, trackProcessGroup } from "../process-group.js";
 import type { Runner, RunnerEvent, StepRequest, StepResult } from "./runner.js";
 
 export interface ClaudeRunnerOptions {
@@ -77,7 +78,15 @@ export function createClaudeRunner(options: ClaudeRunnerOptions = {}): Runner {
         ];
         if (step.model) args.push("--model", step.model);
 
-        const child = spawn("claude", args, { cwd: step.cwd, env: options.env ?? process.env });
+        if (step.signal?.aborted) {
+          resolve({ status: "failed", error: "the Step was cancelled before it started" });
+          return;
+        }
+        // Its own process group, so a cancel can end claude and every tool it started in one go.
+        const child = spawn("claude", args, { cwd: step.cwd, env: options.env ?? process.env, detached: true });
+        trackProcessGroup(child.pid);
+        const cancel = () => killProcessGroup(child.pid);
+        step.signal?.addEventListener("abort", cancel, { once: true });
         let buffer = "";
         let final: any = null;
         let rateLimit: any = null;
@@ -110,6 +119,8 @@ export function createClaudeRunner(options: ClaudeRunnerOptions = {}): Runner {
         child.on("error", (e: NodeJS.ErrnoException) =>
           finish({ status: "failed", error: e.code === "ENOENT" ? "claude CLI not found on PATH" : `could not start claude: ${e.message}` }));
         child.on("close", (code, signal) => {
+          step.signal?.removeEventListener("abort", cancel);
+          forgetProcessGroup(child.pid);
           handleLine(buffer);
           finish(interpret(final, rateLimit, { code, signal, stderr }));
         });
