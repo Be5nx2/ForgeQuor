@@ -114,6 +114,14 @@ describe("Claude Runner", () => {
     expect(args).toContain("sonnet");
   });
 
+  it("denies the tools that wait for a human, so a headless Step never stalls", async () => {
+    const { fake } = await runStep({ stdout: [resultOk] });
+    const args = fake.lastInvocation().args;
+    const i = args.indexOf("--disallowedTools");
+    expect(i).toBeGreaterThan(-1);
+    expect(args[i + 1]).toContain("AskUserQuestion");
+  });
+
   it("reports a process killed by a signal as failed, naming the signal", async () => {
     const { result } = await runStep({ stdout: [init], killWith: "SIGKILL" });
     expect(result).toMatchObject({ status: "failed", error: expect.stringContaining("SIGKILL") });

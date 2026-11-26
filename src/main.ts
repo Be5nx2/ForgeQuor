@@ -5,10 +5,12 @@ import { fileURLToPath } from "node:url";
 import { createForge } from "./forge/forge.js";
 import { createClaudeRunner } from "./runner/claude.js";
 import { createServer } from "./http/server.js";
+import { loadEnvFile } from "./startup/env.js";
 import { checkTools } from "./startup/preflight.js";
 import { createPool, DEFAULT_DATABASE_URL, migrate } from "./store/db.js";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
+if (loadEnvFile(root)) console.log("Settings read from .env");
 const databaseUrl = process.env.FORGEQUOR_DATABASE_URL ?? DEFAULT_DATABASE_URL;
 const port = Number(process.env.FORGEQUOR_PORT ?? 4170);
 

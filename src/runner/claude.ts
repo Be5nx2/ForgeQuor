@@ -7,6 +7,9 @@ export interface ClaudeRunnerOptions {
   env?: NodeJS.ProcessEnv;
 }
 
+/** Claude Code tools that block on a human, which a headless Step cannot have. */
+const HUMAN_WAIT_TOOLS = ["AskUserQuestion", "EnterPlanMode", "ExitPlanMode"];
+
 /** One or more events for a line; only the first carries `raw`, so the log never repeats a line. */
 function toEvents(msg: any, raw: string): RunnerEvent[] {
   const events: RunnerEvent[] = [];
@@ -68,6 +71,8 @@ export function createClaudeRunner(options: ClaudeRunnerOptions = {}): Runner {
           "--verbose",
           "--no-session-persistence",
           "--permission-mode", "bypassPermissions",
+          // No human is there to answer: these tools would wait forever.
+          "--disallowedTools", HUMAN_WAIT_TOOLS.join(" "),
           "--append-system-prompt", step.instructions,
         ];
         if (step.model) args.push("--model", step.model);

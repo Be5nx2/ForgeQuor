@@ -54,11 +54,11 @@ To inspect what the Developer did, open the Run's worktree. The path is shown in
 
 > M1 is in progress. Runs do not push branches or open pull requests yet (`m1-04`), Checks do not run yet (`m1-05`), and progress is not shown live (`m1-09`): refresh the Run page to see it. See [ROADMAP.md](ROADMAP.md).
 
-> Agents run with Claude Code's permission prompts bypassed, with your rights on this machine ([ADR 0005](docs/adr/0005-agents-bypass-runner-permissions.md)). Only register Projects you trust.
+> Agents run with Claude Code's permission prompts bypassed, with your rights on this machine ([ADR 0005](docs/adr/0005-agents-bypass-runner-permissions.md)). Tools that wait for a human (asking a question, plan mode) are disabled, so an Agent never stalls on one. Only register Projects you trust.
 
 ### Configuration
 
-All settings are optional environment variables. Set them in the shell that runs `npm start`.
+All settings are optional environment variables. Set them in the shell that runs `npm start`, or in a `.env` file at the repo root (copy `.env.example`); a variable set in the shell wins over the file.
 
 | Variable | Default | Purpose |
 |---|---|---|

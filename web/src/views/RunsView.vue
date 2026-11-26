@@ -37,6 +37,8 @@ async function start() {
 }
 
 const projectName = (id: number) => projects.value.find((p) => p.id === id)?.name ?? `#${id}`;
+// Same-named Projects are told apart by their local path.
+const projectLabel = (p: Project) => `${p.name} (${p.localPath})`;
 
 let timer: ReturnType<typeof setInterval>;
 onMounted(async () => {
@@ -54,7 +56,7 @@ watch([filterProject, filterState], load);
   <p v-if="!projects.length" class="muted">Register a Project first.</p>
   <form v-else class="stack" @submit.prevent="start">
     <select v-model="form.projectId" aria-label="Project">
-      <option v-for="p in projects" :key="p.id" :value="String(p.id)">{{ p.name }}</option>
+      <option v-for="p in projects" :key="p.id" :value="String(p.id)">{{ projectLabel(p) }}</option>
     </select>
     <textarea v-model="form.task" rows="4" placeholder="Task" aria-label="Task" required />
     <input v-model="form.title" placeholder="Title (derived from the task if empty)" aria-label="Title" />
@@ -67,7 +69,7 @@ watch([filterProject, filterState], load);
   <form>
     <select v-model="filterProject" aria-label="Filter by Project">
       <option value="">All Projects</option>
-      <option v-for="p in projects" :key="p.id" :value="String(p.id)">{{ p.name }}</option>
+      <option v-for="p in projects" :key="p.id" :value="String(p.id)">{{ projectLabel(p) }}</option>
     </select>
     <select v-model="filterState" aria-label="Filter by state">
       <option value="">All states</option>

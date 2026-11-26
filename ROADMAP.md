@@ -42,7 +42,7 @@ One **Project**, one **Run** going Developer (Claude) → **Checks** → pull re
     - the Run Notes folder is excluded from git without changing the Project;
     - the Run reaches a final Gate offering approve or abandon;
     - the Runs list, the Run detail (Steps, attempts, outcomes) and the "Waiting for you" screens work.
-- [ ] `m1-10` **Clean-ups from the first real Run**: small rough edges found running m1-03 for real, fixed before m1-04.
+- [x] `m1-10` **Clean-ups from the first real Run**: small rough edges found running m1-03 for real, fixed before m1-04.
   - Spec: `docs/specs/m1-walking-skeleton.md`
   - Blocked by: none
   - Acceptance:
