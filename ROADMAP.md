@@ -83,7 +83,8 @@ One **Project**, one **Run** going Developer (Claude) → **Checks** → pull re
   - Acceptance:
     - each Project has a max concurrent Runs setting (default 2), editable in the UI;
     - a Run over the limit is Queued;
-    - Queued Runs start automatically, in creation order, when a slot frees up.
+    - Queued Runs start automatically, in creation order, when a slot frees up;
+    - a test shows that a Run becoming Merged, Closed or Abandoned frees its slot and starts the next Queued Run (left untested by m1-06).
 - [ ] `m1-08` **Quota pause, restart recovery, Runner failures**: no Run fails or gets stuck for a temporary reason.
   - Spec: `docs/specs/m1-walking-skeleton.md`
   - Blocked by: `m1-05`, `m1-06` (PR polling to resume on startup)
@@ -92,7 +93,8 @@ One **Project**, one **Run** going Developer (Claude) → **Checks** → pull re
     - on Forgequor startup, Running Runs restart their current Step and Approved Runs resume PR polling;
     - a Runner failure opens an Escalation with the error;
     - a Step running longer than a configurable timeout has its Runner process killed and opens an Escalation saying so;
-    - killing a timed-out Step or Check ends its whole process group, so no child process (such as a headless engine) survives it.
+    - killing a timed-out Step or Check ends its whole process group, so no child process (such as a headless engine) survives it;
+    - abandoning a Run while a Step or Check is running kills it the same way (today the Developer keeps running after m1-06's abandon).
 - [ ] `m1-09` **Live Step progress**: the human watches the Agent work in real time.
   - Spec: `docs/specs/m1-walking-skeleton.md`
   - Blocked by: `m1-03`
@@ -117,6 +119,8 @@ YAML **Workflows** with parallel **Steps**, Griller with chat, Spec Writer, Arch
 ## Icebox
 
 - Child Runs: a feature Run splitting its spec into one Run per ticket (ADR 0001).
+- Verifier Agent: a Step that runs the real app and the opt-in smoke tests and checks each acceptance criterion before the final Gate (green unit tests missed m1-03's undecidable Gates). To grill.
+- Conductor Agent (the sprint manager): reads the roadmap, computes the frontier, spots hidden dependencies and parallel-safe items, proposes the next Runs; advisory first, then driving Child Runs. Touches ADR 0001. To grill.
 - Runner fallback when a Quota is exhausted.
 - Competing Runs: the same Step on two Runners, then pick.
 - Codecks sync: import cards, update status.
