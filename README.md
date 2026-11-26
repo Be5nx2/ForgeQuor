@@ -4,6 +4,8 @@
 
 Multi-Agent AI Game Development Orchestrator: a Node.js + Vue app with a PostgreSQL store that drives the Claude Code and Codex CLIs through looping workflows (produce, validate, iterate). Brand and vision: [docs/BRAND_IDENTITY.md](docs/BRAND_IDENTITY.md).
 
+> **Private repository.** This project is not open source. It is proprietary to GoodEnoughGame and restricted to internal use only. See [LICENSE](LICENSE).
+
 ## Getting started
 
 ### Prerequisites
