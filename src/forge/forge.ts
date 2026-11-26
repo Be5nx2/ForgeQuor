@@ -112,7 +112,14 @@ export interface Project {
   maxConcurrentRuns: number;
 }
 
+/** What a subscriber hears about live: a Step's progress, or that a Run changed (state, Steps, Checks, Gates, pull request). */
+export type RunUpdate =
+  | { type: "progress"; runId: number; attemptId: number; kind: "text" | "tool" | "other"; summary: string }
+  | { type: "changed"; runId: number };
+
 export interface Forge {
+  /** Hears every RunUpdate from now on. Returns the function that stops it. A throwing listener never disturbs a Run. */
+  subscribe(listener: (update: RunUpdate) => void): () => void;
   registerProject(input: { path: string }): Promise<Project>;
   listProjects(): Promise<Project[]>;
   /** Replaces a Project's ordered Check commands (blank ones are dropped). Applies to Runs started afterwards. */
@@ -267,6 +274,17 @@ export function createForge(deps: ForgeDeps): Forge {
   const now = deps.now ?? (() => new Date());
   const stepTimeoutMs = deps.stepTimeoutMs ?? DEFAULT_STEP_TIMEOUT_MS;
   const inFlight = new Set<Promise<void>>();
+  const listeners = new Set<(update: RunUpdate) => void>();
+  function emit(update: RunUpdate) {
+    for (const l of [...listeners]) {
+      try {
+        l(update);
+      } catch (e) {
+        console.error("A Run update listener failed:", e);
+      }
+    }
+  }
+  const changed = (runId: number) => emit({ type: "changed", runId });
   /** Cancels what a Run is doing (its Developer or its Check) when the human abandons it. */
   const stoppers = new Map<number, AbortController>();
   /** The tail of the git setup queue of each repository, by path. */
@@ -288,6 +306,7 @@ export function createForge(deps: ForgeDeps): Forge {
 
   async function setState(runId: number, state: RunState) {
     await pool.query("UPDATE runs SET state = $2, updated_at = now() WHERE id = $1", [runId, state]);
+    changed(runId);
   }
 
   /** Opens a Gate and makes the Run Waiting, unless the Run was abandoned meanwhile. */
@@ -297,6 +316,7 @@ export function createForge(deps: ForgeDeps): Forge {
        INSERT INTO gates (run_id, kind, reason, evidence) SELECT id, $2, $3, $4 FROM r`,
       [runId, kind, reason, evidence ?? null],
     );
+    changed(runId);
   }
 
   /** False once the human abandoned the Run while it was being worked on. */
@@ -351,7 +371,10 @@ export function createForge(deps: ForgeDeps): Forge {
     } finally {
       client.release();
     }
-    for (const run of started) launch(run, project);
+    for (const run of started) {
+      changed(run.id);
+      launch(run, project);
+    }
   }
 
   async function settle(runId: number, state: "abandoned" | "merged" | "closed", from: RunState[]): Promise<boolean> {
@@ -379,6 +402,7 @@ export function createForge(deps: ForgeDeps): Forge {
     } finally {
       client.release();
     }
+    changed(runId);
     // The Run is over, so its slot is free for the next Queued Run.
     await promote(projectId);
     return true;
@@ -420,6 +444,7 @@ export function createForge(deps: ForgeDeps): Forge {
     );
     const attemptId = rows[0].id;
     const log: string[] = [];
+    changed(run.id);
 
     const step = new AbortController();
     let timedOut = false;
@@ -442,6 +467,7 @@ export function createForge(deps: ForgeDeps): Forge {
         },
         (e) => {
           if (e.raw) log.push(e.raw);
+          emit({ type: "progress", runId: run.id, attemptId, kind: e.kind, summary: e.summary });
         },
       );
     } finally {
@@ -460,6 +486,7 @@ export function createForge(deps: ForgeDeps): Forge {
         log.join("\n"),
       ],
     );
+    changed(run.id);
     return { result, timedOut };
   }
 
@@ -470,6 +497,7 @@ export function createForge(deps: ForgeDeps): Forge {
       runId,
       resumeAt,
     ]);
+    changed(runId);
   }
 
   /** Works on a Run until it waits at a Gate, pauses, or is abandoned; starts over from what is recorded if it was worked on before. */
@@ -498,6 +526,7 @@ export function createForge(deps: ForgeDeps): Forge {
         });
       }
       await pool.query("UPDATE runs SET branch = $2, worktree_path = $3 WHERE id = $1", [run.id, branch, worktreePath]);
+      changed(run.id);
 
       let { attempt, failedCheck, skipDeveloper, checksDone } = await resumePoint(pool, run.id, project.checks.length);
       while (!checksDone) {
@@ -526,6 +555,7 @@ export function createForge(deps: ForgeDeps): Forge {
             [run.id, attempt, c.command, c.exitStatus, c.output],
           );
         }
+        changed(run.id);
         const failed = outcomes.find((c) => !passed(c));
         if (!failed) break;
         failedCheck = describeFailure(failed);
@@ -552,6 +582,7 @@ export function createForge(deps: ForgeDeps): Forge {
           body: `${run.task}\n\n---\nForgequor Run #${run.id}`,
         });
         await pool.query("UPDATE runs SET pr_number = $2, pr_url = $3 WHERE id = $1", [run.id, pr.number, pr.url]);
+        changed(run.id);
       }
       if (!(await stillRunning(run.id))) {
         // Abandoned while the pull request was being opened: it may not have seen it, so close it here.
@@ -567,6 +598,7 @@ export function createForge(deps: ForgeDeps): Forge {
           body: readReviewBrief(worktreePath) ?? "The Developer wrote no Review Brief for this pull request.",
         });
         await pool.query("UPDATE runs SET brief_posted = true WHERE id = $1", [run.id]);
+        changed(run.id);
       }
       await openGate(run.id, "final", "The Developer finished.");
     } catch (e: any) {
@@ -608,6 +640,11 @@ export function createForge(deps: ForgeDeps): Forge {
       return toProject(rows[0]);
     },
 
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => void listeners.delete(listener);
+    },
+
     async startRun({ projectId, task, title, trackerRef }) {
       const { rows: found } = await pool.query(`SELECT id FROM projects WHERE id = $1`, [projectId]);
       if (!found[0]) throw new Error(`No Project ${projectId}.`);
@@ -617,6 +654,7 @@ export function createForge(deps: ForgeDeps): Forge {
          VALUES ($1, $2, $3, $4, 'queued') RETURNING id`,
         [projectId, title?.trim() || deriveTitle(task), task.trim(), trackerRef?.trim() || null],
       );
+      changed(rows[0].id);
       await promote(projectId);
       const { rows: current } = await pool.query(`SELECT ${RUN_COLUMNS} FROM runs WHERE id = $1`, [rows[0].id]);
       return toRun(current[0]);
@@ -698,6 +736,7 @@ export function createForge(deps: ForgeDeps): Forge {
       } finally {
         client.release();
       }
+      changed(gate.runId);
       return forge.getRun(gate.runId);
     },
 
@@ -724,15 +763,19 @@ export function createForge(deps: ForgeDeps): Forge {
          WHERE state = 'paused' AND resume_at <= $1 RETURNING ${RUN_COLUMNS}`,
         [now()],
       );
-      for (const run of rows.map(toRun).sort((a, b) => a.id - b.id)) await restart(run);
+      for (const run of rows.map(toRun).sort((a, b) => a.id - b.id)) {
+        changed(run.id);
+        await restart(run);
+      }
     },
 
     async recoverAfterRestart() {
       // Nothing can be running yet, so any attempt still marked Running was cut short by the restart.
-      await pool.query(
+      const interrupted = await pool.query(
         `UPDATE step_attempts SET status = 'failed', ended_at = now(), error = 'Interrupted by a restart of Forgequor.'
-         WHERE status = 'running'`,
+         WHERE status = 'running' RETURNING run_id`,
       );
+      for (const r of interrupted.rows) changed(Number(r.run_id));
       const { rows } = await pool.query(`SELECT ${RUN_COLUMNS} FROM runs WHERE state = 'running' ORDER BY id`);
       for (const run of rows.map(toRun)) await restart(run);
       const { rows: queued } = await pool.query("SELECT DISTINCT project_id FROM runs WHERE state = 'queued'");

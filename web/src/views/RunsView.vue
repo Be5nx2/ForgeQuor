@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, watch } from "vue";
-import { getJson, postJson, type Project, type Run } from "../api";
+import { followRuns, getJson, postJson, type Project, type Run } from "../api";
 
 const emit = defineEmits<{ open: [id: number] }>();
 
@@ -40,14 +40,14 @@ const projectName = (id: number) => projects.value.find((p) => p.id === id)?.nam
 // Same-named Projects are told apart by their local path.
 const projectLabel = (p: Project) => `${p.name} (${p.localPath})`;
 
-let timer: ReturnType<typeof setInterval>;
+let stopFollowing: () => void;
 onMounted(async () => {
   projects.value = await getJson("/api/projects");
   form.value.projectId = String(projects.value[0]?.id ?? "");
   await load();
-  timer = setInterval(load, 3000);
+  stopFollowing = followRuns((u) => u.type === "changed" && load(), load);
 });
-onUnmounted(() => clearInterval(timer));
+onUnmounted(() => stopFollowing?.());
 watch([filterProject, filterState], load);
 </script>
 

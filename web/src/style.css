@@ -24,3 +24,4 @@ select, textarea { padding: 0.5rem; background: #101d2d; color: inherit; border:
 .badge { background: #38bdf8; color: #080f19; border-radius: 4px; padding: 0 0.4rem; font-size: 0.8rem; font-weight: 600; }
 pre { white-space: pre-wrap; background: #080f19; padding: 0.5rem; border-radius: 6px; margin: 0.5rem 0 0; }
 a { color: #a5e4ff; }
+.live { list-style: none; padding: 0; margin: 0.5rem 0 0; max-height: 14rem; overflow-y: auto; font-family: ui-monospace, monospace; font-size: 0.85rem; }

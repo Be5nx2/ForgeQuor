@@ -1,9 +1,9 @@
 import { existsSync, readFileSync, realpathSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type pg from "pg";
-import { createForge, type Forge, type ForgeDeps, type Project } from "../../src/forge/forge.js";
+import { createForge, type Forge, type ForgeDeps, type Project, type RunUpdate } from "../../src/forge/forge.js";
 import { createTestDatabase } from "../harness/database.js";
 import { createFakeCodeHost } from "../harness/fake-codehost.js";
 import { createFakeRunner } from "../harness/fake-runner.js";
@@ -1010,5 +1010,62 @@ describe("after Forgequor restarts", () => {
     expect((await restarted.getRun(waiting.id)).state).toBe("waiting");
     expect((await restarted.getRun(paused)).state).toBe("paused");
     expect(runner.steps).toHaveLength(1);
+  });
+});
+
+describe("following a Run live", () => {
+  it("delivers the running Step's events as they happen, before the Step ends", async () => {
+    const { project } = await projectWithRemote();
+    const updates: RunUpdate[] = [];
+    const unsubscribe = forge.subscribe((u) => updates.push(u));
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    runner.use(async (_step, emit) => {
+      emit({ kind: "text", summary: "Reading the player script", raw: "{}" });
+      emit({ kind: "tool", summary: "Edit player.gd", raw: "{}" });
+      await held;
+    });
+
+    const run = await forge.startRun({ projectId: project.id, task: "Make the player jump." });
+    await vi.waitFor(() => expect(updates.filter((u) => u.type === "progress")).toHaveLength(2));
+    expect(await forge.getRun(run.id)).toMatchObject({ state: "running" });
+    expect(updates.filter((u) => u.type === "progress")).toMatchObject([
+      { runId: run.id, kind: "text", summary: "Reading the player script" },
+      { runId: run.id, kind: "tool", summary: "Edit player.gd" },
+    ]);
+
+    release();
+    await forge.whenIdle();
+    unsubscribe();
+  });
+
+  it("announces every change of the Run, up to its waiting at the final Gate", async () => {
+    const { project } = await projectWithRemote();
+    const seen: string[] = [];
+    // Read the Run's state in the order the changes were announced.
+    let reading: Promise<unknown> = Promise.resolve();
+    const unsubscribe = forge.subscribe((u) => {
+      if (u.type === "changed") reading = reading.then(() => forge.getRun(u.runId)).then((r) => void seen.push(r.state));
+    });
+
+    const run = await forge.startRun({ projectId: project.id, task: "Make the player jump." });
+    await forge.whenIdle();
+    await vi.waitFor(() => expect(seen.at(-1)).toBe("waiting"));
+    expect(seen).toContain("running");
+    expect(seen.indexOf("running")).toBeLessThan(seen.indexOf("waiting"));
+
+    await forge.abandonRun(run.id);
+    await vi.waitFor(() => expect(seen.at(-1)).toBe("abandoned"));
+    unsubscribe();
+  });
+
+  it("stops delivering to a subscriber that unsubscribed", async () => {
+    const { project } = await projectWithRemote();
+    const updates: RunUpdate[] = [];
+    forge.subscribe((u) => updates.push(u))();
+
+    await forge.startRun({ projectId: project.id, task: "Make the player jump." });
+    await forge.whenIdle();
+    expect(updates).toEqual([]);
   });
 });

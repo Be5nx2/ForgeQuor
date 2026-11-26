@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from "vue";
-import { getJson, postJson, type RunDetail } from "../api";
+import { computed, onMounted, onUnmounted, ref } from "vue";
+import { followRuns, getJson, postJson, type RunDetail } from "../api";
 import GateActions from "../components/GateActions.vue";
 
 const props = defineProps<{ id: number }>();
@@ -32,12 +32,22 @@ async function abandon() {
   }
 }
 
-let timer: ReturnType<typeof setInterval>;
+/** The running Step's latest events, newest last. */
+const live = ref<{ attemptId: number; kind: "text" | "tool" | "other"; summary: string }[]>([]);
+const LIVE_LINES = 100;
+const runningAttempt = computed(() => run.value?.attempts.find((a) => a.status === "running"));
+const liveNow = computed(() => live.value.filter((l) => l.attemptId === runningAttempt.value?.id));
+
+let stopFollowing: () => void;
 onMounted(() => {
   load();
-  timer = setInterval(load, 3000);
+  stopFollowing = followRuns((u) => {
+    if (u.runId !== props.id) return;
+    if (u.type === "changed") return void load();
+    live.value = [...live.value, { attemptId: u.attemptId, kind: u.kind, summary: u.summary }].slice(-LIVE_LINES);
+  }, load);
 });
-onUnmounted(() => clearInterval(timer));
+onUnmounted(() => stopFollowing?.());
 </script>
 
 <template>
@@ -89,6 +99,10 @@ onUnmounted(() => clearInterval(timer));
           {{ a.runner }}<span v-if="a.model"> ({{ a.model }})</span> · {{ new Date(a.startedAt).toLocaleString() }}
           <span v-if="a.endedAt"> → {{ new Date(a.endedAt).toLocaleTimeString() }}</span>
         </div>
+        <ul v-if="a.status === 'running'" class="live" aria-label="Live progress">
+          <li v-if="!liveNow.length" class="muted">Waiting for the Agent's first event…</li>
+          <li v-for="(l, i) in liveNow" :key="i"><span class="badge">{{ l.kind }}</span> {{ l.summary }}</li>
+        </ul>
         <pre v-if="a.error">{{ a.error }}</pre>
         <pre v-else-if="a.summary">{{ a.summary }}</pre>
       </li>

@@ -68,6 +68,22 @@ export interface OpenGate extends Gate {
   projectName: string;
 }
 
+/** A live update from the server: a Step's progress, or a Run that changed. */
+export type RunUpdate =
+  | { type: "progress"; runId: number; attemptId: number; kind: "text" | "tool" | "other"; summary: string }
+  | { type: "changed"; runId: number };
+
+/**
+ * Follows live Run updates over server-sent events. `onOpen` fires on every (re)connection, so a view can reload what it
+ * missed meanwhile. Returns the function that stops following.
+ */
+export function followRuns(onUpdate: (update: RunUpdate) => void, onOpen?: () => void): () => void {
+  const source = new EventSource("/api/events");
+  source.onopen = () => onOpen?.();
+  source.onmessage = (m) => onUpdate(JSON.parse(m.data));
+  return () => source.close();
+}
+
 export async function putJson<T>(url: string, body: unknown): Promise<T> {
   const res = await fetch(url, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   const data = await res.json();

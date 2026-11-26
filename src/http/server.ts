@@ -81,6 +81,22 @@ export async function createServer(deps: {
       return reply.code(e instanceof RunNotFoundError ? 404 : e instanceof RunStateError ? 409 : 502).send({ error: e.message });
     }
   });
+  // Live Run updates as server-sent events: one JSON RunUpdate per message.
+  app.get("/api/events", (req, reply) => {
+    reply.hijack();
+    const res = reply.raw;
+    res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
+    res.write(": connected\n\n");
+    const send = (chunk: string) => {
+      if (!res.destroyed && !res.writableEnded) res.write(chunk);
+    };
+    const unsubscribe = deps.forge.subscribe((update) => send(`data: ${JSON.stringify(update)}\n\n`));
+    const heartbeat = setInterval(() => send(": keep-alive\n\n"), 25_000);
+    req.raw.on("close", () => {
+      clearInterval(heartbeat);
+      unsubscribe();
+    });
+  });
   app.get("/api/gates", async () => deps.forge.listOpenGates());
   app.post<{ Params: { id: string }; Body: { action?: GateAction } }>("/api/gates/:id/decision", async (req, reply) => {
     const action = req.body?.action;

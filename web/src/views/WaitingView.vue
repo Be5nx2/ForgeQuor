@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from "vue";
-import { getJson, type OpenGate } from "../api";
+import { followRuns, getJson, type OpenGate } from "../api";
 import GateActions from "../components/GateActions.vue";
 
 const emit = defineEmits<{ open: [id: number] }>();
@@ -10,12 +10,12 @@ async function load() {
   gates.value = await getJson("/api/gates");
 }
 
-let timer: ReturnType<typeof setInterval>;
+let stopFollowing: () => void;
 onMounted(() => {
   load();
-  timer = setInterval(load, 3000);
+  stopFollowing = followRuns((u) => u.type === "changed" && load(), load);
 });
-onUnmounted(() => clearInterval(timer));
+onUnmounted(() => stopFollowing?.());
 </script>
 
 <template>

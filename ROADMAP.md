@@ -95,7 +95,7 @@ One **Project**, one **Run** going Developer (Claude) → **Checks** → pull re
     - a Step running longer than a configurable timeout has its Runner process killed and opens an Escalation saying so;
     - killing a timed-out Step or Check ends its whole process group, so no child process (such as a headless engine) survives it;
     - abandoning a Run while a Step or Check is running kills it the same way (today the Developer keeps running after m1-06's abandon).
-- [ ] `m1-09` **Live Step progress**: the human watches the Agent work in real time.
+- [x] `m1-09` **Live Step progress**: the human watches the Agent work in real time.
   - Spec: `docs/specs/m1-walking-skeleton.md`
   - Blocked by: `m1-03`
   - Acceptance:
