@@ -559,16 +559,18 @@ describe("detecting a merge or close", () => {
 /** A Developer that blocks until released, so Runs can be held in the Running state. */
 function gatedDeveloper() {
   const waiters: Array<() => void> = [];
+  const listeners: Array<{ n: number; resolve: () => void }> = [];
   runner.use(async (step) => {
-    await new Promise<void>((r) => waiters.push(r));
+    const released = new Promise<void>((r) => waiters.push(r));
+    listeners.filter((l) => waiters.length >= l.n).forEach((l) => l.resolve());
+    await released;
     developerCommits(step);
   });
   return {
     releaseAll: () => waiters.splice(0).forEach((r) => r()),
-    started: async (n: number) => {
-      for (let i = 0; i < 200 && waiters.length < n; i++) await new Promise((r) => setTimeout(r, 10));
-      expect(waiters.length).toBeGreaterThanOrEqual(n);
-    },
+    /** Resolves once `n` Developers are blocked, signalled by the Runner itself rather than polled. */
+    started: (n: number) =>
+      waiters.length >= n ? Promise.resolve() : new Promise<void>((resolve) => listeners.push({ n, resolve })),
   };
 }
 
@@ -681,6 +683,8 @@ describe("the concurrency limit and the queue", () => {
     await gate.started(2);
 
     expect((await forge.listRuns({ projectId: project.id, state: "running" })).length).toBe(2);
+    // Runs of one Project preparing their worktrees together must not trip over git's locks.
+    expect((await forge.listOpenGates()).filter((g) => g.projectName === project.name)).toEqual([]);
     expect((await forge.listRuns({ projectId: project.id, state: "queued" })).length).toBe(3);
     gate.releaseAll();
     await forge.whenIdle();

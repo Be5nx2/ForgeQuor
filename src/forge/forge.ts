@@ -242,6 +242,22 @@ function deriveTitle(task: string): string {
 export function createForge(deps: ForgeDeps): Forge {
   const { pool, runner } = deps;
   const inFlight = new Set<Promise<void>>();
+  /** The tail of the git setup queue of each repository, by path. */
+  const repoQueues = new Map<string, Promise<unknown>>();
+
+  /**
+   * Runs `job` once the repository's earlier jobs are done. Git takes locks on a repository's config and refs, so two
+   * Runs of one Project preparing their worktrees at the same time would make one of them fail.
+   */
+  function onePerRepository<T>(repoRoot: string, job: () => Promise<T>): Promise<T> {
+    const result = (repoQueues.get(repoRoot) ?? Promise.resolve()).catch(() => {}).then(job);
+    const tail = result.catch(() => {});
+    repoQueues.set(repoRoot, tail);
+    void tail.then(() => {
+      if (repoQueues.get(repoRoot) === tail) repoQueues.delete(repoRoot);
+    });
+    return result;
+  }
 
   async function setState(runId: number, state: RunState) {
     await pool.query("UPDATE runs SET state = $2, updated_at = now() WHERE id = $1", [runId, state]);
@@ -387,12 +403,14 @@ export function createForge(deps: ForgeDeps): Forge {
   /** The fixed M1 Workflow so far: Developer, Checks (retrying the Developer), pull request, then the final Gate. Any failure opens an Escalation. */
   async function execute(run: Run, project: Project) {
     try {
-      const defaultBranch = await refreshDefaultBranch(project.localPath);
-      await pool.query("UPDATE projects SET default_branch = $2 WHERE id = $1", [project.id, defaultBranch]);
-
       const branch = `forgequor/${run.id}-${slugify(run.title) || "run"}`;
       const worktreePath = join(deps.worktreesRoot, `${slugify(project.name)}-${project.id}`, `run-${run.id}`);
-      await createRunWorktree({ repoRoot: project.localPath, defaultBranch, branch, worktreePath });
+      const defaultBranch = await onePerRepository(project.localPath, async () => {
+        const fresh = await refreshDefaultBranch(project.localPath);
+        await pool.query("UPDATE projects SET default_branch = $2 WHERE id = $1", [project.id, fresh]);
+        await createRunWorktree({ repoRoot: project.localPath, defaultBranch: fresh, branch, worktreePath });
+        return fresh;
+      });
       await pool.query("UPDATE runs SET branch = $2, worktree_path = $3 WHERE id = $1", [run.id, branch, worktreePath]);
 
       let failedCheck: string | undefined;
