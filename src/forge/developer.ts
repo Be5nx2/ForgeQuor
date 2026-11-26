@@ -8,6 +8,9 @@ export const DEVELOPER_INSTRUCTIONS = `You are the Developer on a Forgequor Run.
 - Never commit the ${RUN_NOTES_DIR}/ folder: it holds Run Notes and is ignored by git.
 - When you are done, write the Review Brief to ${REVIEW_BRIEF_FILE}: what the change does, where the reviewer should look closely, and what to test.`;
 
-export function developerPrompt(task: string): string {
-  return `Task:\n\n${task}`;
+/** The Developer's prompt; on a retry it carries the Check that failed, so the Developer can fix it. */
+export function developerPrompt(task: string, failedCheck?: string): string {
+  const prompt = `Task:\n\n${task}`;
+  if (!failedCheck) return prompt;
+  return `${prompt}\n\nYour previous attempt failed this Check. Fix the cause, keep your earlier work, and commit.\n\n${failedCheck}`;
 }

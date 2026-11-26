@@ -59,7 +59,7 @@ One **Project**, one **Run** going Developer (Claude) → **Checks** → pull re
     - the Review Brief is posted as a comment, or a note says none was written;
     - the final Gate comes after the pull request, and the PR link shows in the UI;
     - an opt-in smoke test opens and closes a real PR on a sandbox repository.
-- [ ] `m1-05` **Checks with retry and Escalation**: broken work never reaches a pull request.
+- [x] `m1-05` **Checks with retry and Escalation**: broken work never reaches a pull request.
   - Spec: `docs/specs/m1-walking-skeleton.md`
   - Blocked by: `m1-03`
   - Acceptance:

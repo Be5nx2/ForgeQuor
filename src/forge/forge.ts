@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import type pg from "pg";
 import type { Runner, StepResult } from "../runner/runner.js";
+import { describeFailure, passed, runChecks } from "./checks.js";
 import { DEVELOPER_INSTRUCTIONS, developerPrompt } from "./developer.js";
 import type { CodeHost } from "../codehost/codehost.js";
 import {
@@ -53,6 +54,17 @@ export interface StepAttempt {
   eventLog: string;
 }
 
+export interface CheckResult {
+  id: number;
+  /** The Developer attempt whose work this Check validated. */
+  attempt: number;
+  command: string;
+  /** Null when the command was killed. */
+  exitStatus: number | null;
+  output: string;
+  ranAt: Date;
+}
+
 export interface Gate {
   id: number;
   runId: number;
@@ -68,6 +80,7 @@ export interface Gate {
 
 export interface RunDetail extends Run {
   attempts: StepAttempt[];
+  checks: CheckResult[];
   gates: Gate[];
 }
 
@@ -91,6 +104,8 @@ export interface Project {
 export interface Forge {
   registerProject(input: { path: string }): Promise<Project>;
   listProjects(): Promise<Project[]>;
+  /** Replaces a Project's ordered Check commands (blank ones are dropped). Applies to Runs started afterwards. */
+  setChecks(projectId: number, checks: string[]): Promise<Project>;
   /** Creates a Run and starts it in the background; follow it with `getRun`. */
   startRun(input: { projectId: number; task: string; title?: string; trackerRef?: string }): Promise<Run>;
   getRun(id: number): Promise<RunDetail>;
@@ -164,6 +179,20 @@ function toAttempt(r: Record<string, any>): StepAttempt {
   };
 }
 
+function toCheck(r: Record<string, any>): CheckResult {
+  return {
+    id: Number(r.id),
+    attempt: r.attempt,
+    command: r.command,
+    exitStatus: r.exit_status,
+    output: r.output,
+    ranAt: r.ran_at,
+  };
+}
+
+/** After this many failed Checks the Developer's extra attempts are used up (1 try + 2 extra). */
+const MAX_DEVELOPER_ATTEMPTS = 3;
+
 function toGate(r: Record<string, any>): Gate {
   return {
     id: Number(r.id),
@@ -203,7 +232,37 @@ export function createForge(deps: ForgeDeps): Forge {
     await setState(runId, "waiting");
   }
 
-  /** The fixed M1 Workflow so far: Developer, then the final Gate. Any failure opens an Escalation. */
+  /** One Developer attempt, recorded as a Step attempt. */
+  async function developerStep(run: Run, worktreePath: string, attempt: number, failedCheck?: string): Promise<StepResult> {
+    const { rows } = await pool.query(
+      `INSERT INTO step_attempts (run_id, step, attempt, runner, model, status)
+       VALUES ($1, 'developer', $2, 'claude', $3, 'running') RETURNING id`,
+      [run.id, attempt, deps.developerModel ?? null],
+    );
+    const attemptId = rows[0].id;
+    const log: string[] = [];
+    const result = await runner.run(
+      { instructions: DEVELOPER_INSTRUCTIONS, prompt: developerPrompt(run.task, failedCheck), cwd: worktreePath, model: deps.developerModel },
+      (e) => {
+        if (e.raw) log.push(e.raw);
+      },
+    );
+    await pool.query(
+      `UPDATE step_attempts SET status = $2, ended_at = now(), summary = $3, error = $4, quota_resets_at = $5, event_log = $6
+       WHERE id = $1`,
+      [
+        attemptId,
+        result.status,
+        result.status === "succeeded" ? result.summary : null,
+        result.status === "failed" ? result.error : null,
+        result.status === "quota_exhausted" ? result.resetsAt : null,
+        log.join("\n"),
+      ],
+    );
+    return result;
+  }
+
+  /** The fixed M1 Workflow so far: Developer, Checks (retrying the Developer), pull request, then the final Gate. Any failure opens an Escalation. */
   async function execute(run: Run, project: Project) {
     try {
       const defaultBranch = await refreshDefaultBranch(project.localPath);
@@ -214,39 +273,31 @@ export function createForge(deps: ForgeDeps): Forge {
       await createRunWorktree({ repoRoot: project.localPath, defaultBranch, branch, worktreePath });
       await pool.query("UPDATE runs SET branch = $2, worktree_path = $3 WHERE id = $1", [run.id, branch, worktreePath]);
 
-      const { rows } = await pool.query(
-        `INSERT INTO step_attempts (run_id, step, attempt, runner, model, status)
-         VALUES ($1, 'developer', 1, 'claude', $2, 'running') RETURNING id`,
-        [run.id, deps.developerModel ?? null],
-      );
-      const attemptId = rows[0].id;
-      const log: string[] = [];
-      const result: StepResult = await runner.run(
-        { instructions: DEVELOPER_INSTRUCTIONS, prompt: developerPrompt(run.task), cwd: worktreePath, model: deps.developerModel },
-        (e) => {
-          if (e.raw) log.push(e.raw);
-        },
-      );
-      await pool.query(
-        `UPDATE step_attempts SET status = $2, ended_at = now(), summary = $3, error = $4, quota_resets_at = $5, event_log = $6
-         WHERE id = $1`,
-        [
-          attemptId,
-          result.status,
-          result.status === "succeeded" ? result.summary : null,
-          result.status === "failed" ? result.error : null,
-          result.status === "quota_exhausted" ? result.resetsAt : null,
-          log.join("\n"),
-        ],
-      );
+      let failedCheck: string | undefined;
+      for (let attempt = 1; attempt <= MAX_DEVELOPER_ATTEMPTS; attempt++) {
+        const result = await developerStep(run, worktreePath, attempt, failedCheck);
+        if (result.status === "failed") return openGate(run.id, "escalation", "The Developer failed.", result.error);
+        if (result.status === "quota_exhausted") {
+          // Pause and resume arrive with m1-08; until then the human sees it.
+          return openGate(run.id, "escalation", "The Runner's Quota is exhausted.", result.resetsAt?.toISOString());
+        }
 
-      if (result.status === "failed") return openGate(run.id, "escalation", "The Developer failed.", result.error);
-      if (result.status === "quota_exhausted") {
-        // Pause and resume arrive with m1-08; until then the human sees it.
-        return openGate(run.id, "escalation", "The Runner's Quota is exhausted.", result.resetsAt?.toISOString());
+        await commitLeftovers(worktreePath, "chore: commit work left by the Developer");
+
+        const outcomes = await runChecks(project.checks, worktreePath);
+        for (const c of outcomes) {
+          await pool.query(
+            "INSERT INTO check_results (run_id, attempt, command, exit_status, output) VALUES ($1, $2, $3, $4, $5)",
+            [run.id, attempt, c.command, c.exitStatus, c.output],
+          );
+        }
+        const failed = outcomes.find((c) => !passed(c));
+        if (!failed) break;
+        failedCheck = describeFailure(failed);
+        if (attempt === MAX_DEVELOPER_ATTEMPTS) {
+          return openGate(run.id, "escalation", `A Check still fails after ${attempt} attempts.`, failedCheck);
+        }
       }
-
-      await commitLeftovers(worktreePath, "chore: commit work left by the Developer");
 
       const notes = await runNotesInBranch(worktreePath, defaultBranch);
       if (notes.length) {
@@ -298,6 +349,16 @@ export function createForge(deps: ForgeDeps): Forge {
       return rows.map(toProject);
     },
 
+    async setChecks(projectId, checks) {
+      const clean = checks.map((c) => c.trim()).filter(Boolean);
+      const { rows } = await pool.query(`UPDATE projects SET checks = $2 WHERE id = $1 RETURNING ${COLUMNS}`, [
+        projectId,
+        JSON.stringify(clean),
+      ]);
+      if (!rows[0]) throw new Error(`No Project ${projectId}.`);
+      return toProject(rows[0]);
+    },
+
     async startRun({ projectId, task, title, trackerRef }) {
       const { rows: found } = await pool.query(`SELECT ${COLUMNS} FROM projects WHERE id = $1`, [projectId]);
       if (!found[0]) throw new Error(`No Project ${projectId}.`);
@@ -317,8 +378,9 @@ export function createForge(deps: ForgeDeps): Forge {
       const { rows } = await pool.query(`SELECT ${RUN_COLUMNS} FROM runs WHERE id = $1`, [id]);
       if (!rows[0]) throw new Error(`No Run ${id}.`);
       const attempts = await pool.query("SELECT * FROM step_attempts WHERE run_id = $1 ORDER BY id", [id]);
+      const checks = await pool.query("SELECT * FROM check_results WHERE run_id = $1 ORDER BY id", [id]);
       const gates = await pool.query("SELECT * FROM gates WHERE run_id = $1 ORDER BY id", [id]);
-      return { ...toRun(rows[0]), attempts: attempts.rows.map(toAttempt), gates: gates.rows.map(toGate) };
+      return { ...toRun(rows[0]), attempts: attempts.rows.map(toAttempt), checks: checks.rows.map(toCheck), gates: gates.rows.map(toGate) };
     },
 
     async listRuns(filter = {}) {

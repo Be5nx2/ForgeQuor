@@ -1,13 +1,27 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
-import { getJson, postJson, type Project } from "../api";
+import { getJson, postJson, putJson, type Project } from "../api";
 
 const projects = ref<Project[]>([]);
 const path = ref("");
 const error = ref("");
+/** Check commands being edited, one per line, by Project id. */
+const drafts = ref<Record<number, string>>({});
 
 async function load() {
   projects.value = await getJson("/api/projects");
+  drafts.value = Object.fromEntries(projects.value.map((p) => [p.id, p.checks.join("\n")]));
+}
+
+async function saveChecks(p: Project) {
+  error.value = "";
+  try {
+    const saved = await putJson<Project>(`/api/projects/${p.id}/checks`, { checks: drafts.value[p.id]!.split("\n") });
+    p.checks = saved.checks;
+    drafts.value[p.id] = saved.checks.join("\n");
+  } catch (e: any) {
+    error.value = e.message;
+  }
 }
 
 async function register() {
@@ -38,6 +52,15 @@ onMounted(load);
       <strong>{{ p.name }}</strong>
       <span class="muted"> {{ p.remoteOwner }}/{{ p.remoteName }} · {{ p.defaultBranch }}</span>
       <div class="muted">{{ p.localPath }}</div>
+      <form class="stack" @submit.prevent="saveChecks(p)">
+        <textarea
+          v-model="drafts[p.id]"
+          rows="3"
+          placeholder="Checks: one shell command per line, run in order after the Developer (e.g. npm test)"
+          :aria-label="`Checks of ${p.name}`"
+        />
+        <button type="submit">Save Checks</button>
+      </form>
     </li>
   </ul>
 </template>

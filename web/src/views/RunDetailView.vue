@@ -49,6 +49,16 @@ onUnmounted(() => clearInterval(timer));
       </li>
     </ul>
 
+    <h3>Checks</h3>
+    <p v-if="!run.checks.length" class="muted">None ran.</p>
+    <ul>
+      <li v-for="c in run.checks" :key="c.id">
+        <code>{{ c.command }}</code> · attempt {{ c.attempt }} ·
+        <span class="badge">{{ c.exitStatus === 0 ? "passed" : c.exitStatus === null ? "killed" : `exit ${c.exitStatus}` }}</span>
+        <pre v-if="c.output.trim()">{{ c.output }}</pre>
+      </li>
+    </ul>
+
     <h3>Steps</h3>
     <p v-if="!run.attempts.length" class="muted">None yet.</p>
     <ul>

@@ -25,6 +25,18 @@ export async function createServer(deps: {
     }
   });
 
+  app.put<{ Params: { id: string }; Body: { checks?: unknown } }>("/api/projects/:id/checks", async (req, reply) => {
+    const checks = req.body?.checks;
+    if (!Array.isArray(checks) || checks.some((c) => typeof c !== "string")) {
+      return reply.code(400).send({ error: "checks must be a list of commands." });
+    }
+    try {
+      return await deps.forge.setChecks(Number(req.params.id), checks);
+    } catch (e: any) {
+      return reply.code(404).send({ error: e.message });
+    }
+  });
+
   app.get<{ Querystring: { projectId?: string; state?: RunState } }>("/api/runs", async (req) =>
     deps.forge.listRuns({
       projectId: req.query.projectId ? Number(req.query.projectId) : undefined,

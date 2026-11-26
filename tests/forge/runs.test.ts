@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -259,6 +259,94 @@ describe("the pull request", () => {
 
     expect(run.gates).toMatchObject([{ kind: "escalation", evidence: expect.stringContaining("not authenticated") }]);
     expect(run.prUrl).toBeNull();
+  });
+});
+
+describe("Checks", () => {
+  it("a Project with no Checks goes straight to the pull request", async () => {
+    const { project } = await projectWithRemote();
+
+    const run = await runToEnd(project);
+
+    expect(run.checks).toEqual([]);
+    expect(run.gates).toMatchObject([{ kind: "final" }]);
+  });
+
+  it("runs the Checks in order in the worktree, and records each command's status and output", async () => {
+    const { project } = await projectWithRemote();
+    await forge.setChecks(project.id, ["pwd", "echo built; echo warn >&2"]);
+
+    const run = await runToEnd(project);
+
+    expect(run.gates).toMatchObject([{ kind: "final" }]);
+    expect(run.checks).toMatchObject([
+      { attempt: 1, command: "pwd", exitStatus: 0 },
+      { attempt: 1, command: "echo built; echo warn >&2", exitStatus: 0 },
+    ]);
+    expect(realpathSync(run.checks[0]!.output.trim())).toBe(realpathSync(run.worktreePath!));
+    expect(run.checks[1]!.output).toContain("built");
+    expect(run.checks[1]!.output).toContain("warn");
+    expect(codeHost.pullRequests).toHaveLength(1);
+  });
+
+  it("stops at the first failing Check", async () => {
+    const { project } = await projectWithRemote();
+    await forge.setChecks(project.id, ["exit 1", "touch second-ran"]);
+
+    const run = await runToEnd(project);
+
+    expect(run.checks.map((c) => c.command)).toEqual(["exit 1", "exit 1", "exit 1"]);
+    expect(existsSync(join(run.worktreePath!, "second-ran"))).toBe(false);
+  });
+
+  it("sends a failure's output back to the Developer, who gets a second try", async () => {
+    const { project } = await projectWithRemote();
+    await forge.setChecks(project.id, ["test -f fixed.txt || { echo missing fixed.txt; exit 2; }"]);
+    runner.use((step) => {
+      if (runner.steps.length === 2) writeFileSync(join(step.cwd, "fixed.txt"), "ok\n");
+    });
+
+    const run = await runToEnd(project);
+
+    expect(runner.steps).toHaveLength(2);
+    expect(runner.steps[1]!.prompt).toContain("missing fixed.txt");
+    expect(run.attempts).toMatchObject([
+      { step: "developer", attempt: 1, status: "succeeded" },
+      { step: "developer", attempt: 2, status: "succeeded" },
+    ]);
+    expect(run.checks).toMatchObject([
+      { attempt: 1, exitStatus: 2, output: expect.stringContaining("missing fixed.txt") },
+      { attempt: 2, exitStatus: 0 },
+    ]);
+    expect(run.gates).toMatchObject([{ kind: "final" }]);
+    expect(codeHost.pullRequests).toHaveLength(1);
+  });
+
+  it("gives up after 2 extra attempts: an Escalation names the failing Check and its output, and nothing is pushed", async () => {
+    const { project, remote } = await projectWithRemote();
+    await forge.setChecks(project.id, ["true", "echo boom; exit 3"]);
+
+    const run = await runToEnd(project);
+
+    expect(runner.steps).toHaveLength(3);
+    expect(run.state).toBe("waiting");
+    expect(run.gates).toMatchObject([
+      { kind: "escalation", actions: ["abandon"], evidence: expect.stringContaining("echo boom; exit 3") },
+    ]);
+    expect(run.gates[0]!.evidence).toContain("boom");
+    expect(run.checks.filter((c) => c.exitStatus !== 0)).toHaveLength(3);
+    expect(codeHost.pullRequests).toHaveLength(0);
+    expect(git(remote.bare, "branch", "--list", run.branch!)).toBe("");
+  });
+
+  it("can be edited, and an empty list clears them", async () => {
+    const { project } = await projectWithRemote();
+
+    const edited = await forge.setChecks(project.id, ["npm test", "  ", "npm run lint"]);
+    expect(edited.checks).toEqual(["npm test", "npm run lint"]);
+    expect((await forge.listProjects()).find((p) => p.id === project.id)?.checks).toEqual(["npm test", "npm run lint"]);
+
+    expect((await forge.setChecks(project.id, [])).checks).toEqual([]);
   });
 });
 

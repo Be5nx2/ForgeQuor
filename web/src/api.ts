@@ -5,6 +5,14 @@ export interface Project {
   remoteOwner: string;
   remoteName: string;
   defaultBranch: string;
+  checks: string[];
+}
+export interface CheckResult {
+  id: number;
+  attempt: number;
+  command: string;
+  exitStatus: number | null;
+  output: string;
 }
 export interface Run {
   id: number;
@@ -50,11 +58,19 @@ export function decideGate(gateId: number, action: GateAction): Promise<RunDetai
 }
 export interface RunDetail extends Run {
   attempts: StepAttempt[];
+  checks: CheckResult[];
   gates: Gate[];
 }
 export interface OpenGate extends Gate {
   runTitle: string;
   projectName: string;
+}
+
+export async function putJson<T>(url: string, body: unknown): Promise<T> {
+  const res = await fetch(url, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? res.statusText);
+  return data;
 }
 
 export async function getJson<T>(url: string): Promise<T> {
