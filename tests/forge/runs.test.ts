@@ -978,6 +978,26 @@ describe("after Forgequor restarts", () => {
     expect((await restarted.getRun(approved.id)).state).toBe("merged");
   });
 
+  it("does not open a second pull request or repeat the Review Brief for a Run that got that far", async () => {
+    const { project } = await projectWithRemote();
+    const id = await crashedRun(project, "running");
+    await pool.query("INSERT INTO step_attempts (run_id, step, attempt, runner, status) VALUES ($1, 'developer', 1, 'claude', 'succeeded')", [id]);
+    await pool.query("UPDATE runs SET pr_number = 1, pr_url = 'https://github.com/acme/game/pull/1', brief_posted = true WHERE id = $1", [id]);
+    codeHost.pullRequests.push({
+      owner: "acme", repo: "game", base: "main", head: "x", title: "Crashed", body: "", number: 1, url: "https://github.com/acme/game/pull/1",
+      comments: ["The Review Brief."], state: "open",
+    });
+    const restarted = forgeWith({});
+
+    await restarted.recoverAfterRestart();
+    await restarted.whenIdle();
+
+    expect(codeHost.pullRequests).toHaveLength(1);
+    expect(codeHost.pullRequests[0]!.comments).toEqual(["The Review Brief."]);
+    expect(runner.steps).toHaveLength(0);
+    expect((await restarted.getRun(id)).gates).toMatchObject([{ kind: "final" }]);
+  });
+
   it("leaves Waiting and Paused Runs as they are", async () => {
     const { project } = await projectWithRemote();
     const waiting = await runToEnd(project);

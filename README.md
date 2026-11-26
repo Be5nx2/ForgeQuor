@@ -67,6 +67,7 @@ All settings are optional environment variables. Set them in the shell that runs
 | `FORGEQUOR_WORKTREES` | `~/.forgequor/worktrees` | Where Run worktrees are created |
 | `FORGEQUOR_DEVELOPER_MODEL` | Claude Code's default | Model used by the Developer Agent |
 | `FORGEQUOR_STEP_TIMEOUT_MINUTES` | `60` | A Developer Step running longer is killed and escalated |
+| `FORGEQUOR_CHECK_TIMEOUT_MINUTES` | `10` | A Check command running longer is killed and counts as failed |
 
 ### Tests
 

@@ -34,13 +34,13 @@ console.log(applied.length ? `Applied migrations: ${applied.join(", ")}` : "Data
 const tools = await checkTools();
 for (const t of tools) console.log(`${t.status === "ok" ? "✓" : "✗"} ${t.tool}: ${t.detail}`);
 
-/** FORGEQUOR_STEP_TIMEOUT_MINUTES in milliseconds; the default applies when unset, and a bad value is refused. */
-function stepTimeoutMs(): number | undefined {
-  const raw = process.env.FORGEQUOR_STEP_TIMEOUT_MINUTES;
+/** A setting in minutes as milliseconds; unset leaves the default, and a bad value is refused. */
+function minutesAsMs(name: string): number | undefined {
+  const raw = process.env[name];
   if (!raw) return undefined;
   const minutes = Number(raw);
   if (!Number.isFinite(minutes) || minutes <= 0) {
-    console.error(`FORGEQUOR_STEP_TIMEOUT_MINUTES must be a positive number of minutes, got "${raw}".`);
+    console.error(`${name} must be a positive number of minutes, got "${raw}".`);
     process.exit(1);
   }
   return minutes * 60_000;
@@ -52,7 +52,8 @@ const forge = createForge({
   codeHost: createGhCodeHost(),
   worktreesRoot: process.env.FORGEQUOR_WORKTREES ?? join(homedir(), ".forgequor", "worktrees"),
   developerModel: process.env.FORGEQUOR_DEVELOPER_MODEL,
-  stepTimeoutMs: stepTimeoutMs(),
+  stepTimeoutMs: minutesAsMs("FORGEQUOR_STEP_TIMEOUT_MINUTES"),
+  checkTimeoutMs: minutesAsMs("FORGEQUOR_CHECK_TIMEOUT_MINUTES"),
 });
 const POLL_MS = Number(process.env.FORGEQUOR_PR_POLL_SECONDS ?? 60) * 1000;
 // Runs that were Running restart their Step, Queued Runs start, Approved Runs are followed again.

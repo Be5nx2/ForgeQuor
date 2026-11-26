@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type pg from "pg";
 import type { Runner, StepResult } from "../runner/runner.js";
+import { resumePoint } from "./resume.js";
 import { describeDuration } from "../duration.js";
 import { DEFAULT_CHECK_TIMEOUT_MS, describeFailure, passed, runChecks } from "./checks.js";
 import { DEVELOPER_INSTRUCTIONS, developerPrompt } from "./developer.js";
@@ -462,27 +463,6 @@ export function createForge(deps: ForgeDeps): Forge {
     return { result, timedOut };
   }
 
-  /** Where a (re)started Run picks up, worked out from what is already recorded. */
-  async function resumePoint(runId: number, project: Project) {
-    const { rows: done } = await pool.query(
-      "SELECT max(attempt) AS attempt FROM step_attempts WHERE run_id = $1 AND step = 'developer' AND status = 'succeeded'",
-      [runId],
-    );
-    const worked: number | null = done[0].attempt;
-    if (!worked) return { attempt: 1, failedCheck: undefined, skipDeveloper: false, checksDone: false };
-
-    const { rows: checks } = await pool.query("SELECT * FROM check_results WHERE run_id = $1 AND attempt = $2 ORDER BY id", [runId, worked]);
-    const failed = checks.find((c) => c.exit_status !== 0);
-    if (failed) {
-      const failedCheck = describeFailure({ command: failed.command, exitStatus: failed.exit_status, output: failed.output });
-      return { attempt: worked + 1, failedCheck, skipDeveloper: false, checksDone: false };
-    }
-    if (checks.length === project.checks.length) return { attempt: worked, failedCheck: undefined, skipDeveloper: true, checksDone: true };
-    // The Checks were interrupted part way: run them all again on the Developer's work.
-    await pool.query("DELETE FROM check_results WHERE run_id = $1 AND attempt = $2", [runId, worked]);
-    return { attempt: worked, failedCheck: undefined, skipDeveloper: true, checksDone: false };
-  }
-
   /** The Runner's Quota ran out: the Run waits for the reset, keeping its slot. */
   async function pause(runId: number, resetsAt: Date | null) {
     const resumeAt = resetsAt ?? new Date(now().getTime() + QUOTA_RETRY_MS);
@@ -519,7 +499,7 @@ export function createForge(deps: ForgeDeps): Forge {
       }
       await pool.query("UPDATE runs SET branch = $2, worktree_path = $3 WHERE id = $1", [run.id, branch, worktreePath]);
 
-      let { attempt, failedCheck, skipDeveloper, checksDone } = await resumePoint(run.id, project);
+      let { attempt, failedCheck, skipDeveloper, checksDone } = await resumePoint(pool, run.id, project.checks.length);
       while (!checksDone) {
         if (attempt > MAX_DEVELOPER_ATTEMPTS) {
           return openGate(run.id, "escalation", `A Check still fails after ${MAX_DEVELOPER_ATTEMPTS} attempts.`, failedCheck);
@@ -578,12 +558,16 @@ export function createForge(deps: ForgeDeps): Forge {
         await deps.codeHost.closePullRequest({ owner: project.remoteOwner, repo: project.remoteName, number: pr.number }).catch(() => {});
         return;
       }
-      await deps.codeHost.comment({
-        owner: project.remoteOwner,
-        repo: project.remoteName,
-        number: pr.number,
-        body: readReviewBrief(worktreePath) ?? "The Developer wrote no Review Brief for this pull request.",
-      });
+      const { rows: posted } = await pool.query("SELECT brief_posted FROM runs WHERE id = $1", [run.id]);
+      if (!posted[0].brief_posted) {
+        await deps.codeHost.comment({
+          owner: project.remoteOwner,
+          repo: project.remoteName,
+          number: pr.number,
+          body: readReviewBrief(worktreePath) ?? "The Developer wrote no Review Brief for this pull request.",
+        });
+        await pool.query("UPDATE runs SET brief_posted = true WHERE id = $1", [run.id]);
+      }
       await openGate(run.id, "final", "The Developer finished.");
     } catch (e: any) {
       // If even the Escalation cannot be recorded (database down), the Run stays Running and restart recovery picks it up.
