@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { killAllProcessGroups } from "../../src/process-group.js";
 import { createClaudeRunner } from "../../src/runner/claude.js";
 import type { RunnerEvent, StepRequest } from "../../src/runner/runner.js";
-import { createFakeClaude, type FakeClaudeScript } from "../harness/fake-claude.js";
+import { createFakeCli, type FakeCliScript } from "../harness/fake-cli.js";
 
 const line = (o: unknown) => JSON.stringify(o);
 const init = line({ type: "system", subtype: "init", session_id: "s1" });
@@ -26,8 +26,8 @@ function step(): StepRequest {
   };
 }
 
-async function runStep(script: FakeClaudeScript) {
-  const fake = createFakeClaude(script);
+async function runStep(script: FakeCliScript) {
+  const fake = createFakeCli(script);
   const runner = createClaudeRunner({ env: fake.env });
   const events: RunnerEvent[] = [];
   const request = step();
@@ -150,7 +150,7 @@ describe("Claude Runner", () => {
   });
 
   it("survives a progress listener that throws", async () => {
-    const fake = createFakeClaude({ stdout: [init, resultOk] });
+    const fake = createFakeCli({ stdout: [init, resultOk] });
     const result = await createClaudeRunner({ env: fake.env }).run(step(), () => {
       throw new Error("listener bug");
     });
@@ -158,7 +158,7 @@ describe("Claude Runner", () => {
   });
 
   it("says so when the working directory does not exist, not that claude is missing", async () => {
-    const fake = createFakeClaude({ stdout: [resultOk] });
+    const fake = createFakeCli({ stdout: [resultOk] });
     const result = await createClaudeRunner({ env: fake.env }).run({ ...step(), cwd: "/nonexistent/worktree" }, () => {});
     expect(result).toMatchObject({ status: "failed", error: expect.stringContaining("working directory") });
   });
@@ -182,7 +182,7 @@ describe("Claude Runner", () => {
     };
 
     it("kills claude and everything it started, then reports a failure", async () => {
-      const fake = createFakeClaude({ stdout: [], hang: true });
+      const fake = createFakeCli({ stdout: [], hang: true });
       const controller = new AbortController();
       const running = createClaudeRunner({ env: fake.env }).run({ ...step(), signal: controller.signal }, () => {});
       const grandchild = await waitFor(() => fake.grandchildPid());
@@ -196,7 +196,7 @@ describe("Claude Runner", () => {
     });
 
     it("is ended with Forgequor: a detached claude does not get Forgequor's Ctrl-C", async () => {
-      const fake = createFakeClaude({ stdout: [], hang: true });
+      const fake = createFakeCli({ stdout: [], hang: true });
       const running = createClaudeRunner({ env: fake.env }).run(step(), () => {});
       const grandchild = await waitFor(() => fake.grandchildPid());
 
@@ -207,7 +207,7 @@ describe("Claude Runner", () => {
     });
 
     it("does not start claude at all when already cancelled", async () => {
-      const fake = createFakeClaude({ stdout: [], hang: true });
+      const fake = createFakeCli({ stdout: [], hang: true });
       const controller = new AbortController();
       controller.abort();
 

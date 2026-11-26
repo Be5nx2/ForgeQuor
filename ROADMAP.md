@@ -30,7 +30,7 @@ Codex **Runner**, **Artist**, an `assets` **Workflow** (Artist → asset **Gate*
     - new commits are pushed to the same pull request, and a new Review Brief comment is posted;
     - the final Gate opens again, with no limit on Iterations;
     - the Run detail lists the Iterations.
-- [ ] `m2-03` **Codex Runner adapter**: a Step can run through Codex headless, sandboxed, behind the Runner seam (ADR 0006).
+- [x] `m2-03` **Codex Runner adapter**: a Step can run through Codex headless, sandboxed, behind the Runner seam (ADR 0006).
   - Spec: `docs/specs/m2-assets.md`
   - Blocked by: none
   - Acceptance:

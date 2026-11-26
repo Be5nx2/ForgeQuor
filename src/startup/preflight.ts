@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 const run = promisify(execFile);
 
 export interface ToolReport {
-  tool: "git" | "gh" | "claude";
+  tool: "git" | "gh" | "claude" | "codex";
   status: "ok" | "missing" | "unauthenticated";
   detail: string;
 }
@@ -18,7 +18,7 @@ async function probe(cmd: string, args: string[]): Promise<{ ok: boolean; missin
   }
 }
 
-/** Checks that `git`, `gh` and `claude` are installed and (for gh and claude) signed in. */
+/** Checks that `git`, `gh`, `claude` and `codex` are installed and (for the last three) signed in. */
 export async function checkTools(): Promise<ToolReport[]> {
   const reports: ToolReport[] = [];
 
@@ -53,6 +53,16 @@ export async function checkTools(): Promise<ToolReport[]> {
       : claude.missing
         ? { tool: "claude", status: "missing", detail: "claude is not installed." }
         : { tool: "claude", status: "unauthenticated", detail: "claude is not signed in: run `claude` then /login." },
+  );
+
+  // `codex login status` exits 0 when signed in.
+  const codex = await probe("codex", ["login", "status"]);
+  reports.push(
+    codex.ok
+      ? { tool: "codex", status: "ok", detail: "Codex authenticated." }
+      : codex.missing
+        ? { tool: "codex", status: "missing", detail: "codex is not installed: npm i -g @openai/codex (needed for assets Runs)." }
+        : { tool: "codex", status: "unauthenticated", detail: "codex is not signed in: run `codex login`." },
   );
 
   return reports;

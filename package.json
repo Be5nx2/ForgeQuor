@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit && vue-tsc --noEmit -p web/tsconfig.json",
     "test": "vitest run",
     "smoke:gh": "FORGEQUOR_SMOKE_GH=1 vitest run tests/codehost/gh.smoke.test.ts",
+    "smoke:codex": "FORGEQUOR_SMOKE_CODEX=1 vitest run tests/runner/codex.smoke.test.ts",
     "smoke:claude": "FORGEQUOR_SMOKE_CLAUDE=1 vitest run tests/runner/claude.smoke.test.ts"
   },
   "dependencies": {

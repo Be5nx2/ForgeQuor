@@ -13,6 +13,7 @@ Multi-Agent AI Game Development Orchestrator: a Node.js + Vue app with a Postgre
 - `git`.
 - The GitHub CLI, authenticated: `gh auth login`.
 - Claude Code, logged in with your subscription: run `claude` once.
+- Codex CLI (only for the `assets` Workflow, from M2), logged in with your ChatGPT subscription: `codex login`. `CODEX_HOME` is honoured.
 
 ### Install
 
@@ -35,7 +36,7 @@ This one command does five things, in order:
 1. Starts PostgreSQL in Docker on port 5433.
 2. Builds the UI.
 3. Applies the database migrations.
-4. Checks that `git`, `gh` and `claude` are installed and authenticated. A missing tool shows as a ✗ in the console and as a banner in the UI.
+4. Checks that `git`, `gh`, `claude` and `codex` are installed and authenticated. A missing tool shows as a ✗ in the console and as a banner in the UI.
 5. Serves the app at <http://127.0.0.1:4170>.
 
 Stop it with Ctrl+C. PostgreSQL keeps running in the background. To stop it:
@@ -92,6 +93,12 @@ The tests use the Docker PostgreSQL, so `npm test` starts it if needed. Each tes
 
 ```bash
 npm run smoke:claude
+```
+
+The Codex Runner has its own opt-in smoke test, which generates one real 16x16 sprite (one image of your Codex Quota):
+
+```bash
+npm run smoke:codex
 ```
 
 Another opt-in smoke test opens, comments on and closes a real pull request on a throwaway GitHub repository you own, with a `main` branch (`gh` must be signed in). Name that repository once in your `.env` (see `.env.example`):
