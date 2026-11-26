@@ -101,7 +101,7 @@ One **Project**, one **Run** going Developer (Claude) → **Checks** → pull re
   - Acceptance:
     - the Run detail shows the running Step's events live through server-sent events;
     - the Run's state updates without a page reload.
-- [ ] `m1-11` **Dogfooding readiness**: Forgequor can run its own roadmap items as Runs, starting with M2.
+- [x] `m1-11` **Dogfooding readiness**: Forgequor can run its own roadmap items as Runs, starting with M2.
   - Spec: `docs/specs/m1-walking-skeleton.md`
   - Blocked by: `m1-05`
   - Acceptance:
