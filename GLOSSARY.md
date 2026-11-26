@@ -29,7 +29,7 @@ A **Gate** a **Run** opens on its own when it cannot go on (iteration limit reac
 _Avoid_: Error, alert, failure
 
 **Feedback**:
-The human's written reason for rejecting a **Gate**, handed to the **Step** the **Run** goes back to.
+The human's written reason for rejecting a **Gate**, or one **Asset** at an **Asset Gate**, handed to the **Step** the **Run** goes back to.
 _Avoid_: Comment, review notes
 
 **Deliverable**:
@@ -109,6 +109,22 @@ _Avoid_: Skill set, bundle, plugin
 **Artist**:
 The **Agent** that produces game art assets from prompts settled during spec grilling, following the **Project**'s **Art Direction**.
 _Avoid_: Graphiste, designer, illustrator
+
+**Asset**:
+One piece of game art an **Artist** delivers as a **Deliverable**: a sprite, a tile or an **Animation Strip**, in pixel art at the size it was asked for.
+_Avoid_: Image, picture, graphic, resource
+
+**Animation Strip**:
+An **Asset** holding the frames of one animation side by side in a single image.
+_Avoid_: Sprite sheet, spritesheet, animation file
+
+**Asset Request**:
+The human's description of one **Asset** to produce (name, what it shows, its size); the **Artist** turns it into a prompt.
+_Avoid_: Prompt, asset spec, brief
+
+**Asset Gate**:
+The **Gate** where the human approves each **Asset** of a batch, or rejects it with its own **Feedback** so the **Artist** redoes only the rejected ones.
+_Avoid_: Art review, gallery gate
 
 **Art Direction**:
 The document inside a game **Project** that fixes its visual style (palette, resolution, sprite sizes) for the **Artist**.
