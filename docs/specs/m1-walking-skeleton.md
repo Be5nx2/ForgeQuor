@@ -156,7 +156,7 @@ After approval the human merges on GitHub. Forgequor never merges; it notices th
 - Before pushing, Workspace fails the Run with an Escalation if any commit on the branch adds a path under the Run Notes folder.
 - **The Developer:**
   - receives the task, plus the previous Check output on a retry;
-  - is told to commit with Conventional Commits;
+  - is told to commit with Conventional Commits, with a body of 5 lines at most;
   - is told to write the Review Brief to a known file in the Run Notes.
 - **A missing Review Brief:** the Run still proceeds, and the comment says that no brief was written.
 - **Branch name:** a Forgequor prefix plus the Run's short id and a slug of its title.

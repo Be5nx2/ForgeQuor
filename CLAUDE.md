@@ -41,7 +41,7 @@ Typical flow: `/grill-with-docs` → `/to-spec` → `/to-tickets` → `/implemen
 
 ## Git workflow
 
-- **Commits**: [Conventional Commits](https://www.conventionalcommits.org). `type(scope): subject`, imperative, English, no trailing period, max 72 chars. Types: `feat`, `fix`, `docs`, `chore`, `refactor`, `test`, `perf`, `ci`. Breaking change: `!` after the type or a `BREAKING CHANGE:` footer. Body explains the why.
+- **Commits**: [Conventional Commits](https://www.conventionalcommits.org). `type(scope): subject`, imperative, English, no trailing period, max 72 chars. Types: `feat`, `fix`, `docs`, `chore`, `refactor`, `test`, `perf`, `ci`. Breaking change: `!` after the type or a `BREAKING CHANGE:` footer. Body explains the why, in 5 lines at most (trailers not counted).
 - **Branches**: `main` stays releasable. Work on `feat/<slug>`, `fix/<slug>`, `chore/<slug>`, `docs/<slug>`. `<slug>` matches the spec or roadmap ID when one exists.
 - **Granularity**: one roadmap item = one branch = one PR. Small, focused commits; each leaves tests green.
 - **Roadmap and changelog**: when an item is resolved, tick it in `ROADMAP.md` and add a line under `Unreleased` in `CHANGELOG.md` in the same PR.
