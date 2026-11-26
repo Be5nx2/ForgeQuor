@@ -10,7 +10,83 @@ Milestones are specified one at a time with `/to-spec`, then split into items wi
 
 One **Project**, one **Run** going Developer (Claude) → **Checks** → pull request with **Review Brief** → final **Gate** in Forgequor. Worktree, branch and PR per Run (ADR 0001), Runners as local subprocesses (ADR 0002), PostgreSQL through Docker Compose (ADR 0003), minimal Vue UI.
 
-- Spec: `docs/specs/m1-walking-skeleton.md`. Items to come from `/to-tickets`.
+- Spec: `docs/specs/m1-walking-skeleton.md`.
+
+- [ ] `m1-01` **Scaffold and Project registration**: one command brings Forgequor up, and the human registers a Project from the UI.
+  - Spec: `docs/specs/m1-walking-skeleton.md`
+  - Blocked by: none
+  - Acceptance:
+    - one start command brings up PostgreSQL (Docker Compose), applies migrations and serves API and UI;
+    - startup reports a missing or unauthenticated `git`, `gh` or `claude`;
+    - registering a local repo reads its GitHub remote and default branch;
+    - registering a non-git folder, or one without a GitHub remote, is refused with a clear message;
+    - Projects are listed in the UI;
+    - the Forge core test harness runs against real PostgreSQL and temporary git repos.
+- [ ] `m1-02` **Claude Runner adapter**: a Step can be run through Claude Code headless behind the Runner seam.
+  - Spec: `docs/specs/m1-walking-skeleton.md`
+  - Blocked by: none
+  - Acceptance:
+    - runs `claude` headless in a given working directory with a fresh session per Step;
+    - streams progress events, then returns succeeded, failed with an error, or Quota exhausted with its reset time;
+    - the contract suite passes against a fake `claude` replaying success, error, Quota exhaustion, unreadable output and crash;
+    - an opt-in smoke test, off by default, runs the real `claude` on a trivial task.
+- [ ] `m1-03` **First Run to the final Gate**: the human starts a Run, the Developer works in its own worktree, and the Run waits at the final Gate.
+  - Spec: `docs/specs/m1-walking-skeleton.md`
+  - Blocked by: `m1-01`, `m1-02`
+  - Acceptance:
+    - a Run starts from the UI (task, title, optional tracker reference);
+    - each Run gets its own worktree and branch from the freshly fetched default branch;
+    - the Developer works there through the Claude Runner and commits, and Forgequor commits whatever is left;
+    - the Run Notes folder is excluded from git without changing the Project;
+    - the Run reaches a final Gate offering approve or abandon;
+    - the Runs list, the Run detail (Steps, attempts, outcomes) and the "Waiting for you" screens work.
+- [ ] `m1-04` **Pull request and Review Brief**: an approved-ready Run has a pull request with its Review Brief on GitHub.
+  - Spec: `docs/specs/m1-walking-skeleton.md`
+  - Blocked by: `m1-03`
+  - Acceptance:
+    - the push is refused, and an Escalation opened, if a commit adds Run Notes;
+    - the branch is pushed and a ready pull request opened through `gh`, with the task and a Run reference;
+    - the Review Brief is posted as a comment, or a note says none was written;
+    - the final Gate comes after the pull request, and the PR link shows in the UI;
+    - an opt-in smoke test opens and closes a real PR on a sandbox repository.
+- [ ] `m1-05` **Checks with retry and Escalation**: broken work never reaches a pull request.
+  - Spec: `docs/specs/m1-walking-skeleton.md`
+  - Blocked by: `m1-03`
+  - Acceptance:
+    - a Project's ordered Check commands are editable in the UI;
+    - Checks run in the worktree after the Developer and stop at the first failure;
+    - a failure sends its output back to the Developer, for at most 2 extra attempts;
+    - when the Checks still fail, an Escalation offering abandon only opens with the failing Check and its output;
+    - every attempt's commands, exit statuses and outputs show in the Run detail;
+    - a Project with no Checks skips them.
+- [ ] `m1-06` **Abandon anytime, merge and close detection**: Run states stay true to what happens on GitHub.
+  - Spec: `docs/specs/m1-walking-skeleton.md`
+  - Blocked by: `m1-04`
+  - Acceptance:
+    - a Run can be abandoned in any state before Merged;
+    - abandoning closes the pull request if there is one, and keeps the branch and the worktree;
+    - polling moves Approved Runs to Merged or Closed;
+    - Merged, Closed and Abandoned Runs free their Project slot.
+- [ ] `m1-07` **Concurrency limit and queue**: the human can line up Runs without overloading a Project.
+  - Spec: `docs/specs/m1-walking-skeleton.md`
+  - Blocked by: `m1-06`
+  - Acceptance:
+    - each Project has a max concurrent Runs setting (default 2), editable in the UI;
+    - a Run over the limit is Queued;
+    - Queued Runs start automatically, in creation order, when a slot frees up.
+- [ ] `m1-08` **Quota pause, restart recovery, Runner failures**: no Run fails or gets stuck for a temporary reason.
+  - Spec: `docs/specs/m1-walking-skeleton.md`
+  - Blocked by: `m1-05`
+  - Acceptance:
+    - when the Quota is exhausted, the Run goes Paused with its reset time and restarts its current Step after the reset;
+    - on Forgequor startup, Running Runs restart their current Step and Approved Runs resume PR polling;
+    - a Runner failure opens an Escalation with the error.
+- [ ] `m1-09` **Live Step progress**: the human watches the Agent work in real time.
+  - Spec: `docs/specs/m1-walking-skeleton.md`
+  - Blocked by: `m1-03`
+  - Acceptance:
+    - the Run detail shows the running Step's events live through server-sent events;
+    - the Run's state updates without a page reload.
 
 ## Next
 
