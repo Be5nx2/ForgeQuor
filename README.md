@@ -52,7 +52,7 @@ docker compose down
 
 To inspect what the Developer did, open the Run's worktree. The path is shown in the Run detail. Its `.forgequor/` folder holds the Run Notes, including the Review Brief. Git ignores that folder.
 
-> M1 is in progress. Runs do not push branches or open pull requests yet (`m1-04`), Checks do not run yet (`m1-05`), and progress is not shown live (`m1-09`): refresh the Run page to see it. See [ROADMAP.md](ROADMAP.md).
+> M1 is in progress. Checks do not run yet (`m1-05`), and progress is not shown live (`m1-09`): refresh the Run page to see it. See [ROADMAP.md](ROADMAP.md).
 
 > Agents run with Claude Code's permission prompts bypassed, with your rights on this machine ([ADR 0005](docs/adr/0005-agents-bypass-runner-permissions.md)). Tools that wait for a human (asking a question, plan mode) are disabled, so an Agent never stalls on one. Only register Projects you trust.
 
@@ -81,6 +81,12 @@ The tests use the Docker PostgreSQL, so `npm test` starts it if needed. Each tes
 
 ```bash
 FORGEQUOR_SMOKE_CLAUDE=1 npx vitest run tests/runner/claude.smoke.test.ts
+```
+
+Another opt-in smoke test opens, comments on and closes a real pull request on a sandbox repository you own (`gh` must be signed in):
+
+```bash
+FORGEQUOR_SMOKE_REPO=owner/name npx vitest run tests/codehost/gh.smoke.test.ts
 ```
 
 ### Link the agent skills (after every clone and every skill change)

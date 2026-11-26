@@ -2,12 +2,16 @@ import { join } from "node:path";
 import type pg from "pg";
 import type { Runner, StepResult } from "../runner/runner.js";
 import { DEVELOPER_INSTRUCTIONS, developerPrompt } from "./developer.js";
+import type { CodeHost } from "../codehost/codehost.js";
 import {
   commitLeftovers,
   createRunWorktree,
   inspectRepository,
   RegistrationError,
+  pushBranch,
+  readReviewBrief,
   refreshDefaultBranch,
+  runNotesInBranch,
   slugify,
 } from "./workspace.js";
 
@@ -29,6 +33,8 @@ export interface Run {
   state: RunState;
   branch: string | null;
   worktreePath: string | null;
+  prNumber: number | null;
+  prUrl: string | null;
   createdAt: Date;
 }
 
@@ -103,6 +109,7 @@ export interface Forge {
 export interface ForgeDeps {
   pool: pg.Pool;
   runner: Runner;
+  codeHost: CodeHost;
   /** Folder under which each Run's worktree is created, outside the Projects' checkouts. */
   worktreesRoot: string;
   /** Model the Developer's Runner is set to; the Runner's default when omitted. */
@@ -134,6 +141,8 @@ function toRun(r: Record<string, any>): Run {
     state: r.state,
     branch: r.branch,
     worktreePath: r.worktree_path,
+    prNumber: r.pr_number,
+    prUrl: r.pr_url,
     createdAt: r.created_at,
   };
 }
@@ -169,7 +178,7 @@ function toGate(r: Record<string, any>): Gate {
   };
 }
 
-const RUN_COLUMNS = "id, project_id, title, task, tracker_ref, state, branch, worktree_path, created_at";
+const RUN_COLUMNS = "id, project_id, title, task, tracker_ref, state, branch, worktree_path, pr_number, pr_url, created_at";
 
 function deriveTitle(task: string): string {
   const first = task.trim().split("\n")[0]!.trim();
@@ -238,6 +247,27 @@ export function createForge(deps: ForgeDeps): Forge {
       }
 
       await commitLeftovers(worktreePath, "chore: commit work left by the Developer");
+
+      const notes = await runNotesInBranch(worktreePath, defaultBranch);
+      if (notes.length) {
+        return openGate(run.id, "escalation", "A commit adds Run Notes, so the branch was not pushed.", notes.join("\n"));
+      }
+      await pushBranch(worktreePath, branch);
+      const pr = await deps.codeHost.openPullRequest({
+        owner: project.remoteOwner,
+        repo: project.remoteName,
+        base: defaultBranch,
+        head: branch,
+        title: run.title,
+        body: `${run.task}\n\n---\nForgequor Run #${run.id}`,
+      });
+      await pool.query("UPDATE runs SET pr_number = $2, pr_url = $3 WHERE id = $1", [run.id, pr.number, pr.url]);
+      await deps.codeHost.comment({
+        owner: project.remoteOwner,
+        repo: project.remoteName,
+        number: pr.number,
+        body: readReviewBrief(worktreePath) ?? "The Developer wrote no Review Brief for this pull request.",
+      });
       await openGate(run.id, "final", "The Developer finished.");
     } catch (e: any) {
       // If even the Escalation cannot be recorded (database down), the Run stays Running and restart recovery (m1-08) picks it up.

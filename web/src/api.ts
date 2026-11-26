@@ -15,6 +15,8 @@ export interface Run {
   state: string;
   branch: string | null;
   worktreePath: string | null;
+  prNumber: number | null;
+  prUrl: string | null;
   createdAt: string;
 }
 export interface StepAttempt {

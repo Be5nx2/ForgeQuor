@@ -50,7 +50,7 @@ One **Project**, one **Run** going Developer (Claude) → **Checks** → pull re
     - Projects with the same name can be told apart wherever one is picked (Run form, Runs filter), for example by showing their local path;
     - the Developer's headless session cannot use tools that wait for a human (such as asking a question), so it never stalls on one;
     - the README matches the result.
-- [ ] `m1-04` **Pull request and Review Brief**: an approved-ready Run has a pull request with its Review Brief on GitHub.
+- [x] `m1-04` **Pull request and Review Brief**: an approved-ready Run has a pull request with its Review Brief on GitHub.
   - Spec: `docs/specs/m1-walking-skeleton.md`
   - Blocked by: `m1-03`
   - Acceptance:

@@ -120,3 +120,24 @@ export async function commitLeftovers(worktreePath: string, message: string): Pr
   await gitOrThrow(worktreePath, "commit", "-q", "-m", message);
   return true;
 }
+
+/** Run Notes paths that some commit of the branch (since `defaultBranch`) adds. Empty when the branch is clean. */
+export async function runNotesInBranch(worktreePath: string, defaultBranch: string): Promise<string[]> {
+  const out = await gitOrThrow(
+    worktreePath, "log", "--name-only", "--diff-filter=A", "--format=", `origin/${defaultBranch}..HEAD`, "--", RUN_NOTES_DIR,
+  );
+  return [...new Set(out.split("\n").filter(Boolean))];
+}
+
+/** Pushes the Run's branch to `origin`. */
+export async function pushBranch(worktreePath: string, branch: string): Promise<void> {
+  await gitOrThrow(worktreePath, "push", "-q", "origin", `${branch}:refs/heads/${branch}`);
+}
+
+/** The Review Brief the Developer wrote, or null when there is none (or it is blank). */
+export function readReviewBrief(worktreePath: string): string | null {
+  const file = join(worktreePath, REVIEW_BRIEF_FILE);
+  if (!existsSync(file)) return null;
+  const text = readFileSync(file, "utf8");
+  return text.trim() ? text : null;
+}

@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createGhCodeHost } from "./codehost/gh.js";
 import { createForge } from "./forge/forge.js";
 import { createClaudeRunner } from "./runner/claude.js";
 import { createServer } from "./http/server.js";
@@ -35,6 +36,7 @@ for (const t of tools) console.log(`${t.status === "ok" ? "✓" : "✗"} ${t.too
 const forge = createForge({
   pool,
   runner: createClaudeRunner(),
+  codeHost: createGhCodeHost(),
   worktreesRoot: process.env.FORGEQUOR_WORKTREES ?? join(homedir(), ".forgequor", "worktrees"),
   developerModel: process.env.FORGEQUOR_DEVELOPER_MODEL,
 });

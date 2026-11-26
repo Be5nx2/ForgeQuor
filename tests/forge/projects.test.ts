@@ -3,6 +3,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { createForge, type Forge } from "../../src/forge/forge.js";
 import { createTempFolder, createTempRepo, type TempRepo } from "../harness/git.js";
 import { createTestDatabase } from "../harness/database.js";
+import { createFakeCodeHost } from "../harness/fake-codehost.js";
 import { createFakeRunner } from "../harness/fake-runner.js";
 
 let forge: Forge;
@@ -17,7 +18,7 @@ function track(t: TempRepo): string {
 beforeAll(async () => {
   const db = await createTestDatabase();
   drop = db.drop;
-  forge = createForge({ pool: db.pool, runner: createFakeRunner(), worktreesRoot: "/nonexistent" });
+  forge = createForge({ pool: db.pool, runner: createFakeRunner(), codeHost: createFakeCodeHost(), worktreesRoot: "/nonexistent" });
 });
 afterAll(async () => drop());
 afterEach(() => temps.splice(0).forEach((t) => t.cleanup()));

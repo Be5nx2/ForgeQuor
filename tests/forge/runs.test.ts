@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { createForge, type Forge, type Project } from "../../src/forge/forge.js";
 import { createTestDatabase } from "../harness/database.js";
+import { createFakeCodeHost } from "../harness/fake-codehost.js";
 import { createFakeRunner } from "../harness/fake-runner.js";
 import { createRepoWithBareRemote, git, type TempRemote, type TempRepo } from "../harness/git.js";
 
@@ -11,6 +12,7 @@ let forge: Forge;
 let drop: () => Promise<void>;
 let worktrees: string;
 const runner = createFakeRunner();
+const codeHost = createFakeCodeHost();
 const cleanups: Array<() => void> = [];
 let counter = 0;
 
@@ -18,7 +20,7 @@ beforeAll(async () => {
   const db = await createTestDatabase();
   drop = db.drop;
   worktrees = mkdtempSync(join(tmpdir(), "forgequor-worktrees-"));
-  forge = createForge({ pool: db.pool, runner, worktreesRoot: worktrees });
+  forge = createForge({ pool: db.pool, runner, codeHost, worktreesRoot: worktrees });
 });
 afterAll(async () => {
   await forge.whenIdle();
@@ -28,6 +30,8 @@ afterAll(async () => {
 afterEach(() => {
   runner.use(() => {});
   runner.steps.length = 0;
+  codeHost.pullRequests.length = 0;
+  codeHost.failWith(null);
   cleanups.splice(0).forEach((c) => c());
 });
 
@@ -180,6 +184,81 @@ describe("when the Developer cannot finish", () => {
 
     expect(run.gates).toMatchObject([{ kind: "escalation" }]);
     expect(runner.steps).toHaveLength(0);
+  });
+});
+
+const BRIEF = ".forgequor/review-brief.md";
+
+function developerCommits(step: { cwd: string }, brief?: string) {
+  writeFileSync(join(step.cwd, "jump.gd"), "extends Node\n");
+  git(step.cwd, "add", ".");
+  git(step.cwd, "commit", "-q", "-m", "feat(player): add jump");
+  if (brief !== undefined) writeFileSync(join(step.cwd, BRIEF), brief);
+}
+
+describe("the pull request", () => {
+  it("pushes the branch and opens a ready pull request with the task and a Run reference, before the final Gate", async () => {
+    const { project, remote } = await projectWithRemote();
+    runner.use((step) => developerCommits(step, "Test the jump on level 1.\n"));
+
+    const run = await runToEnd(project, { title: "Add jump", task: "Make the player jump." });
+
+    expect(git(remote.bare, "branch", "--list", run.branch!)).toContain(run.branch);
+    expect(codeHost.pullRequests).toHaveLength(1);
+    const pr = codeHost.pullRequests[0]!;
+    expect(pr).toMatchObject({ owner: "acme", base: "main", head: run.branch, title: "Add jump" });
+    expect(pr.repo).toBe(project.remoteName);
+    expect(pr.body).toContain("Make the player jump.");
+    expect(pr.body).toContain(`Forgequor Run #${run.id}`);
+    expect(run).toMatchObject({ state: "waiting", prNumber: pr.number, prUrl: pr.url });
+    expect(run.gates).toMatchObject([{ kind: "final" }]);
+  });
+
+  it("posts the Review Brief as a comment", async () => {
+    const { project } = await projectWithRemote();
+    runner.use((step) => developerCommits(step, "Test the jump on level 1.\n"));
+
+    await runToEnd(project);
+
+    expect(codeHost.pullRequests[0]!.comments).toEqual(["Test the jump on level 1.\n"]);
+  });
+
+  it("says no brief was written when the Developer left none", async () => {
+    const { project } = await projectWithRemote();
+    runner.use((step) => developerCommits(step));
+
+    const run = await runToEnd(project);
+
+    expect(run.state).toBe("waiting");
+    expect(codeHost.pullRequests[0]!.comments).toHaveLength(1);
+    expect(codeHost.pullRequests[0]!.comments[0]).toMatch(/no Review Brief/i);
+  });
+
+  it("refuses to push, and opens an Escalation, when a commit adds Run Notes", async () => {
+    const { project, remote } = await projectWithRemote();
+    runner.use((step) => {
+      developerCommits(step, "Brief.\n");
+      git(step.cwd, "add", "-f", BRIEF);
+      git(step.cwd, "commit", "-q", "-m", "chore: oops");
+    });
+
+    const run = await runToEnd(project);
+
+    expect(run.state).toBe("waiting");
+    expect(run.gates).toMatchObject([{ kind: "escalation", actions: ["abandon"], reason: expect.stringMatching(/Run Notes/) }]);
+    expect(git(remote.bare, "branch", "--list", run.branch!)).toBe("");
+    expect(codeHost.pullRequests).toHaveLength(0);
+  });
+
+  it("opens an Escalation when the pull request cannot be opened", async () => {
+    const { project } = await projectWithRemote();
+    runner.use((step) => developerCommits(step));
+    codeHost.failWith("gh: not authenticated");
+
+    const run = await runToEnd(project);
+
+    expect(run.gates).toMatchObject([{ kind: "escalation", evidence: expect.stringContaining("not authenticated") }]);
+    expect(run.prUrl).toBeNull();
   });
 });
 

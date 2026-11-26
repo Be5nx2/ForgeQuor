@@ -34,6 +34,8 @@ onUnmounted(() => clearInterval(timer));
     <pre class="task">{{ run.task }}</pre>
     <p class="muted" v-if="run.branch">Branch <code>{{ run.branch }}</code><br />Worktree <code>{{ run.worktreePath }}</code></p>
 
+    <p v-if="run.prUrl">Pull request <a :href="run.prUrl" target="_blank" rel="noopener">#{{ run.prNumber }}</a></p>
+
     <h3>Gates</h3>
     <p v-if="!run.gates.length" class="muted">None yet.</p>
     <ul>
