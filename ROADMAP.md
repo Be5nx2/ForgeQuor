@@ -101,6 +101,15 @@ One **Project**, one **Run** going Developer (Claude) → **Checks** → pull re
   - Acceptance:
     - the Run detail shows the running Step's events live through server-sent events;
     - the Run's state updates without a page reload.
+- [ ] `m1-11` **Dogfooding readiness**: Forgequor can run its own roadmap items as Runs, starting with M2.
+  - Spec: `docs/specs/m1-walking-skeleton.md`
+  - Blocked by: `m1-05`
+  - Acceptance:
+    - the Docker Compose project has a fixed name, so tests run from any checkout or Run worktree reuse the one PostgreSQL instead of starting a second one on the same port;
+    - a Project declares ordered setup commands, editable in the UI like its Checks, that run in a new worktree before the Developer;
+    - a failing setup command opens an Escalation with its output, and the Developer never starts;
+    - the README shows how to register Forgequor itself: setup `npm ci` then `scripts/link-skills.sh`, Checks `npm run typecheck` then `npm test`;
+    - a real Run on Forgequor itself, on a trivial task, gets through setup, Developer and Checks to a pull request.
 
 ## Next
 
