@@ -87,6 +87,33 @@ async function runToEnd(project: Project, input: { task?: string; title?: string
   return forge.getRun(started.id);
 }
 
+describe("the Run's Workflow", () => {
+  it("is the developer Workflow unless another is named, in the Run and in the Runs list", async () => {
+    const { project } = await projectWithRemote();
+
+    const run = await runToEnd(project);
+
+    expect(run.workflow).toBe("developer");
+    expect((await forge.listRuns({ projectId: project.id }))[0]).toMatchObject({ id: run.id, workflow: "developer" });
+  });
+
+  it("makes a Run created before Workflows existed a developer Run", async () => {
+    const { project } = await projectWithRemote();
+    const { rows } = await pool.query(
+      "INSERT INTO runs (project_id, title, task, state) VALUES ($1, 'Old', 'Old task', 'merged') RETURNING id",
+      [project.id],
+    );
+
+    expect((await forge.getRun(Number(rows[0].id))).workflow).toBe("developer");
+  });
+
+  it("refuses to start a Run of an unknown Workflow", async () => {
+    const { project } = await projectWithRemote();
+
+    await expect(forge.startRun({ projectId: project.id, task: "Draw.", workflow: "nope" })).rejects.toThrow(/Unknown Workflow/);
+  });
+});
+
 describe("the Run's starting point", () => {
   it("derives a title from the task and keeps the tracker reference", async () => {
     const { project } = await projectWithRemote();

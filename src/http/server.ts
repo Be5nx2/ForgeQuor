@@ -67,13 +67,13 @@ export async function createServer(deps: {
       state: req.query.state || undefined,
     }),
   );
-  app.post<{ Body: { projectId?: number; task?: string; title?: string; trackerRef?: string } }>(
+  app.post<{ Body: { projectId?: number; task?: string; title?: string; trackerRef?: string; workflow?: string } }>(
     "/api/runs",
     async (req, reply) => {
-      const { projectId, task, title, trackerRef } = req.body ?? {};
+      const { projectId, task, title, trackerRef, workflow } = req.body ?? {};
       if (!projectId || !task?.trim()) return reply.code(400).send({ error: "projectId and task are required." });
       try {
-        return reply.code(201).send(await deps.forge.startRun({ projectId, task, title, trackerRef }));
+        return reply.code(201).send(await deps.forge.startRun({ projectId, task, title, trackerRef, workflow }));
       } catch (e: any) {
         return reply.code(422).send({ error: e.message });
       }

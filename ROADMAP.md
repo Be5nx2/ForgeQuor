@@ -12,7 +12,7 @@ Codex **Runner**, **Artist**, an `assets` **Workflow** (Artist → asset **Gate*
 
 - Spec: `docs/specs/m2-assets.md`.
 
-- [ ] `m2-01` **Workflows out of the core**: the M1 sequence moves behind an internal Workflow interface, ready for a second Workflow.
+- [x] `m2-01` **Workflows out of the core**: the M1 sequence moves behind an internal Workflow interface, ready for a second Workflow.
   - Spec: `docs/specs/m2-assets.md`
   - Blocked by: none
   - Acceptance:

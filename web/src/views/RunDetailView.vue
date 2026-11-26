@@ -61,6 +61,7 @@ onUnmounted(() => stopFollowing?.());
     <p v-if="!OVER.includes(run.state)">
       <button type="button" class="secondary" :disabled="abandoning" @click="abandon">Abandon Run</button>
     </p>
+    <p class="muted">Workflow: {{ run.workflow }}</p>
     <p class="muted" v-if="run.trackerRef">Tracker: {{ run.trackerRef }}</p>
     <pre class="task">{{ run.task }}</pre>
     <p class="muted" v-if="run.branch">Branch <code>{{ run.branch }}</code><br />Worktree <code>{{ run.worktreePath }}</code></p>

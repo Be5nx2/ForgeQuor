@@ -80,7 +80,7 @@ watch([filterProject, filterState], load);
   <ul>
     <li v-for="r in runs" :key="r.id" class="clickable" @click="emit('open', r.id)">
       <strong>{{ r.title }}</strong> <span class="badge">{{ r.state }}</span>
-      <div class="muted">{{ projectName(r.projectId) }}<span v-if="r.trackerRef"> · {{ r.trackerRef }}</span></div>
+      <div class="muted">{{ r.workflow }} · {{ projectName(r.projectId) }}<span v-if="r.trackerRef"> · {{ r.trackerRef }}</span></div>
     </li>
   </ul>
 </template>

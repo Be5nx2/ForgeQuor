@@ -19,6 +19,7 @@ export interface CheckResult {
 export interface Run {
   id: number;
   projectId: number;
+  workflow: string;
   title: string;
   task: string;
   trackerRef: string | null;

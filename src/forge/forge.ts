@@ -1,23 +1,11 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type pg from "pg";
-import type { Runner, StepResult } from "../runner/runner.js";
-import { resumePoint } from "./resume.js";
-import { describeDuration } from "../duration.js";
-import { DEFAULT_CHECK_TIMEOUT_MS, describeFailure, passed, runChecks } from "./checks.js";
-import { DEVELOPER_INSTRUCTIONS, developerPrompt } from "./developer.js";
+import type { Runner } from "../runner/runner.js";
+import { developerWorkflow } from "./developer.js";
+import type { Workflow } from "./workflow.js";
 import type { CodeHost } from "../codehost/codehost.js";
-import {
-  commitLeftovers,
-  createRunWorktree,
-  inspectRepository,
-  RegistrationError,
-  pushBranch,
-  readReviewBrief,
-  refreshDefaultBranch,
-  runNotesInBranch,
-  slugify,
-} from "./workspace.js";
+import { createRunWorktree, inspectRepository, RegistrationError, refreshDefaultBranch, slugify } from "./workspace.js";
 
 export { RegistrationError };
 
@@ -37,6 +25,8 @@ export type GateAction = "approve" | "abandon";
 export interface Run {
   id: number;
   projectId: number;
+  /** Name of the Workflow the Run follows. */
+  workflow: string;
   title: string;
   task: string;
   trackerRef: string | null;
@@ -131,10 +121,10 @@ export interface Forge {
   /** Sets how many Runs of a Project may work at once (at least 1). Raising it starts Queued Runs that now fit. */
   setMaxConcurrentRuns(projectId: number, max: number): Promise<Project>;
   /**
-   * Creates a Run and starts it in the background; follow it with `getRun`. A Project already at its concurrent Runs
+   * Creates a Run of the given Workflow (`developer` when omitted; an unknown name is refused) and starts it in the background; follow it with `getRun`. A Project already at its concurrent Runs
    * limit leaves the new Run Queued; it starts by itself, in creation order, when a slot frees up.
    */
-  startRun(input: { projectId: number; task: string; title?: string; trackerRef?: string }): Promise<Run>;
+  startRun(input: { projectId: number; task: string; title?: string; trackerRef?: string; workflow?: string }): Promise<Run>;
   getRun(id: number): Promise<RunDetail>;
   listRuns(filter?: { projectId?: number; state?: RunState }): Promise<Run[]>;
   /** Every Gate still waiting for the human, across all Projects. */
@@ -199,6 +189,7 @@ function toRun(r: Record<string, any>): Run {
   return {
     id: Number(r.id),
     projectId: Number(r.project_id),
+    workflow: r.workflow,
     title: r.title,
     task: r.task,
     trackerRef: r.tracker_ref,
@@ -244,8 +235,8 @@ function toCheck(r: Record<string, any>): CheckResult {
 const QUOTA_RETRY_MS = 15 * 60 * 1000;
 const DEFAULT_STEP_TIMEOUT_MS = 60 * 60 * 1000;
 
-/** After this many failed Checks the Developer's extra attempts are used up (1 try + 2 extra). */
-const MAX_DEVELOPER_ATTEMPTS = 3;
+/** The Workflows a Run can follow, by name. */
+const workflows = new Map<string, Workflow>([[developerWorkflow.name, developerWorkflow]]);
 
 /** States a Run cannot leave. A Run in one of them no longer holds its Project's slot. */
 const OVER: RunState[] = ["merged", "closed", "abandoned"];
@@ -267,7 +258,7 @@ function toGate(r: Record<string, any>): Gate {
   };
 }
 
-const RUN_COLUMNS = "id, project_id, title, task, tracker_ref, state, branch, worktree_path, pr_number, pr_url, resume_at, created_at";
+const RUN_COLUMNS = "id, project_id, workflow, title, task, tracker_ref, state, branch, worktree_path, pr_number, pr_url, resume_at, created_at";
 
 function deriveTitle(task: string): string {
   const first = task.trim().split("\n")[0]!.trim();
@@ -290,7 +281,7 @@ export function createForge(deps: ForgeDeps): Forge {
     }
   }
   const changed = (runId: number) => emit({ type: "changed", runId });
-  /** Cancels what a Run is doing (its Developer or its Check) when the human abandons it. */
+  /** Cancels what a Run is doing (its Workflow's Step or its Check) when the human abandons it. */
   const stoppers = new Map<number, AbortController>();
   /** The tail of the git setup queue of each repository, by path. */
   const repoQueues = new Map<string, Promise<unknown>>();
@@ -434,67 +425,6 @@ export function createForge(deps: ForgeDeps): Forge {
     return forge.getRun(runId);
   }
 
-  /** One Developer attempt, recorded as a Step attempt. Killed, and reported as timed out, after the Step timeout. */
-  async function developerStep(
-    run: Run,
-    worktreePath: string,
-    attempt: number,
-    failedCheck: string | undefined,
-    stop: AbortSignal,
-  ): Promise<{ result: StepResult; timedOut: boolean }> {
-    const { rows } = await pool.query(
-      `INSERT INTO step_attempts (run_id, step, attempt, runner, model, status)
-       VALUES ($1, 'developer', $2, 'claude', $3, 'running') RETURNING id`,
-      [run.id, attempt, deps.developerModel ?? null],
-    );
-    const attemptId = rows[0].id;
-    const log: string[] = [];
-    changed(run.id);
-
-    const step = new AbortController();
-    let timedOut = false;
-    const stopStep = () => step.abort();
-    if (stop.aborted) step.abort();
-    stop.addEventListener("abort", stopStep, { once: true });
-    const timer = setTimeout(() => {
-      timedOut = true;
-      step.abort();
-    }, stepTimeoutMs);
-    let result: StepResult;
-    try {
-      result = await runner.run(
-        {
-          instructions: DEVELOPER_INSTRUCTIONS,
-          prompt: developerPrompt(run.task, failedCheck),
-          cwd: worktreePath,
-          model: deps.developerModel,
-          signal: step.signal,
-        },
-        (e) => {
-          if (e.raw) log.push(e.raw);
-          emit({ type: "progress", runId: run.id, attemptId, kind: e.kind, summary: e.summary });
-        },
-      );
-    } finally {
-      clearTimeout(timer);
-      stop.removeEventListener("abort", stopStep);
-    }
-    await pool.query(
-      `UPDATE step_attempts SET status = $2, ended_at = now(), summary = $3, error = $4, quota_resets_at = $5, event_log = $6
-       WHERE id = $1`,
-      [
-        attemptId,
-        result.status,
-        result.status === "succeeded" ? result.summary : null,
-        result.status === "failed" ? result.error : null,
-        result.status === "quota_exhausted" ? result.resetsAt : null,
-        log.join("\n"),
-      ],
-    );
-    changed(run.id);
-    return { result, timedOut };
-  }
-
   /** The Runner's Quota ran out: the Run waits for the reset, keeping its slot. */
   async function pause(runId: number, resetsAt: Date | null) {
     const resumeAt = resetsAt ?? new Date(now().getTime() + QUOTA_RETRY_MS);
@@ -516,7 +446,7 @@ export function createForge(deps: ForgeDeps): Forge {
     }
   }
 
-  /** The fixed M1 Workflow so far: Developer, Checks (retrying the Developer), pull request, then the final Gate. Any failure opens an Escalation. */
+  /** Prepares the Run's worktree, then hands the Run to its Workflow. Any failure opens an Escalation. */
   async function work(run: Run, project: Project, stop: AbortSignal) {
     try {
       const branch = run.branch ?? `forgequor/${run.id}-${slugify(run.title) || "run"}`;
@@ -533,88 +463,27 @@ export function createForge(deps: ForgeDeps): Forge {
       await pool.query("UPDATE runs SET branch = $2, worktree_path = $3 WHERE id = $1", [run.id, branch, worktreePath]);
       changed(run.id);
 
-      const { rows: prepared } = await pool.query("SELECT setup_done FROM runs WHERE id = $1", [run.id]);
-      if (!prepared[0].setup_done) {
-        const outcomes = await runChecks(project.setup, worktreePath, { timeoutMs: deps.checkTimeoutMs, signal: stop });
-        if (!(await stillRunning(run.id))) return;
-        const failed = outcomes.find((c) => !passed(c));
-        if (failed) return openGate(run.id, "escalation", "A setup command failed, so the Developer did not start.", describeFailure(failed));
-        await pool.query("UPDATE runs SET setup_done = true WHERE id = $1", [run.id]);
-      }
-
-      let { attempt, failedCheck, skipDeveloper, checksDone } = await resumePoint(pool, run.id, project.checks.length);
-      while (!checksDone) {
-        if (attempt > MAX_DEVELOPER_ATTEMPTS) {
-          return openGate(run.id, "escalation", `A Check still fails after ${MAX_DEVELOPER_ATTEMPTS} attempts.`, failedCheck);
-        }
-        if (!skipDeveloper) {
-          const { result, timedOut } = await developerStep(run, worktreePath, attempt, failedCheck, stop);
-          if (!(await stillRunning(run.id))) return;
-          // A Step that finished on its own just as the timeout fired keeps its real result.
-          if (timedOut && result.status === "failed") {
-            return openGate(run.id, "escalation", `The Developer's Step timed out after ${describeDuration(stepTimeoutMs)} and was killed.`);
-          }
-          if (result.status === "failed") return openGate(run.id, "escalation", "The Developer failed.", result.error);
-          if (result.status === "quota_exhausted") return pause(run.id, result.resetsAt);
-
-          await commitLeftovers(worktreePath, "chore: commit work left by the Developer");
-        }
-        skipDeveloper = false;
-
-        const outcomes = await runChecks(project.checks, worktreePath, { timeoutMs: deps.checkTimeoutMs, signal: stop });
-        if (!(await stillRunning(run.id))) return;
-        for (const c of outcomes) {
-          await pool.query(
-            "INSERT INTO check_results (run_id, attempt, command, exit_status, output) VALUES ($1, $2, $3, $4, $5)",
-            [run.id, attempt, c.command, c.exitStatus, c.output],
-          );
-        }
-        changed(run.id);
-        const failed = outcomes.find((c) => !passed(c));
-        if (!failed) break;
-        failedCheck = describeFailure(failed);
-        if (attempt === MAX_DEVELOPER_ATTEMPTS) {
-          return openGate(run.id, "escalation", `A Check still fails after ${attempt} attempts.`, failedCheck);
-        }
-        attempt++;
-      }
-
-      if (!(await stillRunning(run.id))) return;
-      const notes = await runNotesInBranch(worktreePath, defaultBranch);
-      if (notes.length) {
-        return openGate(run.id, "escalation", "A commit adds Run Notes, so the branch was not pushed.", notes.join("\n"));
-      }
-      await pushBranch(worktreePath, branch);
-      let pr = run.prNumber ? { number: run.prNumber, url: run.prUrl! } : null;
-      if (!pr) {
-        pr = await deps.codeHost.openPullRequest({
-          owner: project.remoteOwner,
-          repo: project.remoteName,
-          base: defaultBranch,
-          head: branch,
-          title: run.title,
-          body: `${run.task}\n\n---\nForgequor Run #${run.id}`,
-        });
-        await pool.query("UPDATE runs SET pr_number = $2, pr_url = $3 WHERE id = $1", [run.id, pr.number, pr.url]);
-        changed(run.id);
-      }
-      if (!(await stillRunning(run.id))) {
-        // Abandoned while the pull request was being opened: it may not have seen it, so close it here.
-        await deps.codeHost.closePullRequest({ owner: project.remoteOwner, repo: project.remoteName, number: pr.number }).catch(() => {});
-        return;
-      }
-      const { rows: posted } = await pool.query("SELECT brief_posted FROM runs WHERE id = $1", [run.id]);
-      if (!posted[0].brief_posted) {
-        await deps.codeHost.comment({
-          owner: project.remoteOwner,
-          repo: project.remoteName,
-          number: pr.number,
-          body: readReviewBrief(worktreePath) ?? "The Developer wrote no Review Brief for this pull request.",
-        });
-        await pool.query("UPDATE runs SET brief_posted = true WHERE id = $1", [run.id]);
-        changed(run.id);
-      }
-      await openGate(run.id, "final", "The Developer finished.");
+      const workflow = workflows.get(run.workflow);
+      if (!workflow) throw new Error(`Unknown Workflow "${run.workflow}".`);
+      await workflow.run({
+        run,
+        project,
+        branch,
+        worktreePath,
+        defaultBranch,
+        stop,
+        pool,
+        runner,
+        codeHost: deps.codeHost,
+        developerModel: deps.developerModel,
+        stepTimeoutMs,
+        checkTimeoutMs: deps.checkTimeoutMs,
+        changed: () => changed(run.id),
+        emit,
+        openGate: (kind, reason, evidence) => openGate(run.id, kind, reason, evidence),
+        pause: (resetsAt) => pause(run.id, resetsAt),
+        stillRunning: () => stillRunning(run.id),
+      });
     } catch (e: any) {
       // If even the Escalation cannot be recorded (database down), the Run stays Running and restart recovery picks it up.
       await openGate(run.id, "escalation", "The Run could not continue.", String(e?.message ?? e)).catch((err) =>
@@ -666,14 +535,15 @@ export function createForge(deps: ForgeDeps): Forge {
       return () => void listeners.delete(listener);
     },
 
-    async startRun({ projectId, task, title, trackerRef }) {
+    async startRun({ projectId, task, title, trackerRef, workflow = "developer" }) {
+      if (!workflows.has(workflow)) throw new Error(`Unknown Workflow "${workflow}".`);
       const { rows: found } = await pool.query(`SELECT id FROM projects WHERE id = $1`, [projectId]);
       if (!found[0]) throw new Error(`No Project ${projectId}.`);
       if (!task.trim()) throw new Error("A Run needs a task.");
       const { rows } = await pool.query(
-        `INSERT INTO runs (project_id, title, task, tracker_ref, state)
-         VALUES ($1, $2, $3, $4, 'queued') RETURNING id`,
-        [projectId, title?.trim() || deriveTitle(task), task.trim(), trackerRef?.trim() || null],
+        `INSERT INTO runs (project_id, workflow, title, task, tracker_ref, state)
+         VALUES ($1, $2, $3, $4, $5, 'queued') RETURNING id`,
+        [projectId, workflow, title?.trim() || deriveTitle(task), task.trim(), trackerRef?.trim() || null],
       );
       changed(rows[0].id);
       await promote(projectId);
