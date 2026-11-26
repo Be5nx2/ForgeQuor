@@ -1,6 +1,9 @@
 import { execFileSync } from "node:child_process";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createForge } from "./forge/forge.js";
+import { createClaudeRunner } from "./runner/claude.js";
 import { createServer } from "./http/server.js";
 import { checkTools } from "./startup/preflight.js";
 import { createPool, DEFAULT_DATABASE_URL, migrate } from "./store/db.js";
@@ -27,6 +30,12 @@ console.log(applied.length ? `Applied migrations: ${applied.join(", ")}` : "Data
 const tools = await checkTools();
 for (const t of tools) console.log(`${t.status === "ok" ? "✓" : "✗"} ${t.tool}: ${t.detail}`);
 
-const app = await createServer({ forge: createForge({ pool }), tools, webRoot: `${root}web/dist` });
+const forge = createForge({
+  pool,
+  runner: createClaudeRunner(),
+  worktreesRoot: process.env.FORGEQUOR_WORKTREES ?? join(homedir(), ".forgequor", "worktrees"),
+  developerModel: process.env.FORGEQUOR_DEVELOPER_MODEL,
+});
+const app = await createServer({ forge, tools, webRoot: `${root}web/dist` });
 await app.listen({ host: "127.0.0.1", port });
 console.log(`Forgequor on http://127.0.0.1:${port}`);

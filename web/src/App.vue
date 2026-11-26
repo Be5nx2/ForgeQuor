@@ -1,69 +1,54 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
+import { getJson } from "./api";
+import ProjectsView from "./views/ProjectsView.vue";
+import RunDetailView from "./views/RunDetailView.vue";
+import RunsView from "./views/RunsView.vue";
+import WaitingView from "./views/WaitingView.vue";
 
-interface Project {
-  id: number;
-  name: string;
-  localPath: string;
-  remoteOwner: string;
-  remoteName: string;
-  defaultBranch: string;
-}
 interface Tool {
   tool: string;
   status: string;
   detail: string;
 }
 
-const projects = ref<Project[]>([]);
+const tabs = [
+  { id: "waiting", label: "Waiting for you" },
+  { id: "runs", label: "Runs" },
+  { id: "projects", label: "Projects" },
+] as const;
+
+const tab = ref<(typeof tabs)[number]["id"]>("waiting");
+const runId = ref<number | null>(null);
 const tools = ref<Tool[]>([]);
-const path = ref("");
-const error = ref("");
 
-async function load() {
-  projects.value = await (await fetch("/api/projects")).json();
-  tools.value = (await (await fetch("/api/health")).json()).tools;
+function show(id: (typeof tabs)[number]["id"]) {
+  tab.value = id;
+  runId.value = null;
 }
 
-async function register() {
-  error.value = "";
-  const res = await fetch("/api/projects", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ path: path.value }),
-  });
-  if (!res.ok) {
-    error.value = (await res.json()).error;
-    return;
-  }
-  path.value = "";
-  await load();
+function openRun(id: number) {
+  tab.value = "runs";
+  runId.value = id;
 }
 
-onMounted(load);
+onMounted(async () => {
+  tools.value = (await getJson<{ tools: Tool[] }>("/api/health")).tools;
+});
 </script>
 
 <template>
   <main>
     <h1>FORGE<span>QUOR</span></h1>
-    <div v-for="t in tools.filter((t) => t.status !== 'ok')" :key="t.tool" class="warn">
-      {{ t.tool }}: {{ t.detail }}
-    </div>
+    <div v-for="t in tools.filter((t) => t.status !== 'ok')" :key="t.tool" class="warn">{{ t.tool }}: {{ t.detail }}</div>
 
-    <h2>Projects</h2>
-    <form @submit.prevent="register">
-      <input v-model="path" placeholder="/path/to/local/git/repository" aria-label="Repository path" />
-      <button type="submit">Register</button>
-    </form>
-    <p v-if="error" class="error">{{ error }}</p>
+    <nav>
+      <button v-for="t in tabs" :key="t.id" :class="{ active: tab === t.id }" @click="show(t.id)">{{ t.label }}</button>
+    </nav>
 
-    <p v-if="!projects.length" class="muted">No Project registered yet.</p>
-    <ul>
-      <li v-for="p in projects" :key="p.id">
-        <strong>{{ p.name }}</strong>
-        <span class="muted"> {{ p.remoteOwner }}/{{ p.remoteName }} · {{ p.defaultBranch }}</span>
-        <div class="muted">{{ p.localPath }}</div>
-      </li>
-    </ul>
+    <WaitingView v-if="tab === 'waiting'" @open="openRun" />
+    <ProjectsView v-else-if="tab === 'projects'" />
+    <RunDetailView v-else-if="runId !== null" :id="runId" @back="runId = null" />
+    <RunsView v-else @open="openRun" />
   </main>
 </template>

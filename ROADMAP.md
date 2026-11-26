@@ -30,7 +30,7 @@ One **Project**, one **Run** going Developer (Claude) → **Checks** → pull re
     - streams progress events, then returns succeeded, failed with an error, or Quota exhausted with its reset time;
     - the contract suite passes against a fake `claude` replaying success, error, Quota exhaustion, unreadable output and crash;
     - an opt-in smoke test, off by default, runs the real `claude` on a trivial task.
-- [ ] `m1-03` **First Run to the final Gate**: the human starts a Run, the Developer works in its own worktree, and the Run waits at the final Gate.
+- [x] `m1-03` **First Run to the final Gate**: the human starts a Run, the Developer works in its own worktree, and the Run waits at the final Gate.
   - Spec: `docs/specs/m1-walking-skeleton.md`
   - Blocked by: `m1-01`, `m1-02`
   - Acceptance:

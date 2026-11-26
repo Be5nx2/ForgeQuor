@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { existsSync, realpathSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 const run = promisify(execFile);
@@ -54,4 +55,68 @@ export async function inspectRepository(path: string): Promise<RepositoryFacts> 
     remoteName: remote.name,
     defaultBranch,
   };
+}
+
+/** Hidden folder at the root of each worktree where Agents leave Run Notes. Never committed. */
+export const RUN_NOTES_DIR = ".forgequor";
+/** Where the Developer writes the Review Brief, relative to the worktree. */
+export const REVIEW_BRIEF_FILE = `${RUN_NOTES_DIR}/review-brief.md`;
+
+async function gitOrThrow(cwd: string, ...args: string[]): Promise<string> {
+  try {
+    return (await run("git", args, { cwd })).stdout.trim();
+  } catch (e: any) {
+    const detail = String(e.stderr ?? e.message).trim();
+    throw new Error(`git ${args[0]} failed: ${detail}`);
+  }
+}
+
+export function slugify(text: string, max = 40): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, max)
+    .replace(/-+$/, "");
+}
+
+/**
+ * Asks the remote for its current default branch and fetches it, so a stale `origin/HEAD` is never used.
+ * Returns the default branch name.
+ */
+export async function refreshDefaultBranch(repoRoot: string): Promise<string> {
+  await gitOrThrow(repoRoot, "fetch", "origin");
+  await gitOrThrow(repoRoot, "remote", "set-head", "origin", "-a");
+  return (await gitOrThrow(repoRoot, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")).replace(/^origin\//, "");
+}
+
+/**
+ * Creates `branch` in a new worktree at `worktreePath`, from the remote's `defaultBranch`, with the Run Notes
+ * folder in place and excluded through the repository's local exclude file (no change to the Project's files).
+ */
+export async function createRunWorktree(opts: {
+  repoRoot: string;
+  defaultBranch: string;
+  branch: string;
+  worktreePath: string;
+}): Promise<void> {
+  const { repoRoot, defaultBranch, branch, worktreePath } = opts;
+  mkdirSync(dirname(worktreePath), { recursive: true });
+  await gitOrThrow(repoRoot, "worktree", "add", "-b", branch, worktreePath, `origin/${defaultBranch}`);
+
+  const exclude = resolve(worktreePath, await gitOrThrow(worktreePath, "rev-parse", "--git-path", "info/exclude"));
+  mkdirSync(dirname(exclude), { recursive: true });
+  const current = existsSync(exclude) ? readFileSync(exclude, "utf8") : "";
+  if (!current.split("\n").includes(`${RUN_NOTES_DIR}/`)) {
+    appendFileSync(exclude, `${current && !current.endsWith("\n") ? "\n" : ""}${RUN_NOTES_DIR}/\n`);
+  }
+  mkdirSync(join(worktreePath, RUN_NOTES_DIR), { recursive: true });
+}
+
+/** Commits whatever the Developer left uncommitted. Returns true if a commit was made. */
+export async function commitLeftovers(worktreePath: string, message: string): Promise<boolean> {
+  await gitOrThrow(worktreePath, "add", "-A");
+  if (!(await gitOrThrow(worktreePath, "status", "--porcelain"))) return false;
+  await gitOrThrow(worktreePath, "commit", "-q", "-m", message);
+  return true;
 }
