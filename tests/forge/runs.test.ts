@@ -677,10 +677,10 @@ describe("the concurrency limit and the queue", () => {
     const { project } = await projectWithRemote();
     const gate = gatedDeveloper();
 
-    const runs = await Promise.all([1, 2, 3, 4, 5].map((n) => forge.startRun({ projectId: project.id, task: `Run ${n}` })));
+    await Promise.all([1, 2, 3, 4, 5].map((n) => forge.startRun({ projectId: project.id, task: `Run ${n}` })));
     await gate.started(2);
 
-    expect(runs.filter((r) => r.state === "running")).toHaveLength(2);
+    expect((await forge.listRuns({ projectId: project.id, state: "running" })).length).toBe(2);
     expect((await forge.listRuns({ projectId: project.id, state: "queued" })).length).toBe(3);
     gate.releaseAll();
     await forge.whenIdle();
