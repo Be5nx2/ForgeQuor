@@ -48,6 +48,7 @@ Codex **Runner**, **Artist**, an `assets` **Workflow** (Artist → asset **Gate*
     - each Project has an Art Direction path (default `docs/ART_DIRECTION.md`) and an art folder (default `assets/art`), editable in the UI;
     - the Run form offers the Workflow; for `assets` it takes a list of Asset Requests (name, sprite or tile, description, size from 16x16, 18x18, 32x32 or custom);
     - a missing Art Direction opens an Escalation before anything is generated;
+    - a Workflow gets a Runner and a model per Agent (Developer on Claude, Artist on Codex) instead of the single Runner and developer model m2-01 hands it;
     - the Artist (Codex) handles the Asset Requests one after the other, following the Art Direction; each image lands at the art folder / kind folder / kebab-case name `.png`;
     - the Project's setup commands and Checks are skipped, and the Run takes a Project slot;
     - the Asset Gate shows each Asset at real size and magnified with crisp pixels, with a background colour tool beside the preview (UI grey by default, not saved);
