@@ -12,7 +12,7 @@ One **Project**, one **Run** going Developer (Claude) → **Checks** → pull re
 
 - Spec: `docs/specs/m1-walking-skeleton.md`.
 
-- [ ] `m1-01` **Scaffold and Project registration**: one command brings Forgequor up, and the human registers a Project from the UI.
+- [x] `m1-01` **Scaffold and Project registration**: one command brings Forgequor up, and the human registers a Project from the UI.
   - Spec: `docs/specs/m1-walking-skeleton.md`
   - Blocked by: none
   - Acceptance:
