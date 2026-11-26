@@ -42,6 +42,7 @@ YAML **Workflows** with parallel **Steps**, Griller with chat, Spec Writer, Arch
 - Live progress survives a page reload or reconnection mid-Step (events kept as they come, not only at the end of the Step).
 - Stream Check output live, like the Developer's events.
 - Coalesce live "changed" updates so a chatty Agent does not make the UI reload the Run on every event.
+- Tileset atlas: an Asset Request for N tiles delivered as one atlas image (Godot TileSet), instead of one file per tile (M2 grilling).
 
 ## Done
 

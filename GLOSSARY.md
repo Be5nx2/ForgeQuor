@@ -122,6 +122,10 @@ _Avoid_: Sprite sheet, spritesheet, animation file
 The human's description of one **Asset** to produce (name, what it shows, its size); the **Artist** turns it into a prompt.
 _Avoid_: Prompt, asset spec, brief
 
+**Asset Check**:
+An automatic validation of one **Asset** against its **Asset Request** before the **Asset Gate** (format, size, place); a failure sends it back to the **Artist**, while colours outside the **Art Direction**'s palette only warn.
+_Avoid_: Asset test, lint, Check (a **Check** is a command the **Project** declares)
+
 **Asset Gate**:
 The **Gate** where the human approves each **Asset** of a batch, or rejects it with its own **Feedback** so the **Artist** redoes only the rejected ones.
 _Avoid_: Art review, gallery gate
