@@ -20,13 +20,15 @@ export class RunNotFoundError extends Error {}
 
 export type RunState = "queued" | "running" | "waiting" | "paused" | "approved" | "merged" | "closed" | "abandoned";
 export type GateKind = "final" | "escalation";
-export type GateAction = "approve" | "abandon";
+export type GateAction = "approve" | "reject" | "abandon";
 
 export interface Run {
   id: number;
   projectId: number;
   /** Name of the Workflow the Run follows. */
   workflow: string;
+  /** The Run's current Iteration, from 1; each rejection of the final Gate with Feedback starts the next. */
+  iteration: number;
   title: string;
   task: string;
   trackerRef: string | null;
@@ -42,6 +44,7 @@ export interface Run {
 
 export interface StepAttempt {
   id: number;
+  iteration: number;
   step: string;
   attempt: number;
   runner: string;
@@ -57,6 +60,7 @@ export interface StepAttempt {
 
 export interface CheckResult {
   id: number;
+  iteration: number;
   /** The Developer attempt whose work this Check validated. */
   attempt: number;
   command: string;
@@ -72,14 +76,23 @@ export interface Gate {
   kind: GateKind;
   reason: string;
   evidence: string | null;
-  /** What the human can do here. A final Gate may be approved; an Escalation can only be abandoned. */
+  /** What the human can do here. A final Gate may be approved or rejected with Feedback; an Escalation can only be abandoned. */
   actions: GateAction[];
+  /** The human's written reason, when the Gate was rejected. */
+  feedback: string | null;
   openedAt: Date;
   decidedAt: Date | null;
   decision: GateAction | null;
 }
 
+/** One pass through the produce → review loop; the Feedback is what started it (null for the first). */
+export interface Iteration {
+  number: number;
+  feedback: string | null;
+}
+
 export interface RunDetail extends Run {
+  iterations: Iteration[];
   attempts: StepAttempt[];
   checks: CheckResult[];
   gates: Gate[];
@@ -131,9 +144,10 @@ export interface Forge {
   listOpenGates(): Promise<OpenGate[]>;
   /**
    * The human's decision at an open Gate: approve moves the Run to Approved, abandon to Abandoned (its branch and
-   * worktree are kept). Throws a GateError for an unknown or already decided Gate, or a choice it does not offer.
+   * worktree are kept), reject (final Gate only, with a non-empty `feedback`) starts the Run's next Iteration. Throws a
+   * GateError for an unknown or already decided Gate, a choice it does not offer, or a rejection without Feedback.
    */
-  decideGate(input: { gateId: number; action: GateAction }): Promise<RunDetail>;
+  decideGate(input: { gateId: number; action: GateAction; feedback?: string }): Promise<RunDetail>;
   /**
    * Abandons a Run in any state before Merged: closes its pull request if it has one, settles its open Gate, and keeps
    * its branch and worktree. Throws a RunStateError when the Run is already over. A pull request merged on GitHub in
@@ -190,6 +204,7 @@ function toRun(r: Record<string, any>): Run {
     id: Number(r.id),
     projectId: Number(r.project_id),
     workflow: r.workflow,
+    iteration: r.iteration,
     title: r.title,
     task: r.task,
     trackerRef: r.tracker_ref,
@@ -206,6 +221,7 @@ function toRun(r: Record<string, any>): Run {
 function toAttempt(r: Record<string, any>): StepAttempt {
   return {
     id: Number(r.id),
+    iteration: r.iteration,
     step: r.step,
     attempt: r.attempt,
     runner: r.runner,
@@ -223,6 +239,7 @@ function toAttempt(r: Record<string, any>): StepAttempt {
 function toCheck(r: Record<string, any>): CheckResult {
   return {
     id: Number(r.id),
+    iteration: r.iteration,
     attempt: r.attempt,
     command: r.command,
     exitStatus: r.exit_status,
@@ -251,14 +268,15 @@ function toGate(r: Record<string, any>): Gate {
     kind: r.kind,
     reason: r.reason,
     evidence: r.evidence,
-    actions: r.kind === "final" ? ["approve", "abandon"] : ["abandon"],
+    actions: r.kind === "final" ? ["approve", "reject", "abandon"] : ["abandon"],
+    feedback: r.feedback,
     openedAt: r.opened_at,
     decidedAt: r.decided_at,
     decision: r.decision,
   };
 }
 
-const RUN_COLUMNS = "id, project_id, workflow, title, task, tracker_ref, state, branch, worktree_path, pr_number, pr_url, resume_at, created_at";
+const RUN_COLUMNS = "id, project_id, workflow, iteration, title, task, tracker_ref, state, branch, worktree_path, pr_number, pr_url, resume_at, created_at";
 
 function deriveTitle(task: string): string {
   const first = task.trim().split("\n")[0]!.trim();
@@ -404,6 +422,42 @@ export function createForge(deps: ForgeDeps): Forge {
     return true;
   }
 
+  /** Rejects a final Gate: the Run starts its next Iteration, working again in the same worktree with the Feedback. */
+  async function reject(gate: Gate, feedback: string): Promise<RunDetail> {
+    if (!feedback) throw new GateError("Rejecting a Gate needs a Feedback saying what to change.");
+    const client = await pool.connect();
+    let run: Run;
+    try {
+      await client.query("BEGIN");
+      // Guarded on decided_at and on the Run still waiting, so a racing decision or abandon cannot also win.
+      const decided = await client.query(
+        "UPDATE gates SET decided_at = now(), decision = 'reject', feedback = $2 WHERE id = $1 AND decided_at IS NULL RETURNING run_id",
+        [gate.id, feedback],
+      );
+      const moved = decided.rowCount
+        ? await client.query(
+            `UPDATE runs SET state = 'running', iteration = iteration + 1, brief_posted = false, updated_at = now()
+             WHERE id = $1 AND state = 'waiting' RETURNING ${RUN_COLUMNS}`,
+            [gate.runId],
+          )
+        : null;
+      if (!moved?.rowCount) {
+        await client.query("ROLLBACK");
+        throw new GateError(`Gate ${gate.id} is already decided.`);
+      }
+      await client.query("COMMIT");
+      run = toRun(moved.rows[0]);
+    } catch (e) {
+      if (!(e instanceof GateError)) await client.query("ROLLBACK").catch(() => {});
+      throw e;
+    } finally {
+      client.release();
+    }
+    changed(run.id);
+    await restart(run);
+    return forge.getRun(run.id);
+  }
+
   async function abandon(runId: number): Promise<RunDetail> {
     const { rows } = await pool.query(
       `SELECT r.id, r.state, r.pr_number, p.remote_owner, p.remote_name FROM runs r JOIN projects p ON p.id = r.project_id WHERE r.id = $1`,
@@ -442,7 +496,8 @@ export function createForge(deps: ForgeDeps): Forge {
     try {
       await work(run, project, stopper.signal);
     } finally {
-      stoppers.delete(run.id);
+      // A rejection may already have restarted the Run with a controller of its own: leave that one.
+      if (stoppers.get(run.id) === stopper) stoppers.delete(run.id);
     }
   }
 
@@ -463,6 +518,8 @@ export function createForge(deps: ForgeDeps): Forge {
       await pool.query("UPDATE runs SET branch = $2, worktree_path = $3 WHERE id = $1", [run.id, branch, worktreePath]);
       changed(run.id);
 
+      // Abandoned between being restarted and getting here: nothing to work on, no Quota to spend.
+      if (!(await stillRunning(run.id))) return;
       const workflow = workflows.get(run.workflow);
       if (!workflow) throw new Error(`Unknown Workflow "${run.workflow}".`);
       await workflow.run({
@@ -565,7 +622,9 @@ export function createForge(deps: ForgeDeps): Forge {
       const attempts = await pool.query("SELECT * FROM step_attempts WHERE run_id = $1 ORDER BY id", [id]);
       const checks = await pool.query("SELECT * FROM check_results WHERE run_id = $1 ORDER BY id", [id]);
       const gates = await pool.query("SELECT * FROM gates WHERE run_id = $1 ORDER BY id", [id]);
-      return { ...toRun(rows[0]), attempts: attempts.rows.map(toAttempt), checks: checks.rows.map(toCheck), gates: gates.rows.map(toGate) };
+      const iterations: Iteration[] = [{ number: 1, feedback: null }];
+      for (const g of gates.rows.filter((g) => g.decision === "reject")) iterations.push({ number: iterations.length + 1, feedback: g.feedback });
+      return { ...toRun(rows[0]), iterations, attempts: attempts.rows.map(toAttempt), checks: checks.rows.map(toCheck), gates: gates.rows.map(toGate) };
     },
 
     async listRuns(filter = {}) {
@@ -587,14 +646,15 @@ export function createForge(deps: ForgeDeps): Forge {
       return rows.map((r) => ({ ...toGate(r), runTitle: r.run_title, projectName: r.project_name }));
     },
 
-    async decideGate({ gateId, action }) {
+    async decideGate({ gateId, action, feedback }) {
       const { rows } = await pool.query("SELECT * FROM gates WHERE id = $1", [gateId]);
       if (!rows[0]) throw new GateError(`No Gate ${gateId}.`);
       const gate = toGate(rows[0]);
       if (gate.decidedAt) throw new GateError(`Gate ${gateId} is already decided.`);
       if (!gate.actions.includes(action)) {
-        throw new GateError(`An Escalation cannot be ${action === "approve" ? "approved" : action}; it can only be abandoned.`);
+        throw new GateError(`An Escalation cannot be ${action === "approve" ? "approved" : action === "reject" ? "rejected" : action}; it can only be abandoned.`);
       }
+      if (action === "reject") return reject(gate, feedback?.trim() ?? "");
 
       if (action === "abandon") {
         try {

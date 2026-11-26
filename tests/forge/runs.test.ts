@@ -77,7 +77,7 @@ describe("starting a Run", () => {
     expect(runner.steps[0]!.cwd).toBe(run.worktreePath);
     expect(runner.steps[0]!.prompt).toContain("Make the player jump.");
     expect(run.attempts).toMatchObject([{ step: "developer", attempt: 1, status: "succeeded" }]);
-    expect(run.gates).toMatchObject([{ kind: "final", actions: ["approve", "abandon"], decision: null }]);
+    expect(run.gates).toMatchObject([{ kind: "final", actions: ["approve", "reject", "abandon"], decision: null }]);
   });
 });
 
@@ -431,6 +431,126 @@ describe("deciding a Gate", () => {
     await expect(forge.decideGate({ gateId: finished.gates[0]!.id, action: "abandon" })).rejects.toThrow(/already decided/);
     expect((await forge.getRun(escalated.id)).state).toBe("waiting");
     expect((await forge.getRun(finished.id)).state).toBe("approved");
+  });
+});
+
+describe("rejecting a developer Run with Feedback", () => {
+  /** A Developer that commits a new file per call, so each Iteration adds its own commit. */
+  function commitsEachTime(brief: (n: number) => string) {
+    let n = 0;
+    return (step: { cwd: string }) => {
+      n++;
+      writeFileSync(join(step.cwd, `work-${n}.txt`), `${n}\n`);
+      git(step.cwd, "add", ".");
+      git(step.cwd, "commit", "-q", "-m", `feat: work ${n}`);
+      writeFileSync(join(step.cwd, BRIEF), brief(n));
+    };
+  }
+
+  it("starts a new Iteration in the same worktree, then reopens the final Gate on the same pull request with a new Review Brief", async () => {
+    const { project, remote } = await projectWithRemote();
+    runner.use(commitsEachTime((n) => `Brief ${n}.\n`));
+    const first = await runToEnd(project, { task: "Make the player jump." });
+
+    await forge.decideGate({ gateId: first.gates[0]!.id, action: "reject", feedback: "  Jump higher.  " });
+    await forge.whenIdle();
+    const run = await forge.getRun(first.id);
+
+    expect(run.state).toBe("waiting");
+    expect(run.iteration).toBe(2);
+    expect(run.worktreePath).toBe(first.worktreePath);
+    expect(run.gates).toMatchObject([
+      { kind: "final", decision: "reject", feedback: "Jump higher." },
+      { kind: "final", decision: null, actions: ["approve", "reject", "abandon"] },
+    ]);
+    expect(run.iterations).toEqual([
+      { number: 1, feedback: null },
+      { number: 2, feedback: "Jump higher." },
+    ]);
+    expect(run.attempts.map((a) => [a.iteration, a.attempt])).toEqual([[1, 1], [2, 1]]);
+    expect(codeHost.pullRequests).toHaveLength(1);
+    expect(codeHost.pullRequests[0]!.comments).toEqual(["Brief 1.\n", "Brief 2.\n"]);
+    expect(git(remote.bare, "log", "--format=%s", run.branch!)).toContain("feat: work 2");
+  });
+
+  it("does not post the previous Iteration's Review Brief again when the Developer writes none", async () => {
+    const { project } = await projectWithRemote();
+    let n = 0;
+    runner.use((step) => {
+      if (++n === 1) developerCommits(step, "Brief 1.\n");
+      else {
+        writeFileSync(join(step.cwd, "more.txt"), "more\n");
+        git(step.cwd, "add", ".");
+        git(step.cwd, "commit", "-q", "-m", "feat: more");
+      }
+    });
+    const first = await runToEnd(project);
+
+    await forge.decideGate({ gateId: first.gates[0]!.id, action: "reject", feedback: "More." });
+    await forge.whenIdle();
+
+    expect(codeHost.pullRequests[0]!.comments).toEqual(["Brief 1.\n", expect.stringMatching(/no Review Brief/i)]);
+  });
+
+  it("gives the Developer the task, this Feedback and the earlier ones", async () => {
+    const { project } = await projectWithRemote();
+    const first = await runToEnd(project, { task: "Make the player jump." });
+    await forge.decideGate({ gateId: first.gates[0]!.id, action: "reject", feedback: "Jump higher." });
+    await forge.whenIdle();
+    const second = await forge.getRun(first.id);
+    await forge.decideGate({ gateId: second.gates[1]!.id, action: "reject", feedback: "Add a sound." });
+    await forge.whenIdle();
+
+    const prompt = runner.steps.at(-1)!.prompt;
+    expect(prompt).toContain("Make the player jump.");
+    expect(prompt).toContain("1. Jump higher.");
+    expect(prompt).toContain("2. Add a sound.");
+    expect((await forge.getRun(first.id)).iteration).toBe(3);
+  });
+
+  it("runs the Checks again with a fresh retry budget", async () => {
+    const { project } = await projectWithRemote();
+    await forge.setChecks(project.id, ["test -f ok.txt || { echo missing; exit 1; }"]);
+    let calls = 0;
+    runner.use((step) => {
+      calls++;
+      if (calls !== 1) writeFileSync(join(step.cwd, "ok.txt"), "ok\n");
+    });
+    const first = await runToEnd(project);
+    expect(first.attempts).toHaveLength(2);
+    runner.use(() => {});
+    const gate = first.gates.find((g) => g.kind === "final")!;
+
+    await forge.decideGate({ gateId: gate.id, action: "reject", feedback: "Again." });
+    await forge.whenIdle();
+    const run = await forge.getRun(first.id);
+
+    expect(run.state).toBe("waiting");
+    expect(run.checks.filter((c) => c.iteration === 2)).toMatchObject([{ attempt: 1, exitStatus: 0 }]);
+  });
+
+  it("requires a written Feedback and refuses to reject an Escalation", async () => {
+    const { project } = await projectWithRemote();
+    const finished = await runToEnd(project);
+    runner.use(() => ({ status: "failed", error: "claude crashed" }));
+    const escalated = await runToEnd(project);
+
+    await expect(forge.decideGate({ gateId: finished.gates[0]!.id, action: "reject", feedback: "   " })).rejects.toThrow(/Feedback/);
+    await expect(forge.decideGate({ gateId: escalated.gates[0]!.id, action: "reject", feedback: "No." })).rejects.toThrow(/only be abandoned/);
+    expect((await forge.getRun(finished.id)).state).toBe("waiting");
+    expect((await forge.getRun(escalated.id)).state).toBe("waiting");
+  });
+
+  it("can still be abandoned after a rejection", async () => {
+    const { project } = await projectWithRemote();
+    const first = await runToEnd(project);
+    await forge.decideGate({ gateId: first.gates[0]!.id, action: "reject", feedback: "Redo." });
+    await forge.whenIdle();
+    const second = await forge.getRun(first.id);
+
+    const run = await forge.decideGate({ gateId: second.gates[1]!.id, action: "abandon" });
+
+    expect(run.state).toBe("abandoned");
   });
 });
 

@@ -11,6 +11,7 @@ export interface Project {
 }
 export interface CheckResult {
   id: number;
+  iteration: number;
   attempt: number;
   command: string;
   exitStatus: number | null;
@@ -20,6 +21,7 @@ export interface Run {
   id: number;
   projectId: number;
   workflow: string;
+  iteration: number;
   title: string;
   task: string;
   trackerRef: string | null;
@@ -33,6 +35,7 @@ export interface Run {
 }
 export interface StepAttempt {
   id: number;
+  iteration: number;
   step: string;
   attempt: number;
   runner: string;
@@ -53,14 +56,20 @@ export interface Gate {
   actions: GateAction[];
   decidedAt: string | null;
   decision: GateAction | null;
+  feedback: string | null;
 }
-export type GateAction = "approve" | "abandon";
+export type GateAction = "approve" | "reject" | "abandon";
 
 /** Records the human's decision at a Gate and returns the updated Run. */
-export function decideGate(gateId: number, action: GateAction): Promise<RunDetail> {
-  return postJson(`/api/gates/${gateId}/decision`, { action });
+export function decideGate(gateId: number, action: GateAction, feedback?: string): Promise<RunDetail> {
+  return postJson(`/api/gates/${gateId}/decision`, { action, feedback });
+}
+export interface Iteration {
+  number: number;
+  feedback: string | null;
 }
 export interface RunDetail extends Run {
+  iterations: Iteration[];
   attempts: StepAttempt[];
   checks: CheckResult[];
   gates: Gate[];

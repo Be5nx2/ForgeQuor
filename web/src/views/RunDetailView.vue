@@ -68,6 +68,15 @@ onUnmounted(() => stopFollowing?.());
 
     <p v-if="run.prUrl">Pull request <a :href="run.prUrl" target="_blank" rel="noopener">#{{ run.prNumber }}</a></p>
 
+    <h3>Iterations</h3>
+    <ul>
+      <li v-for="i in run.iterations" :key="i.number">
+        <strong>Iteration {{ i.number }}</strong><span v-if="i.number === run.iteration" class="badge">current</span>
+        <pre v-if="i.feedback">{{ i.feedback }}</pre>
+        <span v-else-if="i.number === 1" class="muted"> · first pass</span>
+      </li>
+    </ul>
+
     <h3>Gates</h3>
     <p v-if="!run.gates.length" class="muted">None yet.</p>
     <ul>
@@ -75,7 +84,8 @@ onUnmounted(() => stopFollowing?.());
         <strong>{{ g.kind === "final" ? "Final Gate" : "Escalation" }}</strong>: {{ g.reason }}
         <pre v-if="g.evidence">{{ g.evidence }}</pre>
         <div v-if="g.decidedAt" class="muted">
-          {{ g.decision === "approve" ? "Approved" : "Abandoned" }} · {{ new Date(g.decidedAt).toLocaleString() }}
+          {{ g.decision === "approve" ? "Approved" : g.decision === "reject" ? "Rejected" : "Abandoned" }} · {{ new Date(g.decidedAt).toLocaleString() }}
+          <pre v-if="g.feedback">{{ g.feedback }}</pre>
         </div>
         <GateActions v-else :gate="g" @decided="load" />
       </li>
@@ -85,7 +95,7 @@ onUnmounted(() => stopFollowing?.());
     <p v-if="!run.checks.length" class="muted">None ran.</p>
     <ul>
       <li v-for="c in run.checks" :key="c.id">
-        <code>{{ c.command }}</code> · attempt {{ c.attempt }} ·
+        <code>{{ c.command }}</code> · iteration {{ c.iteration }} · attempt {{ c.attempt }} ·
         <span class="badge">{{ c.exitStatus === 0 ? "passed" : c.exitStatus === null ? "killed" : `exit ${c.exitStatus}` }}</span>
         <pre v-if="c.output.trim()">{{ c.output }}</pre>
       </li>
@@ -95,7 +105,7 @@ onUnmounted(() => stopFollowing?.());
     <p v-if="!run.attempts.length" class="muted">None yet.</p>
     <ul>
       <li v-for="a in run.attempts" :key="a.id">
-        <strong>{{ a.step }}</strong> · attempt {{ a.attempt }} · <span class="badge">{{ a.status }}</span>
+        <strong>{{ a.step }}</strong> · iteration {{ a.iteration }} · attempt {{ a.attempt }} · <span class="badge">{{ a.status }}</span>
         <div class="muted">
           {{ a.runner }}<span v-if="a.model"> ({{ a.model }})</span> · {{ new Date(a.startedAt).toLocaleString() }}
           <span v-if="a.endedAt"> → {{ new Date(a.endedAt).toLocaleTimeString() }}</span>

@@ -20,7 +20,7 @@ Codex **Runner**, **Artist**, an `assets` **Workflow** (Artist → asset **Gate*
     - every Run carries its Workflow name; existing Runs are `developer` Runs;
     - the Workflow shows in the Runs list and the Run detail;
     - behaviour is unchanged: every existing test passes untouched.
-- [ ] `m2-02` **Reject a developer Run with Feedback**: the human can ask for changes instead of abandoning.
+- [x] `m2-02` **Reject a developer Run with Feedback**: the human can ask for changes instead of abandoning.
   - Spec: `docs/specs/m2-assets.md`
   - Blocked by: `m2-01`
   - Acceptance:
