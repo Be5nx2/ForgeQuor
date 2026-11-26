@@ -140,5 +140,7 @@ YAML **Workflows** with parallel **Steps**, Griller with chat, Spec Writer, Arch
 - Project registration accepts a GitHub remote not named `origin` (today refused as "no GitHub remote").
 - Lock migrations so two Forgequor starts at once cannot apply them twice.
 - Test the startup tool checks and the `ls-remote` default-branch fallback.
+- After a hard crash of Forgequor (kill -9, power loss), detached Runner and Check process groups survive; on restart, kill or wait for them before restarting the Step, so two Developers never share a worktree.
+- Keep the partial Check results of an interrupted attempt (marked interrupted) instead of deleting them before the Checks run again.
 
 ## Done
