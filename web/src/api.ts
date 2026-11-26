@@ -18,12 +18,16 @@ export interface AssetRequest {
   description: string;
   width: number;
   height: number;
+  fill?: boolean;
 }
 export interface Asset extends AssetRequest {
   id: number;
+  fill: boolean;
   position: number;
   targetPath: string;
   status: "pending" | "generating" | "waiting" | "approved";
+  /** Colours outside the Art Direction's palette in the current version; a warning, never a failure. */
+  warnings: string[];
 }
 export interface CheckResult {
   id: number;

@@ -2,6 +2,7 @@ import { copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readSync, 
 import { join, resolve, sep } from "node:path";
 import type pg from "pg";
 import { describeDuration } from "../duration.js";
+import { checkAssetFile, parsePalette, type AssetCheckResult } from "./asset-checks.js";
 import { publishPullRequest } from "./publish.js";
 import { runAgentStep } from "./step.js";
 import type { RunInput, RunPlan, Workflow, WorkflowContext } from "./workflow.js";
@@ -18,15 +19,20 @@ export interface AssetRequest {
   description: string;
   width: number;
   height: number;
+  /** The Asset fills its whole square, fully opaque (a ground tile). Off by default; any transparent pixel then fails the Asset Checks. */
+  fill?: boolean;
 }
 
 export interface Asset extends AssetRequest {
   id: number;
+  fill: boolean;
   /** Order in which the Artist handles the Run's Assets, from 0. */
   position: number;
   /** Where the Artist writes the final Asset, relative to the Run's worktree. */
   targetPath: string;
   status: AssetStatus;
+  /** What the Asset Checks warned about in its current version (colours outside the palette). Warnings never fail an Asset. */
+  warnings: string[];
 }
 
 /** No such Asset in that Run, or nothing servable recorded for it. */
@@ -66,7 +72,8 @@ export function validateAssetRequests(assets: unknown): AssetRequest[] {
     if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) {
       throw new Error(`${at} ("${name}") needs a size of whole pixels, at least 1x1.`);
     }
-    return { name, kind: raw.kind, description, width, height };
+    if (raw.fill !== undefined && typeof raw.fill !== "boolean") throw new Error(`${at} ("${name}"): fill must be yes or no.`);
+    return { name, kind: raw.kind, description, width, height, fill: raw.fill === true };
   });
 }
 
@@ -79,13 +86,20 @@ export function toAsset(r: Record<string, any>): Asset {
     description: r.description,
     width: r.width,
     height: r.height,
+    fill: r.fill,
     targetPath: r.target_path,
     status: r.status,
+    warnings: r.warnings ?? [],
   };
 }
 
-async function loadAssets(pool: pg.Pool, runId: number): Promise<Asset[]> {
-  const { rows } = await pool.query("SELECT * FROM assets WHERE run_id = $1 ORDER BY position", [runId]);
+/** Reads a Run's Assets, in order, each with the warnings of its latest version. */
+export async function loadAssets(pool: pg.Pool, runId: number): Promise<Asset[]> {
+  const { rows } = await pool.query(
+    `SELECT a.*, (SELECT v.warnings FROM asset_versions v WHERE v.asset_id = a.id ORDER BY v.id DESC LIMIT 1) AS warnings
+     FROM assets a WHERE a.run_id = $1 ORDER BY a.position`,
+    [runId],
+  );
   return rows.map(toAsset);
 }
 
@@ -120,22 +134,31 @@ export const ARTIST_INSTRUCTIONS = `You are the Artist on a Forgequor Run. Work 
 - Use your image tool for exactly this one Asset.
 - Save the final Asset at the exact Target path you are given, and nowhere else in the worktree. Create the folders if needed.
 - Deliver pixel art at exactly the requested size. The image tool's output is much larger: scale it down yourself, keeping the pixels crisp (nearest neighbour).
-- Use a transparent background.
+- When the Asset says "Fill: yes", fill the whole square edge to edge with no transparent pixel. Otherwise use a transparent background wherever the Asset does not need to cover it.
 - Do not commit anything.
 - When you are done, say in one or two sentences what you saved.`;
 
-/** The Artist's prompt for one Asset. */
-export function artistPrompt(asset: Asset, artDirectionPath: string, artDirection: string): string {
+/** Why the Artist's previous attempt at an Asset has to be redone. */
+export type Redo = { unwritten: true } | { failures: string[] };
+
+/** The Artist's prompt for one Asset; on a retry it says what was wrong with the previous attempt. */
+export function artistPrompt(asset: Asset, artDirectionPath: string, artDirection: string, redo?: Redo): string {
+  const note = !redo
+    ? ""
+    : "unwritten" in redo
+      ? `\n\nYour previous attempt left nothing at the target path. Draw the Asset again and save it at exactly ${asset.targetPath}.`
+      : `\n\nYour previous attempt failed the Asset Checks. Fix this and save the final Asset again at the same target path:\n${redo.failures.map((f) => `- ${f}`).join("\n")}`;
   return `Asset to draw: ${asset.name}
 Kind: ${asset.kind}
 Size: ${size(asset)} pixels
+Fill: ${asset.fill ? "yes, every pixel opaque" : "no"}
 Target path: ${asset.targetPath}
 
 What it shows:
 ${asset.description}
 
 Art Direction (${artDirectionPath}):
-${artDirection}`;
+${artDirection}${note}`;
 }
 
 /** The Art Direction text, or null when the Project has none at its path. */
@@ -159,8 +182,11 @@ function reviewBrief(assets: Asset[]): string {
   ].join("\n");
 }
 
-/** Keeps the Runner's raw images in the Run Notes, as a trace, and records them as this attempt's version of the Asset. */
-async function keepTrace(ctx: WorkflowContext, asset: Asset, attempt: number, files: string[]) {
+/**
+ * Records one Artist attempt as a version of the Asset: the Runner's raw images, kept in the Run Notes as a trace, and
+ * what the Asset Checks found.
+ */
+async function recordVersion(ctx: WorkflowContext, asset: Asset, attempt: number, files: string[], summary: string, check: AssetCheckResult) {
   const dir = join(ctx.worktreePath, RUN_NOTES_DIR, "assets");
   const kept: string[] = [];
   mkdirSync(dir, { recursive: true });
@@ -173,53 +199,80 @@ async function keepTrace(ctx: WorkflowContext, asset: Asset, attempt: number, fi
       // The trace is only a convenience: a vanished raw image never fails the Run.
     }
   });
-  await ctx.pool.query("INSERT INTO asset_versions (asset_id, iteration, attempt, raw_images) VALUES ($1, $2, $3, $4)", [
-    asset.id,
-    ctx.run.iteration,
-    attempt,
-    JSON.stringify(kept),
-  ]);
+  await ctx.pool.query(
+    `INSERT INTO asset_versions (asset_id, iteration, attempt, raw_images, written, failures, warnings, summary)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [asset.id, ctx.run.iteration, attempt, JSON.stringify(kept), check.written, JSON.stringify(check.failures), JSON.stringify(check.warnings), summary],
+  );
 }
 
-/** One Artist Step for one Asset. False when the Run cannot go on (it paused, opened an Escalation, or was abandoned). */
-async function drawAsset(ctx: WorkflowContext, asset: Asset, artDirection: string): Promise<boolean> {
+/** An Asset the Artist did not write at its target path gets this many attempts in all (1 try + 1 more). */
+const MAX_UNWRITTEN_ATTEMPTS = 2;
+/** An Asset that fails the Asset Checks gets this many attempts in all (1 try + 2 extra). */
+const MAX_FAILING_ATTEMPTS = 3;
+// The two budgets are counted apart: an attempt that wrote nothing does not use up the failing one.
+
+/**
+ * Has the Artist draw one Asset until it passes the Asset Checks, sending it back with the reason when it does not. What
+ * was tried is read from the recorded versions, so a restarted Run goes on from there. False when the Run cannot go on
+ * (it paused, opened an Escalation, or was abandoned).
+ */
+async function drawAsset(ctx: WorkflowContext, asset: Asset, artDirection: string, palette: string[] | null): Promise<boolean> {
   const { run, project, pool, worktreePath } = ctx;
   const seat = ctx.agents.artist;
   if (!seat) throw new Error("Forgequor has no Runner for the Artist.");
-  const { rows } = await pool.query(
-    "SELECT coalesce(max(attempt), 0) + 1 AS attempt FROM step_attempts WHERE run_id = $1 AND iteration = $2 AND asset_id = $3",
-    [run.id, run.iteration, asset.id],
-  );
-  const attempt: number = rows[0].attempt;
-  await pool.query("UPDATE assets SET status = 'generating' WHERE id = $1", [asset.id]);
-  ctx.changed();
+  for (;;) {
+    const { rows: versions } = await pool.query(
+      "SELECT written, failures, summary FROM asset_versions WHERE asset_id = $1 AND iteration = $2 ORDER BY id",
+      [asset.id, run.iteration],
+    );
+    const last = versions.at(-1);
+    let redo: Redo | undefined;
+    if (last?.written && !last.failures.length) break;
+    if (last && !last.written) {
+      if (versions.filter((v) => !v.written).length >= MAX_UNWRITTEN_ATTEMPTS) {
+        await ctx.openGate("escalation", `The Artist wrote nothing at the target path of "${asset.name}" (${asset.targetPath}) after ${MAX_UNWRITTEN_ATTEMPTS} attempts.`, last.summary);
+        return false;
+      }
+      redo = { unwritten: true };
+    } else if (last) {
+      if (versions.filter((v) => v.written && v.failures.length).length >= MAX_FAILING_ATTEMPTS) {
+        await ctx.openGate("escalation", `"${asset.name}" still fails the Asset Checks after ${MAX_FAILING_ATTEMPTS} attempts.`, last.failures.join("\n"));
+        return false;
+      }
+      redo = { failures: last.failures };
+    }
 
-  const { result, timedOut } = await runAgentStep(ctx, seat, {
-    name: "artist",
-    attempt,
-    assetId: asset.id,
-    instructions: ARTIST_INSTRUCTIONS,
-    prompt: artistPrompt(asset, project.artDirectionPath, artDirection),
-  });
-  if (!(await ctx.stillRunning())) return false;
-  // A Step that finished on its own just as the timeout fired keeps its real result.
-  if (timedOut && result.status === "failed") {
-    await ctx.openGate("escalation", `The Artist's Step timed out after ${describeDuration(ctx.stepTimeoutMs)} and was killed.`);
-    return false;
-  }
-  if (result.status === "failed") {
-    await ctx.openGate("escalation", "The Artist failed.", result.error);
-    return false;
-  }
-  if (result.status === "quota_exhausted") {
-    await ctx.pause(result.resetsAt);
-    return false;
-  }
+    const { rows } = await pool.query(
+      "SELECT coalesce(max(attempt), 0) + 1 AS attempt FROM step_attempts WHERE run_id = $1 AND iteration = $2 AND asset_id = $3",
+      [run.id, run.iteration, asset.id],
+    );
+    const attempt: number = rows[0].attempt;
+    await pool.query("UPDATE assets SET status = 'generating' WHERE id = $1", [asset.id]);
+    ctx.changed();
 
-  await keepTrace(ctx, asset, attempt, result.files ?? []);
-  if (!servableAssetFile(worktreePath, asset.targetPath)) {
-    await ctx.openGate("escalation", `The Artist wrote no PNG at the target path of "${asset.name}" (${asset.targetPath}).`, result.summary);
-    return false;
+    const { result, timedOut } = await runAgentStep(ctx, seat, {
+      name: "artist",
+      attempt,
+      assetId: asset.id,
+      instructions: ARTIST_INSTRUCTIONS,
+      prompt: artistPrompt(asset, project.artDirectionPath, artDirection, redo),
+    });
+    if (!(await ctx.stillRunning())) return false;
+    // A Step that finished on its own just as the timeout fired keeps its real result.
+    if (timedOut && result.status === "failed") {
+      await ctx.openGate("escalation", `The Artist's Step timed out after ${describeDuration(ctx.stepTimeoutMs)} and was killed.`);
+      return false;
+    }
+    if (result.status === "failed") {
+      await ctx.openGate("escalation", "The Artist failed.", result.error);
+      return false;
+    }
+    if (result.status === "quota_exhausted") {
+      await ctx.pause(result.resetsAt);
+      return false;
+    }
+    await recordVersion(ctx, asset, attempt, result.files ?? [], result.summary, checkAssetFile(worktreePath, asset, palette));
   }
   await pool.query("UPDATE assets SET status = 'waiting' WHERE id = $1", [asset.id]);
   ctx.changed();
@@ -267,8 +320,9 @@ export const assetsWorkflow: Workflow = {
           `Expected a file at ${project.artDirectionPath} in the repository, on its default branch.`,
         );
       }
+      const palette = parsePalette(artDirection);
       for (const asset of todo) {
-        if (!(await drawAsset(ctx, asset, artDirection))) return;
+        if (!(await drawAsset(ctx, asset, artDirection, palette))) return;
       }
     }
 

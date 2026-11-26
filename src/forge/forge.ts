@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type pg from "pg";
 import type { Runner } from "../runner/runner.js";
 import { developerWorkflow } from "./developer.js";
-import { assetsWorkflow, assetTargetPath, AssetNotFoundError, repositoryPath, servableAssetFile, toAsset, type Asset, type AssetRequest } from "./assets.js";
+import { assetsWorkflow, assetTargetPath, AssetNotFoundError, repositoryPath, servableAssetFile, loadAssets, type Asset, type AssetRequest } from "./assets.js";
 import type { AgentSeat, Workflow } from "./workflow.js";
 import type { CodeHost } from "../codehost/codehost.js";
 import { createRunWorktree, inspectRepository, RegistrationError, refreshDefaultBranch, slugify } from "./workspace.js";
@@ -682,9 +682,9 @@ export function createForge(deps: ForgeDeps): Forge {
         runId = Number(rows[0].id);
         for (const [position, a] of plan.assets.entries()) {
           await client.query(
-            `INSERT INTO assets (run_id, position, name, kind, description, width, height, target_path)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-            [runId, position, a.name, a.kind, a.description, a.width, a.height, assetTargetPath(found[0].art_folder, a.kind, a.name)],
+            `INSERT INTO assets (run_id, position, name, kind, description, width, height, fill, target_path)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+            [runId, position, a.name, a.kind, a.description, a.width, a.height, a.fill === true, assetTargetPath(found[0].art_folder, a.kind, a.name)],
           );
         }
         await client.query("COMMIT");
@@ -714,10 +714,9 @@ export function createForge(deps: ForgeDeps): Forge {
       const attempts = await pool.query("SELECT * FROM step_attempts WHERE run_id = $1 ORDER BY id", [id]);
       const checks = await pool.query("SELECT * FROM check_results WHERE run_id = $1 ORDER BY id", [id]);
       const gates = await pool.query("SELECT * FROM gates WHERE run_id = $1 ORDER BY id", [id]);
-      const assets = await pool.query("SELECT * FROM assets WHERE run_id = $1 ORDER BY position", [id]);
       const iterations: Iteration[] = [{ number: 1, feedback: null }];
       for (const g of gates.rows.filter((g) => g.decision === "reject")) iterations.push({ number: iterations.length + 1, feedback: g.feedback });
-      return { ...toRun(rows[0]), assets: assets.rows.map(toAsset), iterations, attempts: attempts.rows.map(toAttempt), checks: checks.rows.map(toCheck), gates: gates.rows.map(toGate) };
+      return { ...toRun(rows[0]), assets: await loadAssets(pool, id), iterations, attempts: attempts.rows.map(toAttempt), checks: checks.rows.map(toCheck), gates: gates.rows.map(toGate) };
     },
 
     async listRuns(filter = {}) {

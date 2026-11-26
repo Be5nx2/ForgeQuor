@@ -10,6 +10,7 @@ import { createTestDatabase } from "../harness/database.js";
 import { createFakeCodeHost } from "../harness/fake-codehost.js";
 import { createFakeRunner } from "../harness/fake-runner.js";
 import { createRepoWithBareRemote, git, type TempRemote, type TempRepo } from "../harness/git.js";
+import { makePng, type Pixel } from "../harness/png.js";
 
 let forge: Forge;
 let pool: pg.Pool;
@@ -64,10 +65,10 @@ afterEach(() => {
 });
 
 /** A registered Project whose `origin` is a real (bare) remote; its default branch has an Art Direction unless told otherwise. */
-async function projectWithRemote(opts: { artDirection?: boolean } = {}): Promise<{ project: Project; repo: TempRepo; remote: TempRemote }> {
+async function projectWithRemote(opts: { artDirection?: boolean; artText?: string } = {}): Promise<{ project: Project; repo: TempRepo; remote: TempRemote }> {
   const { repo, remote } = createRepoWithBareRemote({ remote: `git@github.com:acme/game-${++counter}.git` });
   cleanups.push(repo.cleanup, remote.cleanup);
-  if (opts.artDirection !== false) remote.advance("docs/ART_DIRECTION.md", ART_DIRECTION);
+  if (opts.artDirection !== false) remote.advance("docs/ART_DIRECTION.md", opts.artText ?? ART_DIRECTION);
   const project = await forge.registerProject({ path: repo.path });
   remote.pointOriginAtBare();
   return { project, repo, remote };
@@ -80,12 +81,18 @@ const grass: AssetRequest = { name: "grass", kind: "tile", description: "A plain
 const targetOf = (step: StepRequest) => /Target path: (\S+)/.exec(step.prompt)![1]!;
 
 /** An Artist that draws every Asset at its target path, as the real one must. */
-function drawing() {
-  return (step: StepRequest) => {
-    const file = join(step.cwd, targetOf(step));
-    mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, PNG);
-  };
+function drawing(pixel?: (x: number, y: number) => Pixel) {
+  return (step: StepRequest) => write(step, makePng(...sizeOf(step), { pixel }));
+}
+const sizeOf = (step: StepRequest): [number, number] => {
+  const m = /Size: (\d+)x(\d+)/.exec(step.prompt)!;
+  return [Number(m[1]), Number(m[2])];
+};
+/** What the Artist saves at the target path. */
+function write(step: StepRequest, bytes: Buffer | string) {
+  const file = join(step.cwd, targetOf(step));
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, bytes);
 }
 
 async function startAssets(project: Project, assets: AssetRequest[] = [hero, grass], extra: { title?: string } = {}) {
@@ -129,7 +136,7 @@ describe("starting an assets Run", () => {
     expect(run.task).toContain("Hero Idle");
     expect(run.task).toContain("16x16");
     expect(run.assets).toMatchObject([
-      { name: "Hero Idle", kind: "sprite", width: 16, height: 16, targetPath: "assets/art/sprites/hero-idle.png" },
+      { name: "Hero Idle", kind: "sprite", width: 16, height: 16, fill: false, targetPath: "assets/art/sprites/hero-idle.png" },
       { name: "grass", kind: "tile", width: 32, height: 32, targetPath: "assets/art/tiles/grass.png" },
     ]);
     await forge.whenIdle();
@@ -283,6 +290,7 @@ describe("when the assets Run cannot go on", () => {
     expect(run.gates).toMatchObject([{ kind: "escalation" }]);
     expect(run.gates[0]!.reason).toContain("Hero Idle");
     expect(run.gates[0]!.evidence).toContain("I could not get the image tool to answer.");
+    expect(artist.steps).toHaveLength(2);
   });
 
   it("opens an Escalation with the error when the Artist fails", async () => {
@@ -316,6 +324,111 @@ describe("when the assets Run cannot go on", () => {
     expect(run.state).toBe("paused");
     expect(run.resumeAt).toEqual(resetsAt);
     await pool.query("UPDATE runs SET state = 'abandoned' WHERE id = $1", [run.id]);
+  });
+});
+
+describe("the Asset Checks", () => {
+  it("send a failing Asset back to the Artist with the reason, and the next valid file goes to the Gate", async () => {
+    const { project } = await projectWithRemote();
+    artist.use((step) => (artist.steps.length === 1 ? write(step, makePng(32, 32)) : drawing()(step)));
+
+    const run = await startAssets(project, [hero]);
+
+    expect(run.gates).toMatchObject([{ kind: "asset" }]);
+    expect(artist.steps).toHaveLength(2);
+    expect(artist.steps[1]!.prompt).toContain("32x32");
+    expect(artist.steps[1]!.prompt).toContain("expected exactly 16x16");
+    expect(run.attempts.map((a) => [a.step, a.attempt])).toEqual([["artist", 1], ["artist", 2]]);
+    expect(run.assets[0]).toMatchObject({ status: "waiting", warnings: [] });
+  });
+
+  it("give a failing Asset 2 extra attempts, then open an Escalation naming the Asset and the failure", async () => {
+    const { project } = await projectWithRemote();
+    artist.use((step) => write(step, makePng(16, 16, { alpha: false })));
+
+    const run = await startAssets(project, [hero, grass]);
+
+    expect(artist.steps).toHaveLength(3);
+    expect(run.gates).toMatchObject([{ kind: "escalation", actions: ["abandon"] }]);
+    expect(run.gates[0]!.reason).toContain("Hero Idle");
+    expect(run.gates[0]!.reason).toContain("3 attempts");
+    expect(run.gates[0]!.evidence).toMatch(/alpha channel/);
+    expect(run.assets.map((a) => a.status)).toEqual(["generating", "pending"]);
+  });
+
+  it("treat a file that is not a PNG as a failure to fix, not as nothing written", async () => {
+    const { project } = await projectWithRemote();
+    artist.use((step) => (artist.steps.length === 1 ? write(step, "<html></html>") : drawing()(step)));
+
+    const run = await startAssets(project, [hero]);
+
+    expect(run.gates).toMatchObject([{ kind: "asset" }]);
+    expect(artist.steps[1]!.prompt).toContain("not a readable PNG");
+  });
+
+  it("give an Asset with nothing written one more try, with a reminder of where to save it", async () => {
+    const { project } = await projectWithRemote();
+    artist.use((step) => (artist.steps.length === 1 ? { status: "succeeded", summary: "Done!" } : drawing()(step)));
+
+    const run = await startAssets(project, [hero]);
+
+    expect(run.gates).toMatchObject([{ kind: "asset" }]);
+    expect(artist.steps[1]!.prompt).toContain("nothing at the target path");
+    expect(artist.steps[1]!.prompt).toContain(targetOf(artist.steps[1]!));
+  });
+
+  it("fail a transparent pixel in an Asset marked as filling its square, and leave other Assets free to use transparency", async () => {
+    const { project } = await projectWithRemote();
+    artist.use((step) => (artist.steps.length === 1 ? drawing((x) => (x === 0 ? [0, 0, 0, 0] : [255, 0, 0, 255]))(step) : drawing()(step)));
+
+    const run = await startAssets(project, [{ ...grass, fill: true }]);
+
+    expect(run.assets[0]).toMatchObject({ fill: true, status: "waiting" });
+    expect(artist.steps).toHaveLength(2);
+    expect(artist.steps[0]!.prompt).toMatch(/Fill: yes/);
+    expect(artist.steps[1]!.prompt).toContain("must fill its whole square");
+
+    artist.steps.length = 0;
+    artist.use(drawing((x) => (x === 0 ? [0, 0, 0, 0] : [255, 0, 0, 255])));
+    const free = await startAssets(project, [hero]);
+    expect(free.assets[0]).toMatchObject({ fill: false, status: "waiting" });
+    expect(artist.steps).toHaveLength(1);
+    expect(artist.steps[0]!.prompt).toMatch(/Fill: no/);
+  });
+
+  it("refuse a fill flag that is not a yes or a no", async () => {
+    const { project } = await projectWithRemote();
+
+    await expect(forge.startRun({ projectId: project.id, workflow: "assets", assets: [{ ...hero, fill: "yes" as any }] })).rejects.toThrow(/fill/);
+  });
+
+  it("show colours outside the Art Direction's palette as a warning on the Asset, never a failure", async () => {
+    const { project } = await projectWithRemote({ artText: "# Art\n\n## Palette\n- #FF0000 red\n- #00FF00 green\n" });
+    artist.use(drawing((x) => (x === 0 ? [1, 2, 3, 255] : [255, 0, 0, 255])));
+
+    const run = await startAssets(project, [hero]);
+
+    expect(artist.steps).toHaveLength(1);
+    expect(run.gates).toMatchObject([{ kind: "asset" }]);
+    expect(run.assets[0]!.warnings).toEqual(["1 colour outside the palette: #010203"]);
+  });
+
+  it("raise no palette warning when the Art Direction lists no palette", async () => {
+    const { project } = await projectWithRemote();
+    artist.use(drawing(() => [1, 2, 3, 255]));
+
+    const run = await startAssets(project, [hero]);
+
+    expect(run.assets[0]!.warnings).toEqual([]);
+  });
+
+  it("keep the warnings of the version the human is judging, not those of an earlier attempt", async () => {
+    const { project } = await projectWithRemote({ artText: "## Palette\n#FF0000\n" });
+    artist.use((step) => (artist.steps.length === 1 ? write(step, makePng(8, 8)) : drawing(() => [255, 0, 0, 255])(step)));
+
+    const run = await startAssets(project, [hero]);
+
+    expect(run.assets[0]!.warnings).toEqual([]);
   });
 });
 
@@ -429,7 +542,7 @@ describe("serving an Asset's image", () => {
     const path = await forge.assetImage(run.id, run.assets[0]!.id);
 
     expect(path).toBe(realpathSync(join(run.worktreePath!, "assets/art/sprites/hero-idle.png")));
-    expect(readFileSync(path)).toEqual(PNG);
+    expect(readFileSync(path)).toEqual(makePng(16, 16));
     await expect(forge.assetImage(other.id, run.assets[0]!.id)).rejects.toThrow(/No such Asset/);
     await expect(forge.assetImage(run.id, 999_999)).rejects.toThrow(/No such Asset/);
     await expect(forge.assetImage(999_999, run.assets[0]!.id)).rejects.toThrow(/No such Asset/);

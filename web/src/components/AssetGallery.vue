@@ -23,7 +23,10 @@ const zoom = (a: Asset) => Math.min(16, Math.max(2, Math.floor(256 / Math.max(a.
     <ul>
       <li v-for="a in assets" :key="a.id">
         <strong>{{ a.name }}</strong> <span class="badge">{{ a.status }}</span>
-        <div class="muted">{{ a.kind }} · {{ a.width }}x{{ a.height }} · <code>{{ a.targetPath }}</code></div>
+        <div class="muted">{{ a.kind }} · {{ a.width }}x{{ a.height }}<span v-if="a.fill"> · fills its square</span> · <code>{{ a.targetPath }}</code></div>
+        <ul v-if="a.warnings.length" class="warnings" aria-label="Palette warnings">
+          <li v-for="w in a.warnings" :key="w" class="error">⚠ {{ w }}</li>
+        </ul>
         <div v-if="HAS_IMAGE.includes(a.status)" class="previews" :style="{ background: backdrop }">
           <img
             :src="`/api/runs/${runId}/assets/${a.id}/image?i=${iteration}`"
@@ -46,6 +49,8 @@ const zoom = (a: Asset) => Math.min(16, Math.max(2, Math.floor(256 / Math.max(a.
 </template>
 
 <style scoped>
+.warnings { margin: 0.25rem 0 0; }
+.warnings li { background: transparent; padding: 0; margin: 0; }
 .backdrop { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem; }
 .backdrop input { flex: none; padding: 0; width: 2.5rem; height: 2rem; }
 .previews { display: flex; gap: 1.5rem; align-items: flex-start; padding: 0.75rem; margin-top: 0.5rem; border-radius: 6px; border: 1px solid #94a3b8; overflow-x: auto; }

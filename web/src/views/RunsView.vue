@@ -19,10 +19,11 @@ interface AssetDraft {
   kind: AssetKind;
   description: string;
   size: string;
+  fill: boolean;
   width: number;
   height: number;
 }
-const newAsset = (): AssetDraft => ({ name: "", kind: "sprite", description: "", size: "16x16", width: 16, height: 16 });
+const newAsset = (): AssetDraft => ({ name: "", kind: "sprite", description: "", size: "16x16", fill: false, width: 16, height: 16 });
 const assets = ref<AssetDraft[]>([newAsset()]);
 const sizeOf = (a: AssetDraft) => (a.size === "custom" ? { width: a.width, height: a.height } : { width: Number(a.size.split("x")[0]), height: Number(a.size.split("x")[1]) });
 const error = ref("");
@@ -42,7 +43,7 @@ async function start() {
       projectId: Number(form.value.projectId),
       workflow: form.value.workflow,
       task: isAssets ? undefined : form.value.task,
-      assets: isAssets ? assets.value.map((a) => ({ name: a.name, kind: a.kind, description: a.description, ...sizeOf(a) })) : undefined,
+      assets: isAssets ? assets.value.map((a) => ({ name: a.name, kind: a.kind, description: a.description, fill: a.fill, ...sizeOf(a) })) : undefined,
       title: form.value.title || undefined,
       trackerRef: form.value.trackerRef || undefined,
     });
@@ -94,6 +95,7 @@ watch([filterProject, filterState], load);
           <option v-for="size in SIZES" :key="size" :value="size">{{ size }}</option>
           <option value="custom">custom…</option>
         </select>
+        <label class="fill"><input v-model="a.fill" type="checkbox" aria-label="Asset fills its square" /> Fills its whole square (no transparency, e.g. a ground tile)</label>
         <div v-if="a.size === 'custom'">
           <input v-model.number="a.width" type="number" min="1" step="1" aria-label="Asset width" />
           ×

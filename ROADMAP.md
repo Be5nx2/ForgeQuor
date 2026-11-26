@@ -57,7 +57,7 @@ Codex **Runner**, **Artist**, an `assets` **Workflow** (Artist → asset **Gate*
     - an `assets` Run waits at an Asset Gate, never a final Gate, so the developer-style reject with Feedback never applies to it;
     - a Gate decision refused for bad input (such as an empty Feedback) answers 400, not 409 (left by m2-02);
     - once approved: one commit, push, pull request, a Review Brief written by Forgequor (path, kind, size of each Asset), and the Run is Approved with no second Gate.
-- [ ] `m2-05` **Asset Checks**: broken files never reach the Asset Gate.
+- [x] `m2-05` **Asset Checks**: broken files never reach the Asset Gate.
   - Spec: `docs/specs/m2-assets.md`
   - Blocked by: `m2-04`
   - Acceptance:
