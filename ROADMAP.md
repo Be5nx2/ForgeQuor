@@ -65,6 +65,8 @@ Codex **Runner**, **Artist**, an `assets` **Workflow** (Artist → asset **Gate*
     - a failing Asset goes back to the Artist with the reason, for at most 2 extra attempts, then an Escalation names the Asset and the failure;
     - an Asset Request with nothing written at its target path gets one more try, then an Escalation with the Artist's last message;
     - `npm run smoke:codex` also checks the file the Artist wrote in the working directory: a PNG with transparency at exactly 16x16 (today it only checks the raw image is a PNG);
+    - an Asset Request has a fill flag, off by default, for any kind: when on, the Artist fills the whole square edge to edge, and any transparent pixel fails the Asset Checks; when off, the Artist may use transparency as it sees fit (found in the first real assets Run, where a ground tile came back mostly transparent);
+    - the Asset Gate's text no longer says Assets are waiting once it is decided, and the Projects screen's Art Direction path field is wide enough to show the whole path;
     - colours outside the Art Direction palette (the `#RRGGBB` codes under its "Palette" heading) are shown as a warning on the Asset, never a failure; no palette, no warning.
 - [ ] `m2-06` **Per-Asset verdicts and Iterations**: only the Assets the human rejects are redone.
   - Spec: `docs/specs/m2-assets.md`
