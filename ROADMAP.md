@@ -36,6 +36,8 @@ One **Project**, one **Run** going Developer (Claude) → **Checks** → pull re
   - Acceptance:
     - a Run starts from the UI (task, title, optional tracker reference);
     - each Run gets its own worktree and branch from the freshly fetched default branch;
+    - the Project's default branch is refreshed from the remote at Run start, so a stale `origin/HEAD` is never used;
+    - the Forge core test harness gains a bare remote, used to test the fetch (and the push in `m1-04`);
     - the Developer works there through the Claude Runner and commits, and Forgequor commits whatever is left;
     - the Run Notes folder is excluded from git without changing the Project;
     - the Run reaches a final Gate offering approve or abandon;
@@ -112,5 +114,8 @@ YAML **Workflows** with parallel **Steps**, Griller with chat, Spec Writer, Arch
 - Automatic solo/duo review choice from diff size.
 - Visual Workflow editor.
 - Containerised or API-key Runners, multi-user studio instance.
+- Project registration accepts a GitHub remote not named `origin` (today refused as "no GitHub remote").
+- Lock migrations so two Forgequor starts at once cannot apply them twice.
+- Test the startup tool checks and the `ls-remote` default-branch fallback.
 
 ## Done
