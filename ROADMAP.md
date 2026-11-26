@@ -54,6 +54,8 @@ Codex **Runner**, **Artist**, an `assets` **Workflow** (Artist → asset **Gate*
     - the Asset Gate shows each Asset at real size and magnified with crisp pixels, with a background colour tool beside the preview (UI grey by default, not saved);
     - the image route serves only the Assets recorded for that Run, never a path taken from the request (tested at the HTTP seam);
     - at the Asset Gate the human approves everything or abandons;
+    - an `assets` Run waits at an Asset Gate, never a final Gate, so the developer-style reject with Feedback never applies to it;
+    - a Gate decision refused for bad input (such as an empty Feedback) answers 400, not 409 (left by m2-02);
     - once approved: one commit, push, pull request, a Review Brief written by Forgequor (path, kind, size of each Asset), and the Run is Approved with no second Gate.
 - [ ] `m2-05` **Asset Checks**: broken files never reach the Asset Gate.
   - Spec: `docs/specs/m2-assets.md`
@@ -98,6 +100,7 @@ Codex **Runner**, **Artist**, an `assets` **Workflow** (Artist → asset **Gate*
     - after a Forgequor restart, a running `assets` Run picks up at its current Asset, keeping the Assets already produced;
     - abandoning the Run kills the running Codex process group;
     - the Run detail shows progress live, Asset by Asset.
+    - tests cover resuming a `developer` Run in the middle of a Feedback Iteration (after a Quota pause and after a restart), and a rejection racing an abandon (left untested by m2-02).
 
 ## Next
 
