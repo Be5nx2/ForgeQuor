@@ -10,7 +10,93 @@ Milestones are specified one at a time with `/to-spec`, then split into items wi
 
 Codex **Runner**, **Artist**, an `assets` **Workflow** (Artist → asset **Gate** → PR), generic Gate + **Feedback** + **Iteration** mechanism, **Art Direction** read from the Project, asset gallery in the UI. Unblocks the first game.
 
-- Spec: `docs/specs/m2-assets.md`. Items to come from `/to-tickets`.
+- Spec: `docs/specs/m2-assets.md`.
+
+- [ ] `m2-01` **Workflows out of the core**: the M1 sequence moves behind an internal Workflow interface, ready for a second Workflow.
+  - Spec: `docs/specs/m2-assets.md`
+  - Blocked by: none
+  - Acceptance:
+    - the Run lifecycle (slots, queue, Pause, restart, Gates, pull-request follow-up) stays in the Forge core, while the `developer` Workflow owns its Steps;
+    - every Run carries its Workflow name; existing Runs are `developer` Runs;
+    - the Workflow shows in the Runs list and the Run detail;
+    - behaviour is unchanged: every existing test passes untouched.
+- [ ] `m2-02` **Reject a developer Run with Feedback**: the human can ask for changes instead of abandoning.
+  - Spec: `docs/specs/m2-assets.md`
+  - Blocked by: `m2-01`
+  - Acceptance:
+    - a `developer` Run's final Gate offers approve, abandon, or reject with a required written Feedback; an Escalation stays abandon-only;
+    - rejecting starts a new Iteration: the Developer works in the same worktree with the task, this Feedback and earlier ones;
+    - the Checks run again with a fresh retry budget;
+    - new commits are pushed to the same pull request, and a new Review Brief comment is posted;
+    - the final Gate opens again, with no limit on Iterations;
+    - the Run detail lists the Iterations.
+- [ ] `m2-03` **Codex Runner adapter**: a Step can run through Codex headless, sandboxed, behind the Runner seam (ADR 0006).
+  - Spec: `docs/specs/m2-assets.md`
+  - Blocked by: none
+  - Acceptance:
+    - runs `codex exec` with JSON output in the worktree, in the workspace-write sandbox, with approval prompts off, the Agent's instructions and the configured model, one fresh session per Step;
+    - it runs in its own process group and can be cancelled like the Claude Runner;
+    - a succeeded result carries the generated images, which the adapter collects itself from Codex's home folder by thread; the Claude Runner returns none;
+    - a usage-limit turn failure with a retry time becomes Quota exhausted with that reset time; an image limit reported in the final message becomes Quota exhausted without one; anything else is a failure;
+    - startup reports a missing or logged-out `codex`;
+    - the contract suite passes against a fake `codex` with a temporary `CODEX_HOME` (success with and without an image, both limits, unreadable output, crash, cancellation, instructions and model passed through);
+    - `npm run smoke:codex` (opt-in) generates one real 16x16 sprite.
+- [ ] `m2-04` **First assets Run**: the human orders sprites and tiles, reviews them in a gallery and gets a pull request.
+  - Spec: `docs/specs/m2-assets.md`
+  - Blocked by: `m2-01`, `m2-03`
+  - Acceptance:
+    - each Project has an Art Direction path (default `docs/ART_DIRECTION.md`) and an art folder (default `assets/art`), editable in the UI;
+    - the Run form offers the Workflow; for `assets` it takes a list of Asset Requests (name, sprite or tile, description, size from 16x16, 18x18, 32x32 or custom);
+    - a missing Art Direction opens an Escalation before anything is generated;
+    - the Artist (Codex) handles the Asset Requests one after the other, following the Art Direction; each image lands at the art folder / kind folder / kebab-case name `.png`;
+    - the Project's setup commands and Checks are skipped, and the Run takes a Project slot;
+    - the Asset Gate shows each Asset at real size and magnified with crisp pixels, with a background colour tool beside the preview (UI grey by default, not saved);
+    - the image route serves only the Assets recorded for that Run, never a path taken from the request (tested at the HTTP seam);
+    - at the Asset Gate the human approves everything or abandons;
+    - once approved: one commit, push, pull request, a Review Brief written by Forgequor (path, kind, size of each Asset), and the Run is Approved with no second Gate.
+- [ ] `m2-05` **Asset Checks**: broken files never reach the Asset Gate.
+  - Spec: `docs/specs/m2-assets.md`
+  - Blocked by: `m2-04`
+  - Acceptance:
+    - each Asset is checked to be a readable PNG with an alpha channel, of the exact requested size, at the expected path;
+    - a failing Asset goes back to the Artist with the reason, for at most 2 extra attempts, then an Escalation names the Asset and the failure;
+    - an Asset Request with no image back gets one more try, then an Escalation with the Artist's last message;
+    - colours outside the Art Direction palette (the `#RRGGBB` codes under its "Palette" heading) are shown as a warning on the Asset, never a failure; no palette, no warning.
+- [ ] `m2-06` **Per-Asset verdicts and Iterations**: only the Assets the human rejects are redone.
+  - Spec: `docs/specs/m2-assets.md`
+  - Blocked by: `m2-04`, `m2-02`
+  - Acceptance:
+    - at the Asset Gate each pending Asset is approved, or rejected with its own required Feedback; the whole batch is submitted at once and a partial set is refused;
+    - a new Iteration redoes only the rejected Assets, each with its Feedback and its rejected version as a reference image;
+    - approved Assets are kept as they are;
+    - the gallery shows each Asset's past versions and Feedback;
+    - the Review Brief lists the Feedback that led to each Asset.
+- [ ] `m2-07` **Animation Strips**: the human can order animations, frames side by side in one image.
+  - Spec: `docs/specs/m2-assets.md`
+  - Blocked by: `m2-05`
+  - Acceptance:
+    - an Asset Request can be an Animation Strip with a frame count; frames have the chosen size and sit side by side horizontally;
+    - Animation Strips land in the `animations` kind folder;
+    - the Asset Checks expect a width of frame width × frame count;
+    - the gallery shows the strip and its frame count, and the Review Brief gives it.
+- [ ] `m2-08` **References, default size and safe replacement**: new art matches existing art, and nothing is overwritten by accident.
+  - Spec: `docs/specs/m2-assets.md`
+  - Blocked by: `m2-04`
+  - Acceptance:
+    - reference images named in the Art Direction are always given to the Artist; an Art Direction without any works the same;
+    - an Asset Request can name existing repository images as style references;
+    - a `Default size: WxH` line in the Art Direction presets the size in the Run form;
+    - an Asset Request can be marked as replacing an existing file;
+    - starting a Run is refused, before anything is generated, when a file would be overwritten without that mark, when two Asset Requests would produce the same file, or when a reference does not exist;
+    - the README documents the Art Direction contract (Palette heading, Default size line, reference images).
+- [ ] `m2-09` **Resilient, live assets Runs**: an `assets` Run survives limits and restarts, and shows its progress.
+  - Spec: `docs/specs/m2-assets.md`
+  - Blocked by: `m2-04`
+  - Acceptance:
+    - an exhausted Codex Quota pauses the Run and resumes it like a `developer` Run, at the Asset it was on;
+    - after a Forgequor restart, a running `assets` Run picks up at its current Asset, keeping the Assets already produced;
+    - abandoning the Run kills the running Codex process group;
+    - the Run detail shows progress live, Asset by Asset.
 
 ## Next
 
