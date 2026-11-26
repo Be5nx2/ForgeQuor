@@ -10,7 +10,7 @@ Milestones are specified one at a time with `/to-spec`, then split into items wi
 
 One **Project**, one **Run** going Developer (Claude) → **Checks** → pull request with **Review Brief** → final **Gate** in Forgequor. Worktree, branch and PR per Run (ADR 0001), Runners as local subprocesses (ADR 0002), PostgreSQL through Docker Compose (ADR 0003), minimal Vue UI.
 
-- Spec: to write (`docs/specs/m1-walking-skeleton.md`)
+- Spec: `docs/specs/m1-walking-skeleton.md`. Items to come from `/to-tickets`.
 
 ## Next
 
