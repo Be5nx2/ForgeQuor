@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from "vue";
 import { getJson, type RunDetail } from "../api";
+import GateActions from "../components/GateActions.vue";
 
 const props = defineProps<{ id: number }>();
 defineEmits<{ back: [] }>();
@@ -38,8 +39,11 @@ onUnmounted(() => clearInterval(timer));
     <ul>
       <li v-for="g in run.gates" :key="g.id">
         <strong>{{ g.kind === "final" ? "Final Gate" : "Escalation" }}</strong>: {{ g.reason }}
-        <div class="muted">Offers: {{ g.actions.join(" or ") }}<span v-if="g.decidedAt"> · decided</span></div>
         <pre v-if="g.evidence">{{ g.evidence }}</pre>
+        <div v-if="g.decidedAt" class="muted">
+          {{ g.decision === "approve" ? "Approved" : "Abandoned" }} · {{ new Date(g.decidedAt).toLocaleString() }}
+        </div>
+        <GateActions v-else :gate="g" @decided="load" />
       </li>
     </ul>
 

@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyInstance } from "fastify";
-import { RegistrationError, type Forge, type RunState } from "../forge/forge.js";
+import { GateError, RegistrationError, type Forge, type GateAction, type RunState } from "../forge/forge.js";
 import type { ToolReport } from "../startup/preflight.js";
 
 /** Thin JSON translation of the Forge core interface. No logic here. */
@@ -51,6 +51,16 @@ export async function createServer(deps: {
     }
   });
   app.get("/api/gates", async () => deps.forge.listOpenGates());
+  app.post<{ Params: { id: string }; Body: { action?: GateAction } }>("/api/gates/:id/decision", async (req, reply) => {
+    const action = req.body?.action;
+    if (action !== "approve" && action !== "abandon") return reply.code(400).send({ error: "action must be approve or abandon." });
+    try {
+      return await deps.forge.decideGate({ gateId: Number(req.params.id), action });
+    } catch (e) {
+      if (e instanceof GateError) return reply.code(409).send({ error: e.message });
+      throw e;
+    }
+  });
 
   if (deps.webRoot && existsSync(deps.webRoot)) {
     await app.register(fastifyStatic, { root: deps.webRoot });

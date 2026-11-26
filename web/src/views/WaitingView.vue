@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from "vue";
 import { getJson, type OpenGate } from "../api";
+import GateActions from "../components/GateActions.vue";
 
 const emit = defineEmits<{ open: [id: number] }>();
 const gates = ref<OpenGate[]>([]);
@@ -24,8 +25,9 @@ onUnmounted(() => clearInterval(timer));
     <li v-for="g in gates" :key="g.id" class="clickable" @click="emit('open', g.runId)">
       <strong>{{ g.runTitle }}</strong>
       <span class="badge">{{ g.kind === "final" ? "final Gate" : "Escalation" }}</span>
-      <div class="muted">{{ g.projectName }} · {{ g.reason }} · {{ g.actions.join(" / ") }}</div>
+      <div class="muted">{{ g.projectName }} · {{ g.reason }}</div>
       <pre v-if="g.evidence">{{ g.evidence }}</pre>
+      <GateActions :gate="g" @decided="load" />
     </li>
   </ul>
 </template>

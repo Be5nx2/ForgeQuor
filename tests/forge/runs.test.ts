@@ -183,6 +183,46 @@ describe("when the Developer cannot finish", () => {
   });
 });
 
+describe("deciding a Gate", () => {
+  it("approving the final Gate makes the Run Approved and clears it from the open Gates", async () => {
+    const { project } = await projectWithRemote();
+    const waiting = await runToEnd(project);
+
+    const run = await forge.decideGate({ gateId: waiting.gates[0]!.id, action: "approve" });
+
+    expect(run.state).toBe("approved");
+    expect(run.gates).toMatchObject([{ kind: "final", decision: "approve" }]);
+    expect(run.gates[0]!.decidedAt).not.toBeNull();
+    expect((await forge.listOpenGates()).map((g) => g.runId)).not.toContain(run.id);
+  });
+
+  it("abandoning a Gate makes the Run Abandoned and keeps its branch and worktree", async () => {
+    const { project } = await projectWithRemote();
+    runner.use(() => ({ status: "failed", error: "claude crashed" }));
+    const waiting = await runToEnd(project);
+
+    const run = await forge.decideGate({ gateId: waiting.gates[0]!.id, action: "abandon" });
+
+    expect(run.state).toBe("abandoned");
+    expect(run.gates).toMatchObject([{ kind: "escalation", decision: "abandon" }]);
+    expect(git(run.worktreePath!, "rev-parse", "--abbrev-ref", "HEAD")).toBe(run.branch);
+  });
+
+  it("refuses a choice the Gate does not offer, and a Gate already decided", async () => {
+    const { project } = await projectWithRemote();
+    runner.use(() => ({ status: "failed", error: "claude crashed" }));
+    const escalated = await runToEnd(project);
+    runner.use(() => {});
+    const finished = await runToEnd(project);
+    await forge.decideGate({ gateId: finished.gates[0]!.id, action: "approve" });
+
+    await expect(forge.decideGate({ gateId: escalated.gates[0]!.id, action: "approve" })).rejects.toThrow(/cannot be approved/);
+    await expect(forge.decideGate({ gateId: finished.gates[0]!.id, action: "abandon" })).rejects.toThrow(/already decided/);
+    expect((await forge.getRun(escalated.id)).state).toBe("waiting");
+    expect((await forge.getRun(finished.id)).state).toBe("approved");
+  });
+});
+
 describe("finding Runs", () => {
   it("lists Runs by Project and state, and every open Gate with its Run's title", async () => {
     const one = await projectWithRemote();

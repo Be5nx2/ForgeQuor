@@ -52,7 +52,7 @@ docker compose down
 
 To inspect what the Developer did, open the Run's worktree. The path is shown in the Run detail. Its `.forgequor/` folder holds the Run Notes, including the Review Brief. Git ignores that folder.
 
-> M1 is in progress. Gates show their choices but cannot be decided from the UI yet. Runs do not push branches or open pull requests yet (`m1-04`), Checks do not run yet (`m1-05`), and progress is not shown live (`m1-09`): refresh the Run page to see it. See [ROADMAP.md](ROADMAP.md).
+> M1 is in progress. Runs do not push branches or open pull requests yet (`m1-04`), Checks do not run yet (`m1-05`), and progress is not shown live (`m1-09`): refresh the Run page to see it. See [ROADMAP.md](ROADMAP.md).
 
 > Agents run with Claude Code's permission prompts bypassed, with your rights on this machine ([ADR 0005](docs/adr/0005-agents-bypass-runner-permissions.md)). Only register Projects you trust.
 

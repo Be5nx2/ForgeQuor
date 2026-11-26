@@ -13,6 +13,9 @@ import {
 
 export { RegistrationError };
 
+/** A Gate decision that cannot be made: unknown Gate, already decided, or a choice it does not offer. */
+export class GateError extends Error {}
+
 export type RunState = "queued" | "running" | "waiting" | "paused" | "approved" | "merged" | "closed" | "abandoned";
 export type GateKind = "final" | "escalation";
 export type GateAction = "approve" | "abandon";
@@ -88,6 +91,11 @@ export interface Forge {
   listRuns(filter?: { projectId?: number; state?: RunState }): Promise<Run[]>;
   /** Every Gate still waiting for the human, across all Projects. */
   listOpenGates(): Promise<OpenGate[]>;
+  /**
+   * The human's decision at an open Gate: approve moves the Run to Approved, abandon to Abandoned (its branch and
+   * worktree are kept). Throws a GateError for an unknown or already decided Gate, or a choice it does not offer.
+   */
+  decideGate(input: { gateId: number; action: GateAction }): Promise<RunDetail>;
   /** Resolves once no Run is being worked on in the background. */
   whenIdle(): Promise<void>;
 }
@@ -239,7 +247,7 @@ export function createForge(deps: ForgeDeps): Forge {
     }
   }
 
-  return {
+  const forge: Forge = {
     async registerProject({ path }) {
       const repo = await inspectRepository(path);
       try {
@@ -302,8 +310,44 @@ export function createForge(deps: ForgeDeps): Forge {
       return rows.map((r) => ({ ...toGate(r), runTitle: r.run_title, projectName: r.project_name }));
     },
 
+    async decideGate({ gateId, action }) {
+      const { rows } = await pool.query("SELECT * FROM gates WHERE id = $1", [gateId]);
+      if (!rows[0]) throw new GateError(`No Gate ${gateId}.`);
+      const gate = toGate(rows[0]);
+      if (gate.decidedAt) throw new GateError(`Gate ${gateId} is already decided.`);
+      if (!gate.actions.includes(action)) {
+        throw new GateError(`An Escalation cannot be ${action === "approve" ? "approved" : action}; it can only be abandoned.`);
+      }
+
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        // Guarded on decided_at so two decisions racing for the same Gate cannot both win.
+        const decided = await client.query(
+          "UPDATE gates SET decided_at = now(), decision = $2 WHERE id = $1 AND decided_at IS NULL RETURNING run_id",
+          [gateId, action],
+        );
+        if (!decided.rowCount) {
+          await client.query("ROLLBACK");
+          throw new GateError(`Gate ${gateId} is already decided.`);
+        }
+        await client.query("UPDATE runs SET state = $2, updated_at = now() WHERE id = $1", [
+          gate.runId,
+          action === "approve" ? "approved" : "abandoned",
+        ]);
+        await client.query("COMMIT");
+      } catch (e) {
+        if (!(e instanceof GateError)) await client.query("ROLLBACK").catch(() => {});
+        throw e;
+      } finally {
+        client.release();
+      }
+      return forge.getRun(gate.runId);
+    },
+
     async whenIdle() {
       while (inFlight.size) await Promise.all([...inFlight]);
     },
   };
+  return forge;
 }

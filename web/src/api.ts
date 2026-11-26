@@ -36,8 +36,15 @@ export interface Gate {
   kind: "final" | "escalation";
   reason: string;
   evidence: string | null;
-  actions: string[];
+  actions: GateAction[];
   decidedAt: string | null;
+  decision: GateAction | null;
+}
+export type GateAction = "approve" | "abandon";
+
+/** Records the human's decision at a Gate and returns the updated Run. */
+export function decideGate(gateId: number, action: GateAction): Promise<RunDetail> {
+  return postJson(`/api/gates/${gateId}/decision`, { action });
 }
 export interface RunDetail extends Run {
   attempts: StepAttempt[];
