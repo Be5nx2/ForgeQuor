@@ -22,7 +22,7 @@ One **Project**, one **Run** going Developer (Claude) → **Checks** → pull re
     - registering a non-git folder, or one without a GitHub remote, is refused with a clear message;
     - Projects are listed in the UI;
     - the Forge core test harness runs against real PostgreSQL and temporary git repos.
-- [ ] `m1-02` **Claude Runner adapter**: a Step can be run through Claude Code headless behind the Runner seam.
+- [x] `m1-02` **Claude Runner adapter**: a Step can be run through Claude Code headless behind the Runner seam.
   - Spec: `docs/specs/m1-walking-skeleton.md`
   - Blocked by: none
   - Acceptance:
