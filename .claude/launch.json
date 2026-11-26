@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "forgequor",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["start"],
+      "port": 4170,
+      "url": "http://127.0.0.1:4170"
+    }
+  ]
+}
