@@ -1,7 +1,19 @@
 import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyInstance } from "fastify";
-import { GateError, RegistrationError, RunNotFoundError, RunStateError, type Forge, type GateAction, type RunState } from "../forge/forge.js";
+import {
+  AssetNotFoundError,
+  GateError,
+  InvalidInputError,
+  RegistrationError,
+  RunNotFoundError,
+  RunStateError,
+  type AssetRequest,
+  type Forge,
+  type GateAction,
+  type RunState,
+} from "../forge/forge.js";
 import type { ToolReport } from "../startup/preflight.js";
 
 /** Thin JSON translation of the Forge core interface. No logic here. */
@@ -61,19 +73,32 @@ export async function createServer(deps: {
     }
   });
 
+  app.put<{ Params: { id: string }; Body: { artDirectionPath?: unknown; artFolder?: unknown } }>("/api/projects/:id/art", async (req, reply) => {
+    const { artDirectionPath, artFolder } = req.body ?? {};
+    if (typeof artDirectionPath !== "string" || typeof artFolder !== "string") {
+      return reply.code(400).send({ error: "artDirectionPath and artFolder must be paths." });
+    }
+    try {
+      return await deps.forge.setArt(Number(req.params.id), { artDirectionPath, artFolder });
+    } catch (e: any) {
+      return reply.code(e instanceof InvalidInputError ? 400 : 404).send({ error: e.message });
+    }
+  });
+
   app.get<{ Querystring: { projectId?: string; state?: RunState } }>("/api/runs", async (req) =>
     deps.forge.listRuns({
       projectId: req.query.projectId ? Number(req.query.projectId) : undefined,
       state: req.query.state || undefined,
     }),
   );
-  app.post<{ Body: { projectId?: number; task?: string; title?: string; trackerRef?: string; workflow?: string } }>(
+  app.post<{ Body: { projectId?: number; task?: string; title?: string; trackerRef?: string; workflow?: string; assets?: AssetRequest[] } }>(
     "/api/runs",
     async (req, reply) => {
-      const { projectId, task, title, trackerRef, workflow } = req.body ?? {};
-      if (!projectId || !task?.trim()) return reply.code(400).send({ error: "projectId and task are required." });
+      const { projectId, task, title, trackerRef, workflow, assets } = req.body ?? {};
+      // An `assets` Run takes Asset Requests instead of a task; the Forge core says what is wrong with them.
+      if (!projectId || (!task?.trim() && !assets)) return reply.code(400).send({ error: "projectId and a task (or Asset Requests) are required." });
       try {
-        return reply.code(201).send(await deps.forge.startRun({ projectId, task, title, trackerRef, workflow }));
+        return reply.code(201).send(await deps.forge.startRun({ projectId, task, title, trackerRef, workflow, assets }));
       } catch (e: any) {
         return reply.code(422).send({ error: e.message });
       }
@@ -91,6 +116,19 @@ export async function createServer(deps: {
       return await deps.forge.abandonRun(Number(req.params.id));
     } catch (e: any) {
       return reply.code(e instanceof RunNotFoundError ? 404 : e instanceof RunStateError ? 409 : 502).send({ error: e.message });
+    }
+  });
+  // An Asset's image: the ids pick what the Forge core recorded, the request never names a path.
+  app.get<{ Params: { runId: string; assetId: string } }>("/api/runs/:runId/assets/:assetId/image", async (req, reply) => {
+    const { runId, assetId } = req.params;
+    if (!/^\d+$/.test(runId) || !/^\d+$/.test(assetId)) return reply.code(404).send({ error: "No such Asset." });
+    try {
+      const image = await readFile(await deps.forge.assetImage(Number(runId), Number(assetId)));
+      // An Asset's file changes between Iterations at the same URL.
+      return reply.type("image/png").header("cache-control", "no-store").send(image);
+    } catch (e) {
+      if (e instanceof AssetNotFoundError || (e as NodeJS.ErrnoException)?.code === "ENOENT") return reply.code(404).send({ error: "No such Asset." });
+      throw e;
     }
   });
   // Live Run updates as server-sent events: one JSON RunUpdate per message.
@@ -118,6 +156,7 @@ export async function createServer(deps: {
     try {
       return await deps.forge.decideGate({ gateId: Number(req.params.id), action, feedback });
     } catch (e) {
+      if (e instanceof InvalidInputError) return reply.code(400).send({ error: e.message });
       if (e instanceof GateError) return reply.code(409).send({ error: e.message });
       throw e;
     }

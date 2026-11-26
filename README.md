@@ -51,6 +51,12 @@ docker compose down
 2. **Runs**: pick the Project, describe a task and press **Start Run**. Forgequor fetches the default branch and creates a worktree on a `forgequor/<id>-<title>` branch under `~/.forgequor/worktrees/`. A Developer Agent (Claude Code, headless) then does the task there and commits.
 3. **Waiting for you**: the Run stops at its final Gate. Approve or abandon it. If something went wrong, it stops at an Escalation instead, which you can only abandon.
 
+#### An `assets` Run
+
+For 2D pixel art, pick the **assets** Workflow in the Run form and list **Asset Requests** (name, sprite or tile, what it shows, size) instead of a task. The Artist (Codex, headless, sandboxed to the worktree) draws them one after the other, following the Project's **Art Direction**, and writes each at `<art folder>/<sprites|tiles>/<name>.png`. The Run then stops at an **Asset Gate**: a gallery shows each Asset at real size and magnified with crisp pixels, on a background colour you can change. Approve everything and Forgequor commits the Assets in one commit, opens the pull request with a Review Brief it writes itself, and the Run is Approved. Setup commands and Checks are skipped.
+
+On the Projects screen, set where the Project keeps its **Art Direction** document (default `docs/ART_DIRECTION.md`) and its **art folder** (default `assets/art`). A Run stops at an Escalation, before generating anything, when the Art Direction is missing from the repository's default branch. The Runner's raw images are kept under `.forgequor/assets/` as a trace.
+
 To inspect what the Developer did, open the Run's worktree. The path is shown in the Run detail. Its `.forgequor/` folder holds the Run Notes, including the Review Brief. Git ignores that folder.
 
 > M1 (walking skeleton) is done: a Developer Run goes from its own worktree to a pull request and your final Gate; M2 (Assets) is next. The Run page shows the Developer's progress live. On the Projects screen, declare a Project's **Setup** (shell commands run in each new worktree before the Developer, in order; a failing one opens an Escalation and the Developer never starts) and its **Checks** (run after the Developer, in order; without any, a Run goes straight to the pull request). See [ROADMAP.md](ROADMAP.md).
@@ -76,7 +82,8 @@ All settings are optional environment variables. Set them in the shell that runs
 | `FORGEQUOR_DATABASE_URL` | `postgres://forgequor:forgequor@localhost:5433/forgequor` | PostgreSQL connection |
 | `FORGEQUOR_WORKTREES` | `~/.forgequor/worktrees` | Where Run worktrees are created |
 | `FORGEQUOR_DEVELOPER_MODEL` | Claude Code's default | Model used by the Developer Agent |
-| `FORGEQUOR_STEP_TIMEOUT_MINUTES` | `60` | A Developer Step running longer is killed and escalated |
+| `FORGEQUOR_ARTIST_MODEL` | Codex's default | Model Codex uses for the Artist Agent |
+| `FORGEQUOR_STEP_TIMEOUT_MINUTES` | `60` | An Agent's Step running longer is killed and escalated |
 | `FORGEQUOR_CHECK_TIMEOUT_MINUTES` | `10` | A Check command running longer is killed and counts as failed |
 
 ### Tests

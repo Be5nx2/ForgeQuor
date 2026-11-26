@@ -27,7 +27,9 @@ async function decide(action: GateAction) {
 
 <template>
   <div class="gate-actions" @click.stop>
-    <button v-if="gate.actions.includes('approve')" type="button" :disabled="busy" @click="decide('approve')">Approve</button>
+    <button v-if="gate.actions.includes('approve')" type="button" :disabled="busy" @click="decide('approve')">
+      {{ gate.kind === "asset" ? "Approve all Assets" : "Approve" }}
+    </button>
     <button v-if="gate.actions.includes('reject') && !rejecting" type="button" class="secondary" :disabled="busy" @click="rejecting = true">
       Reject…
     </button>

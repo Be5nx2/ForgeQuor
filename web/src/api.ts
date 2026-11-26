@@ -8,6 +8,22 @@ export interface Project {
   checks: string[];
   setup: string[];
   maxConcurrentRuns: number;
+  artDirectionPath: string;
+  artFolder: string;
+}
+export type AssetKind = "sprite" | "tile";
+export interface AssetRequest {
+  name: string;
+  kind: AssetKind;
+  description: string;
+  width: number;
+  height: number;
+}
+export interface Asset extends AssetRequest {
+  id: number;
+  position: number;
+  targetPath: string;
+  status: "pending" | "generating" | "waiting" | "approved";
 }
 export interface CheckResult {
   id: number;
@@ -40,6 +56,7 @@ export interface StepAttempt {
   attempt: number;
   runner: string;
   model: string | null;
+  assetId: number | null;
   status: string;
   startedAt: string;
   endedAt: string | null;
@@ -50,7 +67,7 @@ export interface StepAttempt {
 export interface Gate {
   id: number;
   runId: number;
-  kind: "final" | "escalation";
+  kind: "final" | "escalation" | "asset";
   reason: string;
   evidence: string | null;
   actions: GateAction[];
@@ -69,6 +86,7 @@ export interface Iteration {
   feedback: string | null;
 }
 export interface RunDetail extends Run {
+  assets: Asset[];
   iterations: Iteration[];
   attempts: StepAttempt[];
   checks: CheckResult[];

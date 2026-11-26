@@ -11,12 +11,27 @@ const drafts = ref<Record<number, string>>({});
 const setupDrafts = ref<Record<number, string>>({});
 /** Max concurrent Runs being edited, by Project id. */
 const limits = ref<Record<number, number>>({});
+/** Art Direction path and art folder being edited, by Project id. */
+const arts = ref<Record<number, { artDirectionPath: string; artFolder: string }>>({});
 
 async function load() {
   projects.value = await getJson("/api/projects");
   drafts.value = Object.fromEntries(projects.value.map((p) => [p.id, p.checks.join("\n")]));
   setupDrafts.value = Object.fromEntries(projects.value.map((p) => [p.id, p.setup.join("\n")]));
   limits.value = Object.fromEntries(projects.value.map((p) => [p.id, p.maxConcurrentRuns]));
+  arts.value = Object.fromEntries(projects.value.map((p) => [p.id, { artDirectionPath: p.artDirectionPath, artFolder: p.artFolder }]));
+}
+
+async function saveArt(p: Project) {
+  error.value = "";
+  try {
+    const saved = await putJson<Project>(`/api/projects/${p.id}/art`, arts.value[p.id]);
+    p.artDirectionPath = saved.artDirectionPath;
+    p.artFolder = saved.artFolder;
+    arts.value[p.id] = { artDirectionPath: saved.artDirectionPath, artFolder: saved.artFolder };
+  } catch (e: any) {
+    error.value = e.message;
+  }
 }
 
 async function saveLimit(p: Project) {
@@ -97,6 +112,17 @@ onMounted(load);
           :aria-label="`Checks of ${p.name}`"
         />
         <button type="submit">Save Checks</button>
+      </form>
+      <form class="stack" @submit.prevent="saveArt(p)">
+        <label>
+          Art Direction document
+          <input v-model="arts[p.id]!.artDirectionPath" placeholder="docs/ART_DIRECTION.md" :aria-label="`Art Direction path of ${p.name}`" />
+        </label>
+        <label>
+          Art folder
+          <input v-model="arts[p.id]!.artFolder" placeholder="assets/art" :aria-label="`Art folder of ${p.name}`" />
+        </label>
+        <button type="submit">Save art settings</button>
       </form>
       <form @submit.prevent="saveLimit(p)">
         <label>

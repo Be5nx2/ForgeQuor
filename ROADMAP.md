@@ -41,7 +41,7 @@ Codex **Runner**, **Artist**, an `assets` **Workflow** (Artist → asset **Gate*
     - startup reports a missing or logged-out `codex`;
     - the contract suite passes against a fake `codex` with a temporary `CODEX_HOME` (success with and without an image, both limits, unreadable output, crash, cancellation, instructions and model passed through);
     - `npm run smoke:codex` (opt-in) generates one real 16x16 sprite.
-- [ ] `m2-04` **First assets Run**: the human orders sprites and tiles, reviews them in a gallery and gets a pull request.
+- [x] `m2-04` **First assets Run**: the human orders sprites and tiles, reviews them in a gallery and gets a pull request.
   - Spec: `docs/specs/m2-assets.md`
   - Blocked by: `m2-01`, `m2-03`
   - Acceptance:

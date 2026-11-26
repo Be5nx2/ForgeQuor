@@ -1,10 +1,11 @@
 import { rmSync } from "node:fs";
 import { join } from "node:path";
-import { commitLeftovers, pushBranch, readReviewBrief, REVIEW_BRIEF_FILE, RUN_NOTES_DIR, runNotesInBranch } from "./workspace.js";
-import type { StepResult } from "../runner/runner.js";
+import { commitLeftovers, readReviewBrief, REVIEW_BRIEF_FILE, RUN_NOTES_DIR, runNotesInBranch } from "./workspace.js";
 import { describeDuration } from "../duration.js";
 import { describeFailure, passed, runChecks } from "./checks.js";
+import { publishPullRequest } from "./publish.js";
 import { resumePoint } from "./resume.js";
+import { runAgentStep } from "./step.js";
 import type { Workflow, WorkflowContext } from "./workflow.js";
 
 /** The Developer Agent's standing instructions. */
@@ -26,6 +27,11 @@ export function developerPrompt(task: string, failedCheck?: string, feedbacks: s
   return `${prompt}\n\nYour previous attempt failed this Check. Fix the cause, keep your earlier work, and commit.\n\n${failedCheck}`;
 }
 
+function deriveTitle(task: string): string {
+  const first = task.trim().split("\n")[0]!.trim();
+  return first.length > 60 ? `${first.slice(0, 57).trimEnd()}...` : first;
+}
+
 /** After this many failed Checks the Developer's extra attempts are used up (1 try + 2 extra). */
 const MAX_DEVELOPER_ATTEMPTS = 3;
 
@@ -35,69 +41,13 @@ async function earlierFeedbacks(pool: WorkflowContext["pool"], runId: number): P
   return rows.map((r) => r.feedback);
 }
 
-/** One Developer attempt, recorded as a Step attempt. Killed, and reported as timed out, after the Step timeout. */
-async function developerStep(
-  ctx: WorkflowContext,
-  attempt: number,
-  failedCheck: string | undefined,
-): Promise<{ result: StepResult; timedOut: boolean }> {
-  const { run, pool, runner, stop, stepTimeoutMs, worktreePath } = ctx;
-  const { rows } = await pool.query(
-    `INSERT INTO step_attempts (run_id, iteration, step, attempt, runner, model, status)
-     VALUES ($1, $2, 'developer', $3, 'claude', $4, 'running') RETURNING id`,
-    [run.id, run.iteration, attempt, ctx.developerModel ?? null],
-  );
-  const attemptId = rows[0].id;
-  const log: string[] = [];
-  ctx.changed();
-
-  const step = new AbortController();
-  let timedOut = false;
-  const stopStep = () => step.abort();
-  if (stop.aborted) step.abort();
-  stop.addEventListener("abort", stopStep, { once: true });
-  const timer = setTimeout(() => {
-    timedOut = true;
-    step.abort();
-  }, stepTimeoutMs);
-  let result: StepResult;
-  try {
-    result = await runner.run(
-      {
-        instructions: DEVELOPER_INSTRUCTIONS,
-        prompt: developerPrompt(run.task, failedCheck, await earlierFeedbacks(pool, run.id)),
-        cwd: worktreePath,
-        model: ctx.developerModel,
-        signal: step.signal,
-      },
-      (e) => {
-        if (e.raw) log.push(e.raw);
-        ctx.emit({ type: "progress", runId: run.id, attemptId, kind: e.kind, summary: e.summary });
-      },
-    );
-  } finally {
-    clearTimeout(timer);
-    stop.removeEventListener("abort", stopStep);
-  }
-  await pool.query(
-    `UPDATE step_attempts SET status = $2, ended_at = now(), summary = $3, error = $4, quota_resets_at = $5, event_log = $6
-     WHERE id = $1`,
-    [
-      attemptId,
-      result.status,
-      result.status === "succeeded" ? result.summary : null,
-      result.status === "failed" ? result.error : null,
-      result.status === "quota_exhausted" ? result.resetsAt : null,
-      log.join("\n"),
-    ],
-  );
-  ctx.changed();
-  return { result, timedOut };
-}
-
 /** The `developer` Workflow: setup, Developer, Checks (retrying the Developer), pull request, then the final Gate. */
 export const developerWorkflow: Workflow = {
   name: "developer",
+  plan({ task, title }) {
+    if (!task?.trim()) throw new Error("A Run needs a task.");
+    return { task: task.trim(), title: title?.trim() || deriveTitle(task), assets: [] };
+  },
   async run(ctx) {
     const { run, project, worktreePath, branch, defaultBranch, pool, stop, stepTimeoutMs } = ctx;
     const { rows: prepared } = await pool.query("SELECT setup_done FROM runs WHERE id = $1", [run.id]);
@@ -117,7 +67,12 @@ export const developerWorkflow: Workflow = {
       if (!skipDeveloper) {
         // The previous Iteration's Review Brief must not be posted again as this one's.
         if (run.iteration > 1 && attempt === 1) rmSync(join(worktreePath, REVIEW_BRIEF_FILE), { force: true });
-        const { result, timedOut } = await developerStep(ctx, attempt, failedCheck);
+        const { result, timedOut } = await runAgentStep(ctx, ctx.agents.developer, {
+          name: "developer",
+          attempt,
+          instructions: DEVELOPER_INSTRUCTIONS,
+          prompt: developerPrompt(run.task, failedCheck, await earlierFeedbacks(pool, run.id)),
+        });
         if (!(await ctx.stillRunning())) return;
         // A Step that finished on its own just as the timeout fired keeps its real result.
         if (timedOut && result.status === "failed") {
@@ -153,36 +108,8 @@ export const developerWorkflow: Workflow = {
     if (notes.length) {
       return ctx.openGate("escalation", "A commit adds Run Notes, so the branch was not pushed.", notes.join("\n"));
     }
-    await pushBranch(worktreePath, branch);
-    let pr = run.prNumber ? { number: run.prNumber, url: run.prUrl! } : null;
-    if (!pr) {
-      pr = await ctx.codeHost.openPullRequest({
-        owner: project.remoteOwner,
-        repo: project.remoteName,
-        base: defaultBranch,
-        head: branch,
-        title: run.title,
-        body: `${run.task}\n\n---\nForgequor Run #${run.id}`,
-      });
-      await pool.query("UPDATE runs SET pr_number = $2, pr_url = $3 WHERE id = $1", [run.id, pr.number, pr.url]);
-      ctx.changed();
-    }
-    if (!(await ctx.stillRunning())) {
-      // Abandoned while the pull request was being opened: it may not have seen it, so close it here.
-      await ctx.codeHost.closePullRequest({ owner: project.remoteOwner, repo: project.remoteName, number: pr.number }).catch(() => {});
-      return;
-    }
-    const { rows: posted } = await pool.query("SELECT brief_posted FROM runs WHERE id = $1", [run.id]);
-    if (!posted[0].brief_posted) {
-      await ctx.codeHost.comment({
-        owner: project.remoteOwner,
-        repo: project.remoteName,
-        number: pr.number,
-        body: readReviewBrief(worktreePath) ?? "The Developer wrote no Review Brief for this pull request.",
-      });
-      await pool.query("UPDATE runs SET brief_posted = true WHERE id = $1", [run.id]);
-      ctx.changed();
-    }
+    const pr = await publishPullRequest(ctx, () => readReviewBrief(worktreePath) ?? "The Developer wrote no Review Brief for this pull request.");
+    if (!pr) return;
     await ctx.openGate("final", "The Developer finished.");
   },
 };

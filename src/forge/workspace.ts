@@ -121,6 +121,14 @@ export async function commitLeftovers(worktreePath: string, message: string): Pr
   return true;
 }
 
+/** Commits exactly these paths (and whatever else is staged is left out). Returns true if a commit was made; false when they have no change to commit. */
+export async function commitPaths(worktreePath: string, paths: string[], message: string): Promise<boolean> {
+  await gitOrThrow(worktreePath, "add", "--", ...paths);
+  if (!(await gitOrThrow(worktreePath, "status", "--porcelain", "--", ...paths))) return false;
+  await gitOrThrow(worktreePath, "commit", "-q", "-m", message, "--", ...paths);
+  return true;
+}
+
 /** Run Notes paths that some commit of the branch (since `defaultBranch`) adds. Empty when the branch is clean. */
 export async function runNotesInBranch(worktreePath: string, defaultBranch: string): Promise<string[]> {
   const out = await gitOrThrow(

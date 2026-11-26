@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { followRuns, getJson, postJson, type RunDetail } from "../api";
+import AssetGallery from "../components/AssetGallery.vue";
 import GateActions from "../components/GateActions.vue";
 
 const props = defineProps<{ id: number }>();
@@ -68,6 +69,11 @@ onUnmounted(() => stopFollowing?.());
 
     <p v-if="run.prUrl">Pull request <a :href="run.prUrl" target="_blank" rel="noopener">#{{ run.prNumber }}</a></p>
 
+    <template v-if="run.assets.length">
+      <h3>Assets</h3>
+      <AssetGallery :run-id="run.id" :iteration="run.iteration" :assets="run.assets" />
+    </template>
+
     <h3>Iterations</h3>
     <ul>
       <li v-for="i in run.iterations" :key="i.number">
@@ -81,7 +87,7 @@ onUnmounted(() => stopFollowing?.());
     <p v-if="!run.gates.length" class="muted">None yet.</p>
     <ul>
       <li v-for="g in run.gates" :key="g.id">
-        <strong>{{ g.kind === "final" ? "Final Gate" : "Escalation" }}</strong>: {{ g.reason }}
+        <strong>{{ g.kind === "final" ? "Final Gate" : g.kind === "asset" ? "Asset Gate" : "Escalation" }}</strong>: {{ g.reason }}
         <pre v-if="g.evidence">{{ g.evidence }}</pre>
         <div v-if="g.decidedAt" class="muted">
           {{ g.decision === "approve" ? "Approved" : g.decision === "reject" ? "Rejected" : "Abandoned" }} · {{ new Date(g.decidedAt).toLocaleString() }}
@@ -105,7 +111,7 @@ onUnmounted(() => stopFollowing?.());
     <p v-if="!run.attempts.length" class="muted">None yet.</p>
     <ul>
       <li v-for="a in run.attempts" :key="a.id">
-        <strong>{{ a.step }}</strong> · iteration {{ a.iteration }} · attempt {{ a.attempt }} · <span class="badge">{{ a.status }}</span>
+        <strong>{{ a.step }}</strong><span v-if="a.assetId"> · {{ run.assets.find((x) => x.id === a.assetId)?.name }}</span> · iteration {{ a.iteration }} · attempt {{ a.attempt }} · <span class="badge">{{ a.status }}</span>
         <div class="muted">
           {{ a.runner }}<span v-if="a.model"> ({{ a.model }})</span> · {{ new Date(a.startedAt).toLocaleString() }}
           <span v-if="a.endedAt"> → {{ new Date(a.endedAt).toLocaleTimeString() }}</span>

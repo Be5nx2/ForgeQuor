@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { createGhCodeHost } from "./codehost/gh.js";
 import { createForge } from "./forge/forge.js";
 import { createClaudeRunner } from "./runner/claude.js";
+import { createCodexRunner } from "./runner/codex.js";
 import { createServer } from "./http/server.js";
 import { killAllProcessGroups } from "./process-group.js";
 import { loadEnvFile } from "./startup/env.js";
@@ -49,9 +50,11 @@ function minutesAsMs(name: string): number | undefined {
 const forge = createForge({
   pool,
   runner: createClaudeRunner(),
+  artistRunner: createCodexRunner(),
   codeHost: createGhCodeHost(),
   worktreesRoot: process.env.FORGEQUOR_WORKTREES ?? join(homedir(), ".forgequor", "worktrees"),
   developerModel: process.env.FORGEQUOR_DEVELOPER_MODEL,
+  artistModel: process.env.FORGEQUOR_ARTIST_MODEL,
   stepTimeoutMs: minutesAsMs("FORGEQUOR_STEP_TIMEOUT_MINUTES"),
   checkTimeoutMs: minutesAsMs("FORGEQUOR_CHECK_TIMEOUT_MINUTES"),
 });
