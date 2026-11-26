@@ -10,7 +10,7 @@ Milestones are specified one at a time with `/to-spec`, then split into items wi
 
 Codex **Runner**, **Artist**, an `assets` **Workflow** (Artist → asset **Gate** → PR), generic Gate + **Feedback** + **Iteration** mechanism, **Art Direction** read from the Project, asset gallery in the UI. Unblocks the first game.
 
-- Spec: to write after the M2 grilling (`docs/specs/m2-assets.md`).
+- Spec: `docs/specs/m2-assets.md`. Items to come from `/to-tickets`.
 
 ## Next
 
