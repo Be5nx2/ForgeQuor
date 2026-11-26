@@ -29,7 +29,10 @@ describe.skipIf(!process.env.FORGEQUOR_SMOKE_GH)("real gh (smoke)", () => {
       const pr = await host.openPullRequest({ owner, repo, base: "main", head: branch, title: "Forgequor smoke test", body: "Task\n\n---\nForgequor Run #0" });
       expect(pr.url).toContain(`/pull/${pr.number}`);
       await host.comment({ owner, repo, number: pr.number, body: "Review Brief: nothing to test." });
-      execFileSync("gh", ["pr", "close", String(pr.number), "--repo", sandbox!, "--delete-branch"]);
+      expect(await host.pullRequestState({ owner, repo, number: pr.number })).toBe("open");
+      await host.closePullRequest({ owner, repo, number: pr.number });
+      expect(await host.pullRequestState({ owner, repo, number: pr.number })).toBe("closed");
+      sh("push", "-q", "origin", "--delete", branch);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

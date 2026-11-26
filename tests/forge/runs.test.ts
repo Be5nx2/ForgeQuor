@@ -32,6 +32,7 @@ afterEach(() => {
   runner.steps.length = 0;
   codeHost.pullRequests.length = 0;
   codeHost.failWith(null);
+  codeHost.failStateReads(null);
   cleanups.splice(0).forEach((c) => c());
 });
 
@@ -407,5 +408,149 @@ describe("finding Runs", () => {
         expect.objectContaining({ runTitle: "In two", projectName: two.project.name, kind: "final" }),
       ]),
     );
+  });
+});
+
+/** Starts a Run whose Developer commits real work, and approves it so it waits for the merge. */
+async function approvedRun(project: Project) {
+  runner.use((step) => developerCommits(step));
+  const waiting = await runToEnd(project);
+  return forge.decideGate({ gateId: waiting.gates[0]!.id, action: "approve" });
+}
+
+describe("abandoning a Run", () => {
+  it("closes the pull request, keeps the branch and the worktree, and settles the open Gate", async () => {
+    const { project, remote } = await projectWithRemote();
+    runner.use((step) => developerCommits(step));
+    const waiting = await runToEnd(project);
+
+    const run = await forge.abandonRun(waiting.id);
+
+    expect(run.state).toBe("abandoned");
+    expect(codeHost.pullRequests.map((p) => p.state)).toEqual(["closed"]);
+    expect(git(remote.bare, "branch", "--list", run.branch!)).toContain(run.branch);
+    expect(existsSync(run.worktreePath!)).toBe(true);
+    expect(run.gates).toMatchObject([{ decision: "abandon" }]);
+    expect((await forge.listOpenGates()).map((g) => g.runId)).not.toContain(run.id);
+  });
+
+  it("also closes the pull request when abandoning through the final Gate", async () => {
+    const { project } = await projectWithRemote();
+    runner.use((step) => developerCommits(step));
+    const waiting = await runToEnd(project);
+
+    await forge.decideGate({ gateId: waiting.gates[0]!.id, action: "abandon" });
+
+    expect(codeHost.pullRequests.map((p) => p.state)).toEqual(["closed"]);
+  });
+
+  it("works on an Approved Run", async () => {
+    const { project } = await projectWithRemote();
+    const approved = await approvedRun(project);
+
+    expect((await forge.abandonRun(approved.id)).state).toBe("abandoned");
+    expect(codeHost.pullRequests.map((p) => p.state)).toEqual(["closed"]);
+  });
+
+  it("works on a Run with no pull request yet", async () => {
+    const { project } = await projectWithRemote();
+    runner.use(() => ({ status: "failed", error: "claude crashed" }));
+    const escalated = await runToEnd(project);
+
+    expect((await forge.abandonRun(escalated.id)).state).toBe("abandoned");
+    expect(codeHost.pullRequests).toEqual([]);
+  });
+
+  it("works while the Developer is still running, and the Run never reaches a pull request", async () => {
+    const { project, remote } = await projectWithRemote();
+    let release!: () => void;
+    const hold = new Promise<void>((r) => (release = r));
+    let started!: () => void;
+    const inStep = new Promise<void>((r) => (started = r));
+    runner.use(async (step) => {
+      started();
+      await hold;
+      developerCommits(step);
+    });
+    const { id } = await forge.startRun({ projectId: project.id, task: "Slow work." });
+    await inStep;
+
+    const abandoned = await forge.abandonRun(id);
+    release();
+    await forge.whenIdle();
+
+    expect(abandoned.state).toBe("abandoned");
+    const run = await forge.getRun(id);
+    expect(run.state).toBe("abandoned");
+    expect(run.gates).toEqual([]);
+    expect(codeHost.pullRequests).toEqual([]);
+    expect(git(remote.bare, "branch", "--list", run.branch!)).toBe("");
+  });
+
+  it("cannot abandon a Run that is already over", async () => {
+    const { project } = await projectWithRemote();
+    const approved = await approvedRun(project);
+    codeHost.setState(1, "merged");
+    await forge.checkPullRequests();
+
+    await expect(forge.abandonRun(approved.id)).rejects.toThrow(/already merged/);
+    await forge.abandonRun((await runToEnd(project)).id);
+    const [abandoned] = await forge.listRuns({ state: "abandoned" });
+    await expect(forge.abandonRun(abandoned!.id)).rejects.toThrow(/already abandoned/);
+  });
+
+  it("records a pull request merged on GitHub in the meantime as Merged instead", async () => {
+    const { project } = await projectWithRemote();
+    const approved = await approvedRun(project);
+    codeHost.setState(1, "merged");
+
+    const run = await forge.abandonRun(approved.id);
+
+    expect(run.state).toBe("merged");
+  });
+
+  it("stays as it was when the pull request cannot be closed, so the human can try again", async () => {
+    const { project } = await projectWithRemote();
+    const approved = await approvedRun(project);
+    codeHost.failStateReads("gh is down");
+
+    await expect(forge.abandonRun(approved.id)).rejects.toThrow(/gh is down/);
+    expect((await forge.getRun(approved.id)).state).toBe("approved");
+  });
+});
+
+describe("detecting a merge or close", () => {
+  it("moves Approved Runs to Merged or Closed, and leaves the others alone", async () => {
+    const { project } = await projectWithRemote();
+    const merged = await approvedRun(project);
+    const closed = await approvedRun(project);
+    const open = await approvedRun(project);
+    runner.use(() => {});
+    const waiting = await runToEnd(project);
+    codeHost.setState(1, "merged");
+    codeHost.setState(2, "closed");
+
+    await forge.checkPullRequests();
+
+    expect((await forge.getRun(merged.id)).state).toBe("merged");
+    expect((await forge.getRun(closed.id)).state).toBe("closed");
+    expect((await forge.getRun(open.id)).state).toBe("approved");
+    expect((await forge.getRun(waiting.id)).state).toBe("waiting");
+  });
+
+  it("keeps going when one pull request cannot be read", async () => {
+    const { project } = await projectWithRemote();
+    const first = await approvedRun(project);
+    const second = await approvedRun(project);
+    codeHost.setState(2, "merged");
+    codeHost.failStateReads("rate limited");
+
+    await expect(forge.checkPullRequests()).resolves.toBeUndefined();
+    expect((await forge.getRun(first.id)).state).toBe("approved");
+    expect((await forge.getRun(second.id)).state).toBe("approved");
+
+    codeHost.failStateReads(null);
+    await forge.checkPullRequests();
+    expect((await forge.getRun(second.id)).state).toBe("merged");
   });
 });

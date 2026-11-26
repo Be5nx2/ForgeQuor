@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import type { CodeHost } from "./codehost.js";
+import type { CodeHost, PullRequestState } from "./codehost.js";
 
 /** Runs `gh`, feeding `input` on stdin. Resolves with stdout; rejects with gh's own message. */
 function gh(args: string[], input?: string): Promise<string> {
@@ -32,6 +32,17 @@ export function createGhCodeHost(): CodeHost {
     },
     async comment({ owner, repo, number, body }) {
       await gh(["pr", "comment", String(number), "--repo", `${owner}/${repo}`, "--body-file", "-"], body);
+    },
+    async closePullRequest({ owner, repo, number }) {
+      await gh(["pr", "close", String(number), "--repo", `${owner}/${repo}`]);
+    },
+    async pullRequestState({ owner, repo, number }) {
+      const out = await gh(["pr", "view", String(number), "--repo", `${owner}/${repo}`, "--json", "state", "--jq", ".state"]);
+      const state = out.trim().toUpperCase();
+      if (state === "OPEN") return "open";
+      if (state === "MERGED") return "merged";
+      if (state === "CLOSED") return "closed";
+      throw new Error(`gh pr view returned an unexpected state: ${out}`);
     },
   };
 }

@@ -9,6 +9,8 @@ export interface PullRequestInput {
   body: string;
 }
 
+export type PullRequestState = "open" | "merged" | "closed";
+
 export interface PullRequestRef {
   number: number;
   url: string;
@@ -20,4 +22,8 @@ export interface CodeHost {
   openPullRequest(input: PullRequestInput): Promise<PullRequestRef>;
   /** Posts a comment on a pull request. */
   comment(input: { owner: string; repo: string; number: number; body: string }): Promise<void>;
+  /** Closes a pull request without merging it. The branch is left alone. */
+  closePullRequest(input: { owner: string; repo: string; number: number }): Promise<void>;
+  /** Reads whether a pull request is still open, was merged, or was closed without merging. */
+  pullRequestState(input: { owner: string; repo: string; number: number }): Promise<PullRequestState>;
 }

@@ -21,6 +21,12 @@ export { RegistrationError };
 /** A Gate decision that cannot be made: unknown Gate, already decided, or a choice it does not offer. */
 export class GateError extends Error {}
 
+/** An operation the Run's current state does not allow, such as abandoning a Run that is already over. */
+export class RunStateError extends Error {}
+
+/** No such Run. */
+export class RunNotFoundError extends Error {}
+
 export type RunState = "queued" | "running" | "waiting" | "paused" | "approved" | "merged" | "closed" | "abandoned";
 export type GateKind = "final" | "escalation";
 export type GateAction = "approve" | "abandon";
@@ -117,6 +123,14 @@ export interface Forge {
    * worktree are kept). Throws a GateError for an unknown or already decided Gate, or a choice it does not offer.
    */
   decideGate(input: { gateId: number; action: GateAction }): Promise<RunDetail>;
+  /**
+   * Abandons a Run in any state before Merged: closes its pull request if it has one, settles its open Gate, and keeps
+   * its branch and worktree. Throws a RunStateError when the Run is already over. A pull request merged on GitHub in
+   * the meantime makes the Run Merged instead. If the pull request cannot be read or closed, the Run is left as it was.
+   */
+  abandonRun(runId: number): Promise<RunDetail>;
+  /** One pass of merge and close detection: Approved Runs whose pull request was merged or closed on GitHub follow it. */
+  checkPullRequests(): Promise<void>;
   /** Resolves once no Run is being worked on in the background. */
   whenIdle(): Promise<void>;
 }
@@ -193,6 +207,10 @@ function toCheck(r: Record<string, any>): CheckResult {
 /** After this many failed Checks the Developer's extra attempts are used up (1 try + 2 extra). */
 const MAX_DEVELOPER_ATTEMPTS = 3;
 
+/** States a Run cannot leave. A Run in one of them no longer holds its Project's slot. */
+const OVER: RunState[] = ["merged", "closed", "abandoned"];
+const ACTIVE: RunState[] = ["queued", "running", "waiting", "paused", "approved"];
+
 function toGate(r: Record<string, any>): Gate {
   return {
     id: Number(r.id),
@@ -222,14 +240,64 @@ export function createForge(deps: ForgeDeps): Forge {
     await pool.query("UPDATE runs SET state = $2, updated_at = now() WHERE id = $1", [runId, state]);
   }
 
+  /** Opens a Gate and makes the Run Waiting, unless the Run was abandoned meanwhile. */
   async function openGate(runId: number, kind: GateKind, reason: string, evidence?: string) {
-    await pool.query("INSERT INTO gates (run_id, kind, reason, evidence) VALUES ($1, $2, $3, $4)", [
-      runId,
-      kind,
-      reason,
-      evidence ?? null,
-    ]);
-    await setState(runId, "waiting");
+    await pool.query(
+      `WITH r AS (UPDATE runs SET state = 'waiting', updated_at = now() WHERE id = $1 AND state = 'running' RETURNING id)
+       INSERT INTO gates (run_id, kind, reason, evidence) SELECT id, $2, $3, $4 FROM r`,
+      [runId, kind, reason, evidence ?? null],
+    );
+  }
+
+  /** False once the human abandoned the Run while it was being worked on. */
+  async function stillRunning(runId: number): Promise<boolean> {
+    const { rows } = await pool.query("SELECT state FROM runs WHERE id = $1", [runId]);
+    return rows[0]?.state === "running";
+  }
+
+  async function settle(runId: number, state: "abandoned" | "merged" | "closed", from: RunState[]): Promise<boolean> {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const moved = await client.query("UPDATE runs SET state = $2, updated_at = now() WHERE id = $1 AND state = ANY($3) RETURNING id", [
+        runId,
+        state,
+        from,
+      ]);
+      if (!moved.rowCount) {
+        await client.query("ROLLBACK");
+        return false;
+      }
+      if (state === "abandoned") {
+        await client.query("UPDATE gates SET decided_at = now(), decision = 'abandon' WHERE run_id = $1 AND decided_at IS NULL", [runId]);
+      }
+      await client.query("COMMIT");
+      return true;
+    } catch (e) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+
+  async function abandon(runId: number): Promise<RunDetail> {
+    const { rows } = await pool.query(
+      `SELECT r.id, r.state, r.pr_number, p.remote_owner, p.remote_name FROM runs r JOIN projects p ON p.id = r.project_id WHERE r.id = $1`,
+      [runId],
+    );
+    const row = rows[0];
+    if (!row) throw new RunNotFoundError(`No Run ${runId}.`);
+    if (OVER.includes(row.state)) throw new RunStateError(`Run ${runId} is already ${row.state}.`);
+    let state: "abandoned" | "merged" = "abandoned";
+    if (row.pr_number) {
+      const pr = { owner: row.remote_owner, repo: row.remote_name, number: row.pr_number };
+      const current = await deps.codeHost.pullRequestState(pr);
+      if (current === "merged") state = "merged";
+      else if (current === "open") await deps.codeHost.closePullRequest(pr);
+    }
+    if (!(await settle(runId, state, ACTIVE))) throw new RunStateError(`Run ${runId} changed state while it was being abandoned.`);
+    return forge.getRun(runId);
   }
 
   /** One Developer attempt, recorded as a Step attempt. */
@@ -276,6 +344,7 @@ export function createForge(deps: ForgeDeps): Forge {
       let failedCheck: string | undefined;
       for (let attempt = 1; attempt <= MAX_DEVELOPER_ATTEMPTS; attempt++) {
         const result = await developerStep(run, worktreePath, attempt, failedCheck);
+        if (!(await stillRunning(run.id))) return;
         if (result.status === "failed") return openGate(run.id, "escalation", "The Developer failed.", result.error);
         if (result.status === "quota_exhausted") {
           // Pause and resume arrive with m1-08; until then the human sees it.
@@ -299,6 +368,7 @@ export function createForge(deps: ForgeDeps): Forge {
         }
       }
 
+      if (!(await stillRunning(run.id))) return;
       const notes = await runNotesInBranch(worktreePath, defaultBranch);
       if (notes.length) {
         return openGate(run.id, "escalation", "A commit adds Run Notes, so the branch was not pushed.", notes.join("\n"));
@@ -313,6 +383,11 @@ export function createForge(deps: ForgeDeps): Forge {
         body: `${run.task}\n\n---\nForgequor Run #${run.id}`,
       });
       await pool.query("UPDATE runs SET pr_number = $2, pr_url = $3 WHERE id = $1", [run.id, pr.number, pr.url]);
+      if (!(await stillRunning(run.id))) {
+        // Abandoned while the pull request was being opened: it may not have seen it, so close it here.
+        await deps.codeHost.closePullRequest({ owner: project.remoteOwner, repo: project.remoteName, number: pr.number }).catch(() => {});
+        return;
+      }
       await deps.codeHost.comment({
         owner: project.remoteOwner,
         repo: project.remoteName,
@@ -411,6 +486,14 @@ export function createForge(deps: ForgeDeps): Forge {
         throw new GateError(`An Escalation cannot be ${action === "approve" ? "approved" : action}; it can only be abandoned.`);
       }
 
+      if (action === "abandon") {
+        try {
+          return await abandon(gate.runId);
+        } catch (e) {
+          if (e instanceof RunStateError) throw new GateError(e.message);
+          throw e;
+        }
+      }
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
@@ -435,6 +518,23 @@ export function createForge(deps: ForgeDeps): Forge {
         client.release();
       }
       return forge.getRun(gate.runId);
+    },
+
+    abandonRun: abandon,
+
+    async checkPullRequests() {
+      const { rows } = await pool.query(
+        `SELECT r.id, r.pr_number, p.remote_owner, p.remote_name FROM runs r JOIN projects p ON p.id = r.project_id
+         WHERE r.state = 'approved' AND r.pr_number IS NOT NULL ORDER BY r.id`,
+      );
+      for (const r of rows) {
+        try {
+          const state = await deps.codeHost.pullRequestState({ owner: r.remote_owner, repo: r.remote_name, number: r.pr_number });
+          if (state !== "open") await settle(Number(r.id), state, ["approved"]);
+        } catch (e: any) {
+          console.error(`Run ${r.id}: could not read its pull request:`, e?.message ?? e);
+        }
+      }
     },
 
     async whenIdle() {

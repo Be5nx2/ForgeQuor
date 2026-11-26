@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from "vue";
-import { getJson, type RunDetail } from "../api";
+import { getJson, postJson, type RunDetail } from "../api";
 import GateActions from "../components/GateActions.vue";
 
 const props = defineProps<{ id: number }>();
@@ -17,6 +17,21 @@ async function load() {
   }
 }
 
+const abandoning = ref(false);
+const OVER = ["merged", "closed", "abandoned"];
+async function abandon() {
+  if (!window.confirm("Abandon this Run? Its pull request is closed; its branch and worktree are kept.")) return;
+  abandoning.value = true;
+  error.value = "";
+  try {
+    run.value = await postJson(`/api/runs/${props.id}/abandon`, {});
+  } catch (e: any) {
+    error.value = e.message;
+  } finally {
+    abandoning.value = false;
+  }
+}
+
 let timer: ReturnType<typeof setInterval>;
 onMounted(() => {
   load();
@@ -30,6 +45,9 @@ onUnmounted(() => clearInterval(timer));
   <p v-if="error" class="error">{{ error }}</p>
   <template v-if="run">
     <h2>{{ run.title }} <span class="badge">{{ run.state }}</span></h2>
+    <p v-if="!OVER.includes(run.state)">
+      <button type="button" class="secondary" :disabled="abandoning" @click="abandon">Abandon Run</button>
+    </p>
     <p class="muted" v-if="run.trackerRef">Tracker: {{ run.trackerRef }}</p>
     <pre class="task">{{ run.task }}</pre>
     <p class="muted" v-if="run.branch">Branch <code>{{ run.branch }}</code><br />Worktree <code>{{ run.worktreePath }}</code></p>

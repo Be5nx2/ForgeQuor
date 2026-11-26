@@ -69,7 +69,7 @@ One **Project**, one **Run** going Developer (Claude) → **Checks** → pull re
     - when the Checks still fail, an Escalation offering abandon only opens with the failing Check and its output;
     - every attempt's commands, exit statuses and outputs show in the Run detail;
     - a Project with no Checks skips them.
-- [ ] `m1-06` **Abandon anytime, merge and close detection**: Run states stay true to what happens on GitHub.
+- [x] `m1-06` **Abandon anytime, merge and close detection**: Run states stay true to what happens on GitHub.
   - Spec: `docs/specs/m1-walking-skeleton.md`
   - Blocked by: `m1-04`
   - Acceptance:

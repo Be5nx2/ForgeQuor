@@ -40,6 +40,8 @@ const forge = createForge({
   worktreesRoot: process.env.FORGEQUOR_WORKTREES ?? join(homedir(), ".forgequor", "worktrees"),
   developerModel: process.env.FORGEQUOR_DEVELOPER_MODEL,
 });
+const POLL_MS = Number(process.env.FORGEQUOR_PR_POLL_SECONDS ?? 60) * 1000;
+setInterval(() => forge.checkPullRequests().catch((e) => console.error("Pull request check failed:", e)), POLL_MS).unref();
 const app = await createServer({ forge, tools, webRoot: `${root}web/dist` });
 await app.listen({ host: "127.0.0.1", port });
 console.log(`Forgequor on http://127.0.0.1:${port}`);
