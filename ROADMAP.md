@@ -142,5 +142,8 @@ YAML **Workflows** with parallel **Steps**, Griller with chat, Spec Writer, Arch
 - Test the startup tool checks and the `ls-remote` default-branch fallback.
 - After a hard crash of Forgequor (kill -9, power loss), detached Runner and Check process groups survive; on restart, kill or wait for them before restarting the Step, so two Developers never share a worktree.
 - Keep the partial Check results of an interrupted attempt (marked interrupted) instead of deleting them before the Checks run again.
+- Live progress survives a page reload or reconnection mid-Step (events kept as they come, not only at the end of the Step).
+- Stream Check output live, like the Developer's events.
+- Coalesce live "changed" updates so a chatty Agent does not make the UI reload the Run on every event.
 
 ## Done
