@@ -6,11 +6,13 @@ import { describe, expect, it } from "vitest";
 import { createGhCodeHost } from "../../src/codehost/gh.js";
 
 // Opt-in: opens and closes a real pull request on a sandbox repository you own (needs `gh` signed in, and a "main" branch).
-//   FORGEQUOR_SMOKE_REPO=owner/name npx vitest run tests/codehost/gh.smoke.test.ts
+// Runs only through `npm run smoke:gh` (which sets FORGEQUOR_SMOKE_GH), never in a plain `npm test`, even when
+// FORGEQUOR_SMOKE_REPO=owner/name is set in .env.
 const sandbox = process.env.FORGEQUOR_SMOKE_REPO;
 
-describe.skipIf(!sandbox)("real gh (smoke)", () => {
+describe.skipIf(!process.env.FORGEQUOR_SMOKE_GH)("real gh (smoke)", () => {
   it("opens a pull request, comments on it, then closes it", async () => {
+    if (!sandbox) throw new Error("Set FORGEQUOR_SMOKE_REPO=owner/name (in .env or the shell) to the sandbox repository.");
     const [owner, repo] = sandbox!.split("/") as [string, string];
     const branch = `forgequor-smoke-${Date.now()}`;
     const dir = mkdtempSync(join(tmpdir(), "forgequor-gh-smoke-"));

@@ -80,13 +80,19 @@ npm test
 The tests use the Docker PostgreSQL, so `npm test` starts it if needed. Each test run gets its own isolated schema. Tests never call the real Claude Code: a smoke test that does is skipped unless you opt in, and it uses a little of your Claude Quota.
 
 ```bash
-FORGEQUOR_SMOKE_CLAUDE=1 npx vitest run tests/runner/claude.smoke.test.ts
+npm run smoke:claude
 ```
 
-Another opt-in smoke test opens, comments on and closes a real pull request on a sandbox repository you own (`gh` must be signed in):
+Another opt-in smoke test opens, comments on and closes a real pull request on a throwaway GitHub repository you own, with a `main` branch (`gh` must be signed in). Name that repository once in your `.env` (see `.env.example`):
 
 ```bash
-FORGEQUOR_SMOKE_REPO=owner/name npx vitest run tests/codehost/gh.smoke.test.ts
+FORGEQUOR_SMOKE_REPO=owner/name
+```
+
+Then run it. A plain `npm test` never runs it.
+
+```bash
+npm run smoke:gh
 ```
 
 ### Link the agent skills (after every clone and every skill change)
