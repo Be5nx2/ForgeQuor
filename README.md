@@ -52,7 +52,7 @@ docker compose down
 
 To inspect what the Developer did, open the Run's worktree. The path is shown in the Run detail. Its `.forgequor/` folder holds the Run Notes, including the Review Brief. Git ignores that folder.
 
-> M1 is in progress. The Run page shows the Developer's progress live. On the Projects screen, declare a Project's **Setup** (shell commands run in each new worktree before the Developer, in order; a failing one opens an Escalation and the Developer never starts) and its **Checks** (run after the Developer, in order; without any, a Run goes straight to the pull request). See [ROADMAP.md](ROADMAP.md).
+> M1 (walking skeleton) is done: a Developer Run goes from its own worktree to a pull request and your final Gate; M2 (Assets) is next. The Run page shows the Developer's progress live. On the Projects screen, declare a Project's **Setup** (shell commands run in each new worktree before the Developer, in order; a failing one opens an Escalation and the Developer never starts) and its **Checks** (run after the Developer, in order; without any, a Run goes straight to the pull request). See [ROADMAP.md](ROADMAP.md).
 
 #### Registering Forgequor itself
 

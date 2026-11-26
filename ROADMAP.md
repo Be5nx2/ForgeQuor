@@ -6,7 +6,46 @@ Milestones are specified one at a time with `/to-spec`, then split into items wi
 
 ## Now
 
-### M1 Walking skeleton
+### M2 Assets
+
+Codex **Runner**, **Artist**, an `assets` **Workflow** (Artist → asset **Gate** → PR), generic Gate + **Feedback** + **Iteration** mechanism, **Art Direction** read from the Project, asset gallery in the UI. Unblocks the first game.
+
+- Spec: to write after the M2 grilling (`docs/specs/m2-assets.md`).
+
+## Next
+
+### M3 Full loop
+
+YAML **Workflows** with parallel **Steps**, Griller with chat, Spec Writer, Architect, solo or duo review (chosen at Run launch) with **Consolidator** (an unsettled reviewer disagreement opens a **Gate** with its recommendation), **Escalation**, configurable iteration limit (default 3), default `feature` and `bugfix` Workflows.
+
+### M4 Comfort
+
+**Quota** gauges refreshed after every Step (unknown shown greyed), **Archive** and purge after 60 days, macOS notifications, **Skill Packs** per Project plus the Project's own Skills, one-click Runner assignment (default and per Run), read-only Workflow preview, `/to-workflow` skill (checks for a close existing Workflow before writing a new one).
+
+## Icebox
+
+- Child Runs: a feature Run splitting its spec into one Run per ticket (ADR 0001).
+- Verifier Agent: a Step that runs the real app and the opt-in smoke tests and checks each acceptance criterion before the final Gate (green unit tests missed m1-03's undecidable Gates). To grill.
+- Conductor Agent (the sprint manager): reads the roadmap, computes the frontier, spots hidden dependencies and parallel-safe items, proposes the next Runs; advisory first, then driving Child Runs. Touches ADR 0001. To grill.
+- Runner fallback when a Quota is exhausted.
+- Competing Runs: the same Step on two Runners, then pick.
+- Codecks sync: import cards, update status.
+- Reading the human's GitHub PR comments as Feedback.
+- Automatic solo/duo review choice from diff size.
+- Visual Workflow editor.
+- Containerised or API-key Runners, multi-user studio instance.
+- Project registration accepts a GitHub remote not named `origin` (today refused as "no GitHub remote").
+- Lock migrations so two Forgequor starts at once cannot apply them twice.
+- Test the startup tool checks and the `ls-remote` default-branch fallback.
+- After a hard crash of Forgequor (kill -9, power loss), detached Runner and Check process groups survive; on restart, kill or wait for them before restarting the Step, so two Developers never share a worktree.
+- Keep the partial Check results of an interrupted attempt (marked interrupted) instead of deleting them before the Checks run again.
+- Live progress survives a page reload or reconnection mid-Step (events kept as they come, not only at the end of the Step).
+- Stream Check output live, like the Developer's events.
+- Coalesce live "changed" updates so a chatty Agent does not make the UI reload the Run on every event.
+
+## Done
+
+### M1 Walking skeleton (done 2026-11-26)
 
 One **Project**, one **Run** going Developer (Claude) → **Checks** → pull request with **Review Brief** → final **Gate** in Forgequor. Worktree, branch and PR per Run (ADR 0001), Runners as local subprocesses (ADR 0002), PostgreSQL through Docker Compose (ADR 0003), minimal Vue UI.
 
@@ -110,40 +149,3 @@ One **Project**, one **Run** going Developer (Claude) → **Checks** → pull re
     - a failing setup command opens an Escalation with its output, and the Developer never starts;
     - the README shows how to register Forgequor itself: setup `npm ci` then `scripts/link-skills.sh`, Checks `npm run typecheck` then `npm test`;
     - a real Run on Forgequor itself, on a trivial task, gets through setup, Developer and Checks to a pull request.
-
-## Next
-
-### M2 Assets
-
-Codex **Runner**, **Artist**, an `assets` **Workflow** (Artist → asset **Gate** → PR), generic Gate + **Feedback** + **Iteration** mechanism, **Art Direction** read from the Project, asset gallery in the UI. Unblocks the first game.
-
-### M3 Full loop
-
-YAML **Workflows** with parallel **Steps**, Griller with chat, Spec Writer, Architect, solo or duo review (chosen at Run launch) with **Consolidator** (an unsettled reviewer disagreement opens a **Gate** with its recommendation), **Escalation**, configurable iteration limit (default 3), default `feature` and `bugfix` Workflows.
-
-### M4 Comfort
-
-**Quota** gauges refreshed after every Step (unknown shown greyed), **Archive** and purge after 60 days, macOS notifications, **Skill Packs** per Project plus the Project's own Skills, one-click Runner assignment (default and per Run), read-only Workflow preview, `/to-workflow` skill (checks for a close existing Workflow before writing a new one).
-
-## Icebox
-
-- Child Runs: a feature Run splitting its spec into one Run per ticket (ADR 0001).
-- Verifier Agent: a Step that runs the real app and the opt-in smoke tests and checks each acceptance criterion before the final Gate (green unit tests missed m1-03's undecidable Gates). To grill.
-- Conductor Agent (the sprint manager): reads the roadmap, computes the frontier, spots hidden dependencies and parallel-safe items, proposes the next Runs; advisory first, then driving Child Runs. Touches ADR 0001. To grill.
-- Runner fallback when a Quota is exhausted.
-- Competing Runs: the same Step on two Runners, then pick.
-- Codecks sync: import cards, update status.
-- Reading the human's GitHub PR comments as Feedback.
-- Automatic solo/duo review choice from diff size.
-- Visual Workflow editor.
-- Containerised or API-key Runners, multi-user studio instance.
-- Project registration accepts a GitHub remote not named `origin` (today refused as "no GitHub remote").
-- Lock migrations so two Forgequor starts at once cannot apply them twice.
-- Test the startup tool checks and the `ls-remote` default-branch fallback.
-- After a hard crash of Forgequor (kill -9, power loss), detached Runner and Check process groups survive; on restart, kill or wait for them before restarting the Step, so two Developers never share a worktree.
-- Keep the partial Check results of an interrupted attempt (marked interrupted) instead of deleting them before the Checks run again.
-- Live progress survives a page reload or reconnection mid-Step (events kept as they come, not only at the end of the Step).
-- Stream Check output live, like the Developer's events.
-- Coalesce live "changed" updates so a chatty Agent does not make the UI reload the Run on every event.
-
-## Done
