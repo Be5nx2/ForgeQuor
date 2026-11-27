@@ -160,6 +160,8 @@ export async function createServer(deps: {
     });
   });
   app.get("/api/gates", async () => deps.forge.listOpenGates());
+  // The merge list: Approved Runs whose pull request waits for the human's merge.
+  app.get("/api/approved-runs", async () => deps.forge.listApprovedRuns());
   app.post<{ Params: { id: string }; Body: { action?: GateAction; feedback?: string; verdicts?: Verdict[] } }>("/api/gates/:id/decision", async (req, reply) => {
     const { action, feedback, verdicts } = req.body ?? {};
     if (action !== "approve" && action !== "reject" && action !== "abandon" && action !== "judge") {

@@ -135,6 +135,10 @@ export interface OpenGate extends Gate {
   runTitle: string;
   projectName: string;
 }
+/** An Approved Run on the merge list: its pull request waits for the human's merge. */
+export interface ApprovedRun extends Run {
+  projectName: string;
+}
 
 /** A live update from the server: a Step's progress, or a Run that changed. */
 export type RunUpdate =
