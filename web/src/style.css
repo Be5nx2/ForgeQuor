@@ -15,8 +15,8 @@ button:disabled { opacity: 0.5; cursor: wait; }
 .gate-actions { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.5rem; }
 ul { list-style: none; padding: 0; }
 li { background: #101d2d; padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 0.5rem; }
-nav { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
-nav button { background: #101d2d; color: #94a3b8; border: 1px solid #101d2d; }
+nav { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
+nav button { background: #101d2d; color: #94a3b8; border: 1px solid #101d2d; white-space: nowrap; overflow-wrap: normal; }
 nav button.active { background: #101d2d; color: #f0f5fa; border-color: #ff8c24; }
 .stack { flex-direction: column; }
 select, textarea { padding: 0.5rem; background: #101d2d; color: inherit; border: 1px solid #38bdf8; border-radius: 6px; font: inherit; }
