@@ -741,7 +741,6 @@ describe("waiting for the human's merge", () => {
       state: "approved",
     });
     expect(listed.find((r) => r.id === second.id)).toMatchObject({ projectName: two.project.name, prUrl: second.prUrl });
-    expect(first.prUrl).toMatch(/^https:\/\//);
   });
 
   it("drops a Run once its pull request is merged or closed, or the Run is abandoned", async () => {

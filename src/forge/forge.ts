@@ -373,6 +373,8 @@ function toGate(r: Record<string, any>): Gate {
 }
 
 const RUN_COLUMNS = "id, project_id, workflow, iteration, title, task, tracker_ref, state, branch, worktree_path, pr_number, pr_url, resume_at, created_at";
+/** The same columns, read through the alias `r` in a query that joins another table. */
+const RUN_COLUMNS_OF_R = RUN_COLUMNS.split(", ").map((c) => `r.${c}`).join(", ");
 
 export function createForge(deps: ForgeDeps): Forge {
   const { pool } = deps;
@@ -600,7 +602,9 @@ export function createForge(deps: ForgeDeps): Forge {
       [runId],
     );
     changed(runId);
-    if (rows[0]) await promote(Number(rows[0].project_id));
+    if (!rows[0]) return;
+    // This Run is done: failing to start the next one is not its failure. Restart recovery starts Queued Runs again.
+    await promote(Number(rows[0].project_id)).catch((e) => console.error(`Run ${runId}: could not start the next Queued Run:`, e));
   }
 
   /** Works on a Run until it waits at a Gate, pauses, or is abandoned; starts over from what is recorded if it was worked on before. */
@@ -830,7 +834,7 @@ export function createForge(deps: ForgeDeps): Forge {
 
     async listApprovedRuns() {
       const { rows } = await pool.query(
-        `SELECT ${RUN_COLUMNS.split(", ").map((c) => `r.${c}`).join(", ")}, p.name AS project_name
+        `SELECT ${RUN_COLUMNS_OF_R}, p.name AS project_name
          FROM runs r JOIN projects p ON p.id = r.project_id
          WHERE r.state = 'approved' ORDER BY r.id`,
       );

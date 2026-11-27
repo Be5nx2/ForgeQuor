@@ -84,7 +84,9 @@ A **Run** moves Queued → Running ⇄ Waiting / Paused → Approved → Merged,
 
 **Paused**: stopped because a **Runner**'s **Quota** is exhausted; resumes on its own when the window reopens.
 
-**Approved**: final **Gate** accepted; its pull request awaits the human's merge.
+**Approved**: final **Gate** accepted; its pull request awaits the human's merge. It no longer holds its **Project**'s slot, and it stays on the **merge list** until merged, closed or abandoned.
+
+**Merge list**: the "Waiting for your merge" list under "Waiting for you": every Approved **Run** of every **Project**, with its pull request.
 
 **Merged** / **Closed**: its pull request was merged, or closed without merging.
 

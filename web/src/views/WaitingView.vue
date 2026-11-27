@@ -14,7 +14,11 @@ let latest = 0;
 
 async function load() {
   const mine = ++latest;
-  const [open, approved] = await Promise.all([getJson<OpenGate[]>("/api/gates"), getJson<ApprovedRun[]>("/api/approved-runs")]);
+  // The merge list failing to load must not hide the open Gates.
+  const [open, approved] = await Promise.all([
+    getJson<OpenGate[]>("/api/gates"),
+    getJson<ApprovedRun[]>("/api/approved-runs").catch(() => merges.value),
+  ]);
   // An Asset Gate is judged on the images, so its Run comes along to show them.
   const assetRuns = await Promise.all(open.filter((g) => g.kind === "asset").map((g) => getJson<RunDetail>(`/api/runs/${g.runId}`)));
   if (mine !== latest) return;
