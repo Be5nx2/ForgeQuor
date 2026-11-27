@@ -19,6 +19,27 @@ YAML **Workflows** with parallel **Steps**, Griller with chat, Spec Writer, Arch
 
 **Quota** gauges refreshed after every Step (unknown shown greyed), **Archive** and purge after 60 days, macOS notifications, **Skill Packs** per Project plus the Project's own Skills, one-click Runner assignment (default and per Run), read-only Workflow preview, `/to-workflow` skill (checks for a close existing Workflow before writing a new one).
 
+### Dogfood Notes
+
+**Dogfood Notes** jotted from a floating **+ Note** button, a **Dogfood Inbox** tab, a Markdown **Dogfood Export** of selected notes, and a `/dogfood-triage` skill. Spec: `docs/specs/dogfood-notes.md`. Planned after M4.
+
+- [ ] `dogfood-01` **Jot a Dogfood Note**: from any tab the human clicks **+ Note**, picks a nature (feedback or idea) and a target (workflow, feature, display, other; pre-selected from the tab), types a text and saves; the app records it with its context and closes the popup with a short "noted" message.
+  - Spec: `docs/specs/dogfood-notes.md`
+  - Blocked by: none
+  - Acceptance: **+ Note** is visible on every tab; only the text is required and an empty text is refused with a clear message; what was typed is kept if saving fails; the tab, the Run or Project in view (shown as text, for example "Run #42") and the date are attached automatically; a note without Run or Project is accepted; an unknown Run or Project, or an invalid nature or target, is refused; notes are stored with source `internal`, status `new`, and never deleted or edited; the glossary defines **Dogfood Note**, **Dogfood Inbox** and **Dogfood Export** and says they are not a **Gate**'s **Feedback**; Forge core tests on the real database cover creation and refusals, HTTP route tests cover request shape and error mapping.
+- [ ] `dogfood-02` **Review notes in the Dogfood Inbox**: an Inbox tab lists the notes newest first, with a badge counting the new ones, filters, and buttons to triage or dismiss them.
+  - Spec: `docs/specs/dogfood-notes.md`
+  - Blocked by: `dogfood-01`
+  - Acceptance: each note shows nature, target, text, date and origin; filters by status, nature and target; the badge counts `new` notes and updates after a change; a note can go `new` → `triaged` (with an optional free-text reference) or `dismissed`, and back to `new`; triaged and dismissed notes stay listed; only status and reference ever change; Forge core tests cover filters, the count, allowed transitions and the kept reference.
+- [ ] `dogfood-03` **Export selected notes**: the human selects notes in the Inbox and clicks **Export** to get one Markdown file, written in `docs/dogfood/` and offered for download.
+  - Spec: `docs/specs/dogfood-notes.md`
+  - Blocked by: `dogfood-02`
+  - Acceptance: checkboxes per note plus "select all" for the current filter; the file is named `export_forgequor_<date>_<time>.md`; it has a header with the export date and note count, then one section per target with notes ordered by date, each showing ID, date, nature, target, origin as text, triage reference when present, and the text verbatim; the folder is configurable, defaults to `docs/dogfood/` and is created when missing; exporting changes no status; an empty selection and an unwritable folder give clear errors; Forge core tests cover content, grouping, ordering and file writing in a temporary folder.
+- [ ] `dogfood-04` **Triage notes with `/dogfood-triage`**: a Forgequor skill reads an export file, groups its notes by theme, proposes what each group becomes, and turns the kept ones into roadmap items once the human agrees.
+  - Spec: `docs/specs/dogfood-notes.md`
+  - Blocked by: `dogfood-03`
+  - Acceptance: the skill lives with the Forgequor-only skills and is linked by `scripts/link-skills.sh`; for each group it proposes a roadmap item, a spec to write, the icebox or dismissal; nothing is written before the human agrees; kept groups go through `/to-spec` or `/to-tickets`; it ends with the note IDs to mark triaged or dismissed and where each went; `skills/README.md` has a "Dogfooding" section explaining the flow (+ Note → Inbox → Export → `/dogfood-triage` → roadmap) and why; the role table in `CLAUDE.md` mentions it; checked by hand on a real export.
+
 ## Icebox
 
 - Child Runs: a feature Run splitting its spec into one Run per ticket (ADR 0001).
