@@ -162,13 +162,111 @@ Griller with a **Conversation Gate** (it writes the Project's glossary and ADRs 
     - the Artist and the Asset Gate run only when there are Asset Requests;
     - the Developer is given the approved Assets' paths.
 
-## Next
-
 ### M4 Comfort
 
-- Spec: `docs/specs/m4-comfort.md`. Items cut with `/to-tickets`.
+- Spec: `docs/specs/m4-comfort.md`. Items below.
 - **M4a, running it day to day:** **Archive** as soon as a Run ends (worktree and local branch removed, remote branch too when abandoned or closed unmerged, startup catch-up), purge after `FORGEQUOR_ARCHIVE_DAYS` (60), macOS notifications (Gate, Escalation, Quota pause, pull request merged or closed; `FORGEQUOR_NOTIFICATIONS=off`), one **Quota** bar per vendor at the top (Claude from the free `claude -p "/usage"` at startup, after each Step and every 5 minutes; Codex from its session file after each Step; greyed when unknown).
 - **M4b, setting it up:** Team page for seats in the database (an environment variable wins and locks the seat), per-Run seat overrides in New Run frozen at start, **Skill Packs** per Project (`forgequor` excluded), read-only Workflows page with validation errors and `POST /api/workflows/validate`, `/to-workflow` shared skill (reuse a close Workflow first, Step-type reference kept in sync by a test).
+
+#### M4a Running it day to day
+
+- [ ] `m4-01` **Archive a Run when it ends**: a merged, closed or abandoned Run leaves no worktree or local branch behind and stays readable.
+  - Spec: `docs/specs/m4-comfort.md`
+  - Blocked by: none
+  - Acceptance:
+    - right after a Run becomes merged, closed or abandoned, whatever caused it, its worktree and local branch are removed and it gets an archived-at time; its outcome state is kept (Archived is a mark, not a state; the glossary says so);
+    - an abandoned Run, or a pull request closed unmerged, also has its remote branch deleted (the Code Host gains branch deletion, the fake records it); after a merge the remote branch is left alone;
+    - a target already gone counts as done; a step that fails is logged, does not stop the others, and the Run is archived anyway;
+    - an Approved Run keeps its worktree;
+    - an Archived Run's detail still shows its Run Notes, reviews, Gates, transcripts and attempts, and "files removed, see the pull request" where it would read the worktree (Asset previews included);
+    - the Runs tab hides Archived Runs by default, with a filter to show them;
+    - Forge core tests with temp repos and bare remotes cover each outcome and a worktree already gone.
+- [ ] `m4-02` **Startup catch-up and purge**: old finished Runs are archived and, after the delay, deleted.
+  - Spec: `docs/specs/m4-comfort.md`
+  - Blocked by: `m4-01`
+  - Acceptance:
+    - at startup, every finished Run without an archived-at time is archived the same way, before live Runs resume;
+    - Runs archived more than `FORGEQUOR_ARCHIVE_DAYS` (default 60) days ago are deleted with everything that belongs to them; a Run that is not Archived is never purged;
+    - the purge runs at startup and every 24 hours, and logs how many Runs it deleted;
+    - Forge core takes an injectable clock; tests drive the delay with it.
+- [ ] `m4-03` **macOS notifications**: the human hears about a Run that needs them without watching the tab.
+  - Spec: `docs/specs/m4-comfort.md`
+  - Blocked by: none
+  - Acceptance:
+    - a Notifier port in Forge core's dependencies (title, message); `osascript` in production, a recording fake in tests, a silent one with `FORGEQUOR_NOTIFICATIONS=off`;
+    - a notification when a human Gate opens, an Escalation opens, a Run pauses on an exhausted Quota (with its reset time when known), and the pull request poller finds a pull request merged or closed; none when a Step simply finishes;
+    - the message names the Run (`Run #42 "Title"`) and what happened;
+    - a throwing Notifier is logged and never changes a Run;
+    - the BA keeps notifications off.
+- [ ] `m4-04` **Claude Quota bar**: the human sees Claude's five-hour and weekly percentages at the top of the app.
+  - Spec: `docs/specs/m4-comfort.md`
+  - Blocked by: none
+  - Acceptance:
+    - a Quota Reading (per window: percent used and reset time, each possibly unknown; exhausted or not; read-at time) is defined in the glossary;
+    - the Runner port gains an optional reading on a Step result and an optional on-demand `readQuota()`;
+    - the Claude Runner's `readQuota()` parses `claude -p "/usage" --output-format json` ("Current session", "Current week (all models)"); unparseable text gives an unknown reading, never an error; a Step's `rate_limit_event` gives a partial reading;
+    - Forge core stores the latest reading per vendor in the database, reads Claude at startup, after every Claude Step and every 5 minutes (clock-driven in tests), and pushes each reading on the live-events stream;
+    - `GET /api/quota` returns both vendors with the reading's age;
+    - a compact bar per vendor at the top of every tab, greyed "unknown" without a reading, with its age;
+    - Runner contract tests against a fake CLI replaying the real `/usage` text and an unparseable one; the Claude smoke test makes one real `readQuota()` call.
+- [ ] `m4-05` **Codex Quota bar and Quota pauses**: Codex's bar fills in, and a paused Run's bar reads exhausted.
+  - Spec: `docs/specs/m4-comfort.md`
+  - Blocked by: `m4-04`
+  - Acceptance:
+    - after each Step, the Codex Runner reads the last `token_count` `rate_limits` of the session file named after the thread id (`primary` five-hour, `secondary` weekly); a missing or unreadable file gives no reading;
+    - a Quota pause on any Runner records an exhausted reading with its reset time;
+    - Runner contract tests with a fake session file, and without one.
+
+#### M4b Setting it up
+
+- [ ] `m4-06` **Team page**: the human sets each seat's Runner and model in the app, without a restart.
+  - Spec: `docs/specs/m4-comfort.md`
+  - Blocked by: none
+  - Acceptance:
+    - Team settings stored in the database per seat; a seat's Runner and model each resolve as environment variable, then Team setting, then default;
+    - seats are resolved when a Run starts, so a change applies to the next Runs without a restart;
+    - `GET /api/team` gives each seat's effective Runner and model, where each comes from, and the variable name when locked; `PUT /api/team/:seat` refuses an unknown seat or Runner and a seat locked by the environment;
+    - a Team tab with a short model list per Runner plus a free identifier, locked seats read-only with their variable named;
+    - a seat with a Runner Forgequor cannot start still opens an Escalation naming it.
+- [ ] `m4-07` **Seats per Run**: one Run can use other seats than the default, and shows what it used.
+  - Spec: `docs/specs/m4-comfort.md`
+  - Blocked by: `m4-06`, `m4-05`
+  - Acceptance:
+    - New Run has a folded "Seats" section filled from `GET /api/team`; `POST /api/runs` accepts per-seat overrides, validated like the Team page;
+    - a Run freezes its effective seats at start; its Agent Steps use them, also after a restart; Runs from before M4 resolve seats as before;
+    - the Run detail shows the Runner and model each Agent Step used;
+    - New Run warns, without blocking, next to a seat whose Runner's Quota is exhausted, with the reset time.
+- [ ] `m4-08` **Skill Packs per Project**: a Project's Agents get the packs it picked on top of `shared`.
+  - Spec: `docs/specs/m4-comfort.md`
+  - Blocked by: none
+  - Acceptance:
+    - the packs offered are Forgequor's Skill folders except `shared` (always given) and `forgequor`;
+    - a Project's choice is stored with it and changed from its page (`PUT /api/projects/:id/skill-packs`, refusing an unknown pack);
+    - at a Run's start, `shared` then each chosen pack is placed for Claude and Codex, never committed; a Project's own Skill wins, and between packs the first placed wins;
+    - a change affects only Runs launched afterwards.
+- [ ] `m4-09` **Workflows page and validation endpoint**: the human sees every Workflow a Project offers, and why an invalid one is not offered.
+  - Spec: `docs/specs/m4-comfort.md`
+  - Blocked by: none
+  - Acceptance:
+    - `GET /api/projects/:id/workflows` returns every Workflow with its source, whether it overrides a built-in one, its Steps (id, type, Agent, `needs`, `when`), its YAML and its validation errors; launch keeps offering only valid ones;
+    - `POST /api/workflows/validate` takes YAML text (optionally a Project) and returns the full error list, empty when valid, storing nothing;
+    - a read-only, minimal Workflows tab: list, Steps table, YAML, errors.
+- [ ] `m4-10` **`/to-workflow` skill**: a need becomes a valid Project Workflow without learning the engine.
+  - Spec: `docs/specs/m4-comfort.md`
+  - Blocked by: `m4-09`
+  - Acceptance:
+    - a `shared` Skill that first proposes reusing or adjusting a close existing Workflow, otherwise writes `<name>.yaml` in the Project's Workflows folder from the real Step types, validates it through `POST /api/workflows/validate` (configurable address, local default) and fixes it, or tells the human to open the Workflows page when Forgequor does not answer;
+    - it carries a reference of the Step types and the built-in Workflows; a test checks both match the code;
+    - `skills/README.md` lists it.
+- [ ] `m4-11` **M4 BA scenarios**: archiving and Quota readings checked for real.
+  - Spec: `docs/specs/m4-comfort.md`
+  - Blocked by: `m4-02`, `m4-05`
+  - Acceptance:
+    - a Run abandoned at its final Gate ends with no worktree, no local branch and no remote branch on the sandbox, and still shows its Run Notes and reviews;
+    - after a Claude Step, `GET /api/quota` returns a Claude reading with percentages;
+    - notifications stay off; the README of the BA suite lists the new scenarios.
+
+## Next
 
 ### Dogfood Notes
 
