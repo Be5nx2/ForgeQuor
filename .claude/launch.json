@@ -7,6 +7,13 @@
       "runtimeArgs": ["start"],
       "port": 4170,
       "url": "http://127.0.0.1:4170"
+    },
+    {
+      "name": "forgequor-ba",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "FORGEQUOR_DATABASE_URL=postgres://forgequor:forgequor@localhost:5433/forgequor_ba FORGEQUOR_PORT=4180 FORGEQUOR_PR_POLL_SECONDS=600 FORGEQUOR_WORKTREES=/tmp/forgequor-ba-ui node_modules/.bin/tsx src/main.ts"],
+      "port": 4180,
+      "url": "http://127.0.0.1:4180"
     }
   ]
 }
