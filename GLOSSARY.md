@@ -25,7 +25,7 @@ A **Step** where the **Run** waits for the human, who answers, approves or rejec
 _Avoid_: Checkpoint, approval, human-in-the-loop
 
 **Escalation**:
-A **Gate** a **Run** opens on its own when it cannot go on (iteration limit reached, **Runner** failure, **Check** failing repeatedly), stating why.
+A **Gate** a **Run** opens on its own when it cannot go on (attempt limit reached, **Runner** failure, **Check** failing repeatedly), stating why.
 _Avoid_: Error, alert, failure
 
 **Conversation Gate**:
