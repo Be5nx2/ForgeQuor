@@ -65,11 +65,15 @@ describe("the Steps of an abandoned Run", () => {
     const { project } = await projectWithRemote();
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
+    // The Developer has really started once the Runner is called: wait for that, not for a fixed time.
+    let working!: () => void;
+    const developerStarted = new Promise<void>((r) => (working = r));
     runner.use(async () => {
+      working();
       await gate;
     });
     const started = await forge.startRun({ projectId: project.id, task: "Make the player jump." });
-    await new Promise((r) => setTimeout(r, 300));
+    await developerStarted;
     expect((await forge.getRun(started.id)).steps.some((s) => s.status === "running")).toBe(true);
 
     const abandoned = await forge.abandonRun(started.id);
