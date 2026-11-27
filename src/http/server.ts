@@ -95,7 +95,25 @@ export async function createServer(deps: {
     }
   });
 
-  // What the Run form offers: the built-in Workflows and the Project's own, read from its freshly fetched default branch.
+  /**
+   * POST /api/workflows/validate  body: { yaml: string, projectId?: number }
+   * Validates Workflow YAML text exactly as launch does and stores nothing. Answers 200 with
+   * `{ valid: boolean, errors: [{ path, line?, column?, message }] }` (`errors` is empty when valid; every error is
+   * listed, not the first). 400 when `yaml` is not a string, 404 when `projectId` names no Project.
+   * Used by the `/to-workflow` Skill: curl -s -X POST -H 'content-type: application/json' -d '{"yaml":"..."}' <address>/api/workflows/validate
+   */
+  app.post<{ Body: { yaml?: unknown; projectId?: unknown } }>("/api/workflows/validate", async (req, reply) => {
+    const { yaml, projectId } = req.body ?? {};
+    if (typeof yaml !== "string") return reply.code(400).send({ error: "The body needs a `yaml` string." });
+    if (projectId !== undefined && !Number.isInteger(projectId)) return reply.code(400).send({ error: "`projectId` must be an integer." });
+    try {
+      return await deps.forge.validateWorkflow(yaml, projectId as number | undefined);
+    } catch (e: any) {
+      return reply.code(404).send({ error: e.message });
+    }
+  });
+
+  // What the Run form offers and the Workflows tab shows: the built-in Workflows and the Project's own, with Steps, YAML and errors, read from its freshly fetched default branch.
   app.get<{ Params: { id: string } }>("/api/projects/:id/workflows", async (req, reply) => {
     try {
       return await deps.forge.listWorkflows(Number(req.params.id));

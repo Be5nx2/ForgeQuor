@@ -17,7 +17,7 @@ async function serve(forge: Partial<Forge>) {
 describe("the Project Workflows route", () => {
   it("returns what the Forge core lists for the Project", async () => {
     const list: WorkflowList = {
-      workflows: [{ name: "developer", description: "", inputs: ["task"], origin: "built-in", errors: [], file: null }],
+      workflows: [{ name: "developer", description: "", inputs: ["task"], origin: "built-in", errors: [], file: null, overrides: false, steps: [], yaml: "" }],
       problem: null,
     };
     const asked: number[] = [];

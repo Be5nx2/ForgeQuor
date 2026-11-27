@@ -56,6 +56,29 @@ export interface WorkflowOption {
   errors: WorkflowError[];
   /** The Project file it comes from, or null for a built-in. */
   file: string | null;
+  /** A Project Workflow named like a built-in one, which it replaces. */
+  overrides: boolean;
+  /** Its Steps in Workflow order; empty when the file does not parse. */
+  steps: WorkflowStepSummary[];
+  /** Its YAML text (a built-in Workflow's file, a Project Workflow's file as last fetched). */
+  yaml: string;
+}
+
+/** One Step of a Workflow as the Workflows page shows it. */
+export interface WorkflowStepSummary {
+  id: string;
+  type: string;
+  /** The Agent an agent or conversation Step names, else null. */
+  agent: string | null;
+  needs: string[];
+  /** The input whose absence skips the Step, else null. */
+  when: string | null;
+}
+
+/** The answer of `POST /api/workflows/validate`: valid exactly when `errors` is empty. */
+export interface WorkflowValidation {
+  valid: boolean;
+  errors: WorkflowError[];
 }
 
 /** The Workflows a Project can launch. `problem` says why the Project's own could not be read (then only built-ins are listed). */

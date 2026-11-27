@@ -7,6 +7,7 @@ import ProjectsView from "./views/ProjectsView.vue";
 import RunDetailView from "./views/RunDetailView.vue";
 import RunsView from "./views/RunsView.vue";
 import WaitingView from "./views/WaitingView.vue";
+import WorkflowsView from "./views/WorkflowsView.vue";
 
 interface Tool {
   tool: string;
@@ -19,6 +20,7 @@ const tabs = [
   { id: "new", label: "New Run" },
   { id: "runs", label: "Runs" },
   { id: "projects", label: "Projects" },
+  { id: "workflows", label: "Workflows" },
 ] as const;
 
 const tab = ref<(typeof tabs)[number]["id"]>("waiting");
@@ -53,6 +55,7 @@ onMounted(async () => {
     <WaitingView v-if="tab === 'waiting'" @open="openRun" />
     <NewRunView v-else-if="tab === 'new'" @open="openRun" />
     <ProjectsView v-else-if="tab === 'projects'" />
+    <WorkflowsView v-else-if="tab === 'workflows'" />
     <RunDetailView v-else-if="runId !== null" :id="runId" @back="runId = null" />
     <RunsView v-else @open="openRun" />
   </main>
