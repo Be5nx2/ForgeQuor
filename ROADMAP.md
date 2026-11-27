@@ -107,7 +107,7 @@ Griller with a **Conversation Gate** (it writes the Project's glossary and ADRs 
   - minimal Skill Packs move into M3b: at each Run's start Forgequor places its own `shared` pack in the worktree (`.claude/skills` and `.agents/skills`), never committed, and a skill the Project has itself wins; choosing packs per Project stays in M4;
   - the `feature` Developer gets the task, the spec, the Implementation Plan and the approved Assets' paths; a final Gate rejection sends it back with the Feedback; an Escalation can go back to any earlier Step, the Griller included, which reopens the conversation;
   - a `feature` Run starts from a free-text subject and a solo or duo review choice (duo by default; solo by default for `bugfix`).
-- [ ] `m3-10` **Shared Skill Pack in every Run**: Agents find the skills they need in any Project.
+- [x] `m3-10` **Shared Skill Pack in every Run**: Agents find the skills they need in any Project.
   - Spec: `docs/specs/m3b-the-team.md`
   - Blocked by: none
   - Acceptance:
