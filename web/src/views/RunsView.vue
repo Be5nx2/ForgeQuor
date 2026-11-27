@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch } from "vue";
-import { followRuns, getJson, postJson, type AssetKind, type Project, type Run } from "../api";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { followRuns, getJson, postJson, type ArtInfo, type AssetKind, type Project, type Run } from "../api";
 
 const emit = defineEmits<{ open: [id: number] }>();
 
@@ -14,17 +14,35 @@ const form = ref({ projectId: "", workflow: "developer", task: "", title: "", tr
 
 /** The size presets of an Asset Request; "custom" shows the width and height fields. */
 const SIZES = ["16x16", "18x18", "32x32"];
+/** What the chosen Project's Art Direction says, to preset the size and offer reference images. */
+const art = ref<ArtInfo>({ present: false, defaultSize: null, references: [], images: [] });
+const defaultSize = computed(() => (art.value.defaultSize ? `${art.value.defaultSize.width}x${art.value.defaultSize.height}` : null));
+/** The Art Direction's default size comes first, then the usual ones. */
+const sizes = computed(() => [...new Set([...(defaultSize.value ? [defaultSize.value] : []), ...SIZES])]);
 interface AssetDraft {
   name: string;
   kind: AssetKind;
   description: string;
   size: string;
   fill: boolean;
+  replace: boolean;
+  references: string[];
   frames: number;
   width: number;
   height: number;
 }
-const newAsset = (): AssetDraft => ({ name: "", kind: "sprite", description: "", size: "16x16", fill: false, frames: 4, width: 16, height: 16 });
+const newAsset = (): AssetDraft => ({
+  name: "",
+  kind: "sprite",
+  description: "",
+  size: defaultSize.value ?? "16x16",
+  fill: false,
+  replace: false,
+  references: [],
+  frames: 4,
+  width: 16,
+  height: 16,
+});
 const assets = ref<AssetDraft[]>([newAsset()]);
 const sizeOf = (a: AssetDraft) => (a.size === "custom" ? { width: a.width, height: a.height } : { width: Number(a.size.split("x")[0]), height: Number(a.size.split("x")[1]) });
 const error = ref("");
@@ -44,7 +62,7 @@ async function start() {
       projectId: Number(form.value.projectId),
       workflow: form.value.workflow,
       task: isAssets ? undefined : form.value.task,
-      assets: isAssets ? assets.value.map((a) => ({ name: a.name, kind: a.kind, description: a.description, fill: a.fill, frames: a.kind === "animation" ? a.frames : undefined, ...sizeOf(a) })) : undefined,
+      assets: isAssets ? assets.value.map((a) => ({ name: a.name, kind: a.kind, description: a.description, fill: a.fill, replace: a.replace, references: a.references, frames: a.kind === "animation" ? a.frames : undefined, ...sizeOf(a) })) : undefined,
       title: form.value.title || undefined,
       trackerRef: form.value.trackerRef || undefined,
     });
@@ -69,6 +87,20 @@ onMounted(async () => {
 });
 onUnmounted(() => stopFollowing?.());
 watch([filterProject, filterState], load);
+// The Art Direction's default size presets the Assets not yet filled in; a Project without images or Art Direction offers nothing.
+watch(
+  () => form.value.projectId,
+  async (id) => {
+    const none: ArtInfo = { present: false, defaultSize: null, references: [], images: [] };
+    const fetched = id ? await getJson<ArtInfo>(`/api/projects/${id}/art-info`).catch(() => none) : none;
+    // A quicker switch to another Project already moved on: drop this answer.
+    if (form.value.projectId !== id) return;
+    art.value = fetched;
+    // References are the previous Project's images; the preset size is the new Project's.
+    assets.value = assets.value.map((a) => (a.name || a.description ? { ...a, references: [] } : newAsset()));
+  },
+  { immediate: true },
+);
 </script>
 
 <template>
@@ -98,9 +130,16 @@ watch([filterProject, filterState], load);
         </label>
         <textarea v-model="a.description" rows="2" placeholder="What it shows" aria-label="Asset description" required />
         <select v-model="a.size" aria-label="Asset size">
-          <option v-for="size in SIZES" :key="size" :value="size">{{ size }}</option>
+          <option v-for="size in sizes" :key="size" :value="size">{{ size }}{{ size === defaultSize ? " (Art Direction)" : "" }}</option>
           <option value="custom">custom…</option>
         </select>
+        <label v-if="art.images.length">
+          Style references (existing images; those the Art Direction names are always given)
+          <select v-model="a.references" multiple size="4" aria-label="Asset references">
+            <option v-for="image in art.images" :key="image" :value="image">{{ image }}</option>
+          </select>
+        </label>
+        <label class="fill"><input v-model="a.replace" type="checkbox" aria-label="Asset replaces an existing file" /> Replaces the existing file at its path</label>
         <label class="fill"><input v-model="a.fill" type="checkbox" aria-label="Asset fills its square" /> Fills its whole square (no transparency, e.g. a ground tile)</label>
         <div v-if="a.size === 'custom'">
           <input v-model.number="a.width" type="number" min="1" step="1" aria-label="Asset width" />

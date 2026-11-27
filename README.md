@@ -57,6 +57,16 @@ For 2D pixel art, pick the **assets** Workflow in the Run form and list **Asset 
 
 On the Projects screen, set where the Project keeps its **Art Direction** document (default `docs/ART_DIRECTION.md`) and its **art folder** (default `assets/art`). A Run stops at an Escalation, before generating anything, when the Art Direction is missing from the repository's default branch. The Runner's raw images are kept under `.forgequor/assets/` as a trace.
 
+##### The Art Direction contract
+
+The Art Direction is a Markdown document in the Project (default `docs/ART_DIRECTION.md`, read from the Run's worktree). Forgequor reads three things from it, none required:
+
+- **Palette**: every `#RRGGBB` code under a `Palette` heading (up to the next heading of the same or a higher level). Opaque colours outside it only show as a warning on the Asset. Without a palette there is no warning.
+- **Default size**: a `Default size: WxH` line (for example `Default size: 16x16`). The Run form presets new Assets to it. Without one, the form starts at 16x16.
+- **Reference images**: repository paths to PNG files mentioned anywhere in the document (for example `assets/art/ref/style.png`). Those that exist are always shown to the Artist, so every Asset follows the same look. An Art Direction without any works just as well. An Asset Request can add its own style references, picked from the repository's PNGs.
+
+An Asset Request never overwrites an existing file by accident: starting the Run is refused when its target file already exists, unless the request is marked as **replacing** it (the existing art is then shown to the Artist as a reference). Two requests that would produce the same file, or a reference that does not exist, are refused too.
+
 To inspect what the Developer did, open the Run's worktree. The path is shown in the Run detail. Its `.forgequor/` folder holds the Run Notes, including the Review Brief. Git ignores that folder.
 
 > M1 (walking skeleton) is done: a Developer Run goes from its own worktree to a pull request and your final Gate; M2 (Assets) is next. The Run page shows the Developer's progress live. On the Projects screen, declare a Project's **Setup** (shell commands run in each new worktree before the Developer, in order; a failing one opens an Escalation and the Developer never starts) and its **Checks** (run after the Developer, in order; without any, a Run goes straight to the pull request). See [ROADMAP.md](ROADMAP.md).

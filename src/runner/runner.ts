@@ -7,6 +7,8 @@ export interface StepRequest {
   /** Directory the Agent works in (the Run's worktree). */
   cwd: string;
   model?: string;
+  /** Images to show the Agent with the prompt (absolute paths), for Runners that can take them (Codex); others ignore them. */
+  images?: string[];
   /** Aborting it kills the Runner's process and everything it started; the Step then ends as a failure. */
   signal?: AbortSignal;
 }

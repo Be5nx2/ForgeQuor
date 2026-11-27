@@ -65,7 +65,7 @@ function approveAll() {
       <li v-for="a in assets" :key="a.id">
         <strong>{{ a.name }}</strong> <span class="badge">{{ a.status }}</span>
         <div class="muted">
-          {{ a.kind }} · {{ a.width }}x{{ a.height }}<span v-if="a.kind === 'animation'"> × {{ a.frames }} frames</span><span v-if="a.fill"> · fills its square</span> · <code>{{ a.targetPath }}</code></div>
+          {{ a.kind }} · {{ a.width }}x{{ a.height }}<span v-if="a.kind === 'animation'"> × {{ a.frames }} frames</span><span v-if="a.fill"> · fills its square</span><span v-if="a.replace"> · replaces an existing file</span> · <code>{{ a.targetPath }}</code></div>
         <ul v-if="a.warnings.length" class="warnings" aria-label="Palette warnings">
           <li v-for="w in a.warnings" :key="w" class="error">⚠ {{ w }}</li>
         </ul>

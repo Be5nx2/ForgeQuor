@@ -127,6 +127,15 @@ describe("refusing bad input", () => {
     expect(decided).toMatchObject({ gateId: 5, action: "judge", verdicts });
   });
 
+  it("serves a Project's Art Direction facts to the Run form", async () => {
+    const info = { present: true, defaultSize: { width: 16, height: 16 }, references: [], images: ["a.png"] };
+    const address = await serve({ artInfo: async (id) => (id === 2 ? info : (undefined as any)) });
+
+    const res = await fetch(`${address}/api/projects/2/art-info`);
+
+    expect(await res.json()).toEqual(info);
+  });
+
   it("answers 400 to a Project's art settings outside the repository", async () => {
     const address = await serve({
       async setArt() {

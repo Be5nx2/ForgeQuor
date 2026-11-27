@@ -3,6 +3,7 @@ import { join, resolve, sep } from "node:path";
 import type pg from "pg";
 import { describeDuration } from "../duration.js";
 import { checkAssetFile, parsePalette, type AssetCheckResult } from "./asset-checks.js";
+import { parseReferences } from "./art-direction.js";
 import { publishPullRequest } from "./publish.js";
 import { runAgentStep } from "./step.js";
 import type { RunInput, RunPlan, Workflow, WorkflowContext } from "./workflow.js";
@@ -23,6 +24,10 @@ export interface AssetRequest {
   fill?: boolean;
   /** For an Animation Strip: how many frames of the chosen size sit side by side in the image. 1 for other kinds. */
   frames?: number;
+  /** Existing repository images (PNG paths) to match the style of, besides those the Art Direction names. */
+  references?: string[];
+  /** The Asset replaces the file already at its target path. Without it, an existing file is never overwritten. */
+  replace?: boolean;
 }
 
 /** One version of an Asset that reached the human: the Artist's last passing attempt of an Iteration, and the Feedback it got. */
@@ -52,6 +57,8 @@ export interface Asset extends AssetRequest {
   id: number;
   fill: boolean;
   frames: number;
+  references: string[];
+  replace: boolean;
   /** Order in which the Artist handles the Run's Assets, from 0. */
   position: number;
   /** Where the Artist writes the final Asset, relative to the Run's worktree. */
@@ -115,8 +122,53 @@ export function validateAssetRequests(assets: unknown): AssetRequest[] {
     if (raw.kind === "animation" && (!Number.isInteger(raw.frames) || raw.frames < 2)) {
       throw new Error(`${at} ("${name}") is an animation: it needs a whole number of frames, at least 2.`);
     }
-    return { name, kind: raw.kind, description, width, height, fill: raw.fill === true, frames: raw.kind === "animation" ? raw.frames : 1 };
+    if (raw.replace !== undefined && typeof raw.replace !== "boolean") throw new Error(`${at} ("${name}"): replace must be yes or no.`);
+    const references = raw.references ?? [];
+    if (!Array.isArray(references)) throw new Error(`${at} ("${name}"): references must be a list of repository paths.`);
+    for (const reference of references) {
+      try {
+        if (typeof reference !== "string" || !reference.endsWith(".png")) throw new Error("not a PNG");
+        repositoryPath(reference);
+      } catch {
+        throw new Error(`${at} ("${name}"): the reference "${reference}" is not a repository path to a PNG image.`);
+      }
+    }
+    return {
+      name, kind: raw.kind, description, width, height,
+      fill: raw.fill === true,
+      frames: raw.kind === "animation" ? raw.frames : 1,
+      references: [...new Set<string>(references)],
+      replace: raw.replace === true,
+    };
   });
+}
+
+/**
+ * Checks Asset Requests against what the repository already holds, so a Run is refused before anything is generated: two
+ * requests producing the same file, an existing file that was not marked for replacement, a reference that is not there.
+ * `exists` says whether a repository path exists on the default branch.
+ */
+export async function checkAgainstRepository(assets: AssetRequest[], artFolder: string, exists: (path: string) => Promise<boolean>) {
+  const targets = new Map<string, number>();
+  for (const [i, a] of assets.entries()) {
+    const target = assetTargetPath(artFolder, a.kind, a.name);
+    const other = targets.get(target);
+    if (other !== undefined) {
+      throw new Error(`Asset Requests ${other + 1} ("${assets[other]!.name}") and ${i + 1} ("${a.name}") would produce the same file: ${target}.`);
+    }
+    targets.set(target, i);
+  }
+  for (const [i, a] of assets.entries()) {
+    const target = assetTargetPath(artFolder, a.kind, a.name);
+    if (!a.replace && (await exists(target))) {
+      throw new Error(`Asset Request ${i + 1} ("${a.name}") would overwrite the existing file ${target}: mark it as replacing that file, or rename it.`);
+    }
+    for (const reference of a.references ?? []) {
+      if (!(await exists(reference))) {
+        throw new Error(`Asset Request ${i + 1} ("${a.name}"): the reference ${reference} does not exist in the repository's default branch.`);
+      }
+    }
+  }
 }
 
 export function toAsset(r: Record<string, any>): Asset {
@@ -130,6 +182,8 @@ export function toAsset(r: Record<string, any>): Asset {
     height: r.height,
     fill: r.fill,
     frames: r.frames,
+    references: r.style_references,
+    replace: r.replace,
     targetPath: r.target_path,
     status: r.status,
     warnings: r.warnings ?? [],
@@ -259,8 +313,13 @@ export interface Rejected {
  * The Artist's prompt for one Asset. Redoing a rejected Asset it carries the rejected version as a reference and the
  * Feedback; on a retry it says what was wrong with the previous attempt.
  */
-export function artistPrompt(asset: Asset, artDirectionPath: string, artDirection: string, extra: { redo?: Redo; rejected?: Rejected } = {}): string {
-  const { redo, rejected } = extra;
+export function artistPrompt(
+  asset: Asset,
+  artDirectionPath: string,
+  artDirection: string,
+  extra: { redo?: Redo; rejected?: Rejected; references?: string[]; replaced?: string } = {},
+): string {
+  const { redo, rejected, references = [], replaced } = extra;
   let prompt = `Asset to draw: ${asset.name}
 Kind: ${asset.kind}
 Size: ${size(asset)} pixels${asset.kind === "animation" ? " per frame" : ""}${
@@ -275,6 +334,12 @@ ${asset.description}
 
 Art Direction (${artDirectionPath}):
 ${artDirection}`;
+  if (references.length) {
+    prompt += `\n\nReference images (attached to this message; match their style): ${references.join(", ")}`;
+  }
+  if (replaced) {
+    prompt += `\n\nYou are replacing an existing Asset. Its current version is the reference image at ${replaced} (attached): keep what works, change what the description asks. Save the new one at the target path.`;
+  }
   if (rejected) {
     const history = rejected.feedbacks.map((f, i) => `${i + 1}. ${f}`).join("\n");
     prompt += `\n\nThe human rejected your earlier version of this Asset. Rejected version (reference image, to look at, not to edit or commit): ${rejected.imagePath}\nDraw the Asset again at the target path, addressing the latest Feedback (the last one) and keeping the earlier ones satisfied.\n\nFeedback so far, oldest first:\n${history}`;
@@ -366,6 +431,24 @@ async function rejectedBefore(ctx: WorkflowContext, asset: Asset, starting: bool
   return { imagePath: earlier[0].image_path, feedbacks: rows.map((r) => r.feedback) };
 }
 
+/**
+ * Before the first attempt at an Asset that replaces an existing file, moves that file out of the way into the Run Notes:
+ * it becomes a reference, and a missing file at the target path again means nothing was written (`clear`; later attempts
+ * only look the copy up). Returns the copy's path relative to the worktree. A restarted Run keeps the first copy.
+ */
+function setAsideReplaced(ctx: WorkflowContext, asset: Asset, clear: boolean): string | undefined {
+  const copy = `${RUN_NOTES_DIR}/assets/replaced/${asset.id}.png`;
+  const target = join(ctx.worktreePath, asset.targetPath);
+  if (!existsSync(join(ctx.worktreePath, copy))) {
+    // Only the file that was there before the Artist started is the existing art: later, the target holds the Artist's own work.
+    if (!clear || !existsSync(target)) return undefined;
+    mkdirSync(join(ctx.worktreePath, RUN_NOTES_DIR, "assets", "replaced"), { recursive: true });
+    copyFileSync(target, join(ctx.worktreePath, copy));
+  }
+  if (clear) rmSync(target, { force: true });
+  return copy;
+}
+
 /** An Asset the Artist did not write at its target path gets this many attempts in all (1 try + 1 more). */
 const MAX_UNWRITTEN_ATTEMPTS = 2;
 /** An Asset that fails the Asset Checks gets this many attempts in all (1 try + 2 extra). */
@@ -377,7 +460,7 @@ const MAX_FAILING_ATTEMPTS = 3;
  * was tried is read from the recorded versions, so a restarted Run goes on from there. False when the Run cannot go on
  * (it paused, opened an Escalation, or was abandoned).
  */
-async function drawAsset(ctx: WorkflowContext, asset: Asset, artDirection: string, palette: string[] | null): Promise<boolean> {
+async function drawAsset(ctx: WorkflowContext, asset: Asset, artDirection: string, artReferences: string[], palette: string[] | null): Promise<boolean> {
   const { run, project, pool, worktreePath } = ctx;
   const seat = ctx.agents.artist;
   if (!seat) throw new Error("Forgequor has no Runner for the Artist.");
@@ -388,6 +471,11 @@ async function drawAsset(ctx: WorkflowContext, asset: Asset, artDirection: strin
     );
     const last = versions.at(-1);
     const rejected = await rejectedBefore(ctx, asset, !versions.length);
+    // Only before the first attempt of this Iteration: later passes must not clear what the Artist just wrote.
+    const replaced = asset.replace && !rejected ? setAsideReplaced(ctx, asset, !versions.length) : undefined;
+    // What the Artist is shown: the Art Direction's references, then the Asset's own, then the art it is redoing.
+    const references = [...new Set([...artReferences, ...asset.references])].filter((p) => existsSync(join(worktreePath, p)));
+    const images = [...references, ...(rejected ? [rejected.imagePath] : []), ...(replaced ? [replaced] : [])].map((p) => join(worktreePath, p));
     let redo: Redo | undefined;
     if (last?.written && !last.failures.length) break;
     if (last && !last.written) {
@@ -417,7 +505,8 @@ async function drawAsset(ctx: WorkflowContext, asset: Asset, artDirection: strin
       attempt,
       assetId: asset.id,
       instructions: ARTIST_INSTRUCTIONS,
-      prompt: artistPrompt(asset, project.artDirectionPath, artDirection, { redo, rejected }),
+      prompt: artistPrompt(asset, project.artDirectionPath, artDirection, { redo, rejected, references, replaced }),
+      images,
     });
     if (!(await ctx.stillRunning())) return false;
     // A Step that finished on its own just as the timeout fired keeps its real result.
@@ -488,8 +577,9 @@ export const assetsWorkflow: Workflow = {
         );
       }
       const palette = parsePalette(artDirection);
+      const artReferences = parseReferences(artDirection);
       for (const asset of todo) {
-        if (!(await drawAsset(ctx, asset, artDirection, palette))) return;
+        if (!(await drawAsset(ctx, asset, artDirection, artReferences, palette))) return;
       }
     }
 

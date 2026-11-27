@@ -79,6 +79,21 @@ describe("Codex Runner", () => {
     expect(args).toContain('developer_instructions="You are the Artist."');
   });
 
+  it("attaches the reference images to the prompt, one flag each, before the prompt marker", async () => {
+    const s = setup({ stdout: [started, message("ok"), completed] });
+    const runner = createCodexRunner({ env: s.env });
+
+    await runner.run({ ...step(), images: ["/w/ref-a.png", "/w/ref-b.png"] }, () => {});
+    const args = s.fake.lastInvocation().args;
+
+    expect(args.filter((a) => a === "-i")).toHaveLength(2);
+    expect(args[args.indexOf("-i") + 1]).toBe("/w/ref-a.png");
+    expect(args[args.lastIndexOf("-i") + 1]).toBe("/w/ref-b.png");
+    expect(args.at(-1)).toBe("-");
+    await runner.run(step(), () => {});
+    expect(s.fake.lastInvocation().args).not.toContain("-i");
+  });
+
   it("quotes instructions with quotes and newlines so Codex reads them as one TOML string", async () => {
     const s = setup({ stdout: [started, message("ok"), completed] });
     await createCodexRunner({ env: s.env }).run({ ...step(), instructions: 'Say "hi"\nthen stop' }, () => {});

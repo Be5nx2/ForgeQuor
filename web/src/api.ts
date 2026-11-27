@@ -21,11 +21,24 @@ export interface AssetRequest {
   fill?: boolean;
   /** Frames of an Animation Strip, side by side in one image. */
   frames?: number;
+  /** Existing repository PNGs to match the style of. */
+  references?: string[];
+  /** Replaces the file already at the target path. */
+  replace?: boolean;
+}
+/** What the Run form needs about a Project's art, read from its default branch. */
+export interface ArtInfo {
+  present: boolean;
+  defaultSize: { width: number; height: number } | null;
+  references: string[];
+  images: string[];
 }
 export interface Asset extends AssetRequest {
   id: number;
   fill: boolean;
   frames: number;
+  references: string[];
+  replace: boolean;
   position: number;
   targetPath: string;
   status: "pending" | "generating" | "waiting" | "approved";

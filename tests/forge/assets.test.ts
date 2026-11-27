@@ -65,10 +65,11 @@ afterEach(() => {
 });
 
 /** A registered Project whose `origin` is a real (bare) remote; its default branch has an Art Direction unless told otherwise. */
-async function projectWithRemote(opts: { artDirection?: boolean; artText?: string } = {}): Promise<{ project: Project; repo: TempRepo; remote: TempRemote }> {
+async function projectWithRemote(opts: { artDirection?: boolean; artText?: string; files?: Record<string, string> } = {}): Promise<{ project: Project; repo: TempRepo; remote: TempRemote }> {
   const { repo, remote } = createRepoWithBareRemote({ remote: `git@github.com:acme/game-${++counter}.git` });
   cleanups.push(repo.cleanup, remote.cleanup);
   if (opts.artDirection !== false) remote.advance("docs/ART_DIRECTION.md", opts.artText ?? ART_DIRECTION);
+  for (const [file, content] of Object.entries(opts.files ?? {})) remote.advance(file, content);
   const project = await forge.registerProject({ path: repo.path });
   remote.pointOriginAtBare();
   return { project, repo, remote };
@@ -446,6 +447,125 @@ describe("the Asset Checks", () => {
     const run = await startAssets(project, [hero]);
 
     expect(run.assets[0]!.warnings).toEqual([]);
+  });
+});
+
+describe("references, default size and safe replacement", () => {
+  const OLD = "assets/art/sprites/hero-idle.png";
+  /** The reference images given to the Artist on its first Step, relative to the worktree. */
+  const imagesOf = (run: { worktreePath: string | null }, step = 0) => (artist.steps[step]!.images ?? []).map((p) => p.replace(`${realpathSync(run.worktreePath!)}/`, "").replace(`${run.worktreePath}/`, ""));
+
+  it("always gives the Artist the reference images its Art Direction mentions, and works the same without any", async () => {
+    const { project } = await projectWithRemote({
+      artText: "# Art\nStyle: see `assets/ref/style.png` and assets/ref/missing.png.\n",
+      files: { "assets/ref/style.png": "style" },
+    });
+    artist.use(drawing());
+
+    const run = await startAssets(project, [hero]);
+
+    expect(imagesOf(run)).toEqual(["assets/ref/style.png"]);
+    expect(artist.steps[0]!.prompt).toContain("assets/ref/style.png");
+    expect(artist.steps[0]!.prompt).not.toMatch(/Reference images.*missing/);
+
+    artist.steps.length = 0;
+    const { project: plain } = await projectWithRemote();
+    await startAssets(plain, [hero]);
+    expect(artist.steps[0]!.images ?? []).toEqual([]);
+    expect(artist.steps[0]!.prompt).not.toMatch(/Reference images/);
+  });
+
+  it("also gives the repository images an Asset Request names as style references", async () => {
+    const { project } = await projectWithRemote({
+      artText: "# Art\nSee assets/ref/style.png\n",
+      files: { "assets/ref/style.png": "style", "assets/art/sprites/old-hero.png": "old", "assets/ref/mood.png": "mood" },
+    });
+    artist.use(drawing());
+
+    const run = await startAssets(project, [{ ...hero, name: "New hero", references: ["assets/art/sprites/old-hero.png", "assets/ref/style.png"] }, grass]);
+
+    expect(imagesOf(run, 0)).toEqual(["assets/ref/style.png", "assets/art/sprites/old-hero.png"]);
+    expect(imagesOf(run, 1)).toEqual(["assets/ref/style.png"]);
+    expect(run.assets[0]!.references).toEqual(["assets/art/sprites/old-hero.png", "assets/ref/style.png"]);
+  });
+
+  it("refuses a reference that does not exist or is not a repository path, before anything starts", async () => {
+    const { project } = await projectWithRemote();
+
+    for (const reference of ["assets/ref/nope.png", "../outside.png", "/etc/x.png"]) {
+      await expect(forge.startRun({ projectId: project.id, workflow: "assets", assets: [{ ...hero, references: [reference] }] })).rejects.toThrow(/reference/i);
+    }
+    expect(await forge.listRuns({ projectId: project.id })).toEqual([]);
+  });
+
+  it("refuses to overwrite an existing file that was not marked for replacement, naming it", async () => {
+    const { project } = await projectWithRemote({ files: { [OLD]: "old art" } });
+
+    await expect(forge.startRun({ projectId: project.id, workflow: "assets", assets: [hero] })).rejects.toThrow(/hero-idle\.png.*replac/);
+    expect(await forge.listRuns({ projectId: project.id })).toEqual([]);
+    await expect(forge.startRun({ projectId: project.id, workflow: "assets", assets: [{ ...hero, replace: true }] })).resolves.toBeTruthy();
+    await forge.whenIdle();
+  });
+
+  it("refuses two Asset Requests that would produce the same file", async () => {
+    const { project } = await projectWithRemote();
+
+    await expect(forge.startRun({ projectId: project.id, workflow: "assets", assets: [hero, { ...hero, name: "hero idle" }] })).rejects.toThrow(/same file/);
+    await expect(forge.startRun({ projectId: project.id, workflow: "assets", assets: [hero, { ...hero, kind: "tile" }] })).resolves.toBeTruthy();
+    await forge.whenIdle();
+  });
+
+  it("redoes a replaced Asset from scratch, keeping the existing art as a reference, and commits the change", async () => {
+    const { project } = await projectWithRemote({ files: { [OLD]: "old art" } });
+    let atStart: boolean | null = null;
+    artist.use((step) => {
+      atStart = existsSync(join(step.cwd, targetOf(step)));
+      drawing()(step);
+    });
+
+    const run = await startAssets(project, [{ ...hero, replace: true }]);
+
+    expect(atStart).toBe(false);
+    expect(artist.steps[0]!.prompt).toMatch(/replacing an existing Asset/);
+    const [reference] = artist.steps[0]!.images!;
+    expect(readFileSync(reference!, "utf8")).toBe("old art");
+    expect(reference).toContain(".forgequor");
+    expect(run.assets[0]).toMatchObject({ replace: true, status: "waiting" });
+
+    await judge(run);
+    await forge.whenIdle();
+    const done = await forge.getRun(run.id);
+    expect(git(done.worktreePath!, "show", "--name-status", "--format=", "HEAD")).toBe(`M\t${OLD}`);
+  });
+
+  it("does not mistake the Artist's own failed attempt for the art being replaced when no file existed", async () => {
+    const { project } = await projectWithRemote();
+    artist.use((step) => (artist.steps.length === 1 ? write(step, makePng(8, 8)) : drawing()(step)));
+
+    await startAssets(project, [{ ...hero, replace: true }]);
+
+    expect(artist.steps[1]!.prompt).not.toMatch(/replacing an existing Asset/);
+    expect(artist.steps[1]!.images ?? []).toEqual([]);
+  });
+
+  it("shows the Art Direction's default size, its reference images and the repository's PNGs", async () => {
+    const { project } = await projectWithRemote({
+      artText: "# Art\nDefault size: 18x18\nSee assets/ref/style.png and assets/ref/gone.png\n",
+      files: { "assets/ref/style.png": "s", "assets/art/tiles/grass.png": "g", "README2.md": "x" },
+    });
+
+    expect(await forge.artInfo(project.id)).toEqual({
+      present: true,
+      defaultSize: { width: 18, height: 18 },
+      references: ["assets/ref/style.png"],
+      images: ["assets/art/tiles/grass.png", "assets/ref/style.png"],
+    });
+  });
+
+  it("says so when the Project has no Art Direction", async () => {
+    const { project } = await projectWithRemote({ artDirection: false });
+
+    expect(await forge.artInfo(project.id)).toEqual({ present: false, defaultSize: null, references: [], images: [] });
   });
 });
 

@@ -134,6 +134,10 @@ _Avoid_: Art review, gallery gate
 The human's decision on one **Asset** at an **Asset Gate**: approve, or reject with its own **Feedback**. The Gate takes one for every **Asset** waiting for one, all at once.
 _Avoid_: Review, vote
 
+**Style Reference**:
+An existing image of the **Project** shown to the **Artist** so new **Assets** match it: those the **Art Direction** names are always given, and an **Asset Request** can name more.
+_Avoid_: Mood board, inspiration
+
 **Asset Version**:
 What the **Artist** delivered for an **Asset** in one **Iteration** (its last attempt that passed the **Asset Checks**), kept so the human can look at past versions beside the **Feedback** each got.
 _Avoid_: Revision, draft

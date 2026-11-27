@@ -7,6 +7,7 @@ import {
   assetsWorkflow,
   assetTargetPath,
   AssetNotFoundError,
+  checkAgainstRepository,
   checkVerdicts,
   loadAssets,
   loadGateVerdicts,
@@ -21,7 +22,8 @@ import {
 } from "./assets.js";
 import type { AgentSeat, Workflow } from "./workflow.js";
 import type { CodeHost } from "../codehost/codehost.js";
-import { createRunWorktree, inspectRepository, RegistrationError, refreshDefaultBranch, slugify } from "./workspace.js";
+import { parseDefaultSize, parseReferences } from "./art-direction.js";
+import { createRunWorktree, existsInBranch, inspectRepository, listInBranch, readInBranch, RegistrationError, refreshDefaultBranch, slugify } from "./workspace.js";
 
 export { RegistrationError, AssetNotFoundError };
 export type { Asset, AssetRequest, GateVerdict, Verdict };
@@ -128,6 +130,14 @@ export interface RunDetail extends Run {
   gates: Gate[];
 }
 
+/** The Art Direction facts of a Project and the images a Run form can offer as references. */
+export interface ArtInfo {
+  present: boolean;
+  defaultSize: { width: number; height: number } | null;
+  references: string[];
+  images: string[];
+}
+
 /** An open Gate with enough of its Run and Project to be listed on its own. */
 export interface OpenGate extends Gate {
   runTitle: string;
@@ -169,6 +179,11 @@ export interface Forge {
   setMaxConcurrentRuns(projectId: number, max: number): Promise<Project>;
   /** Sets where a Project keeps its Art Direction document and its Assets (repository paths). Applies to Runs started afterwards; throws an InvalidInputError for a path outside the repository. */
   setArt(projectId: number, art: { artDirectionPath: string; artFolder: string }): Promise<Project>;
+  /**
+   * What the Run form needs to know about a Project's art, read from its default branch as last fetched: whether the Art
+   * Direction is there, its `Default size`, the reference images it names that exist, and every PNG of the repository.
+   */
+  artInfo(projectId: number): Promise<ArtInfo>;
   /**
    * Creates a Run of the given Workflow (`developer` when omitted; an unknown name is refused) and starts it in the background; follow it with `getRun`. A `developer` Run takes a task, an `assets` Run
    * its Asset Requests; the input is refused with an error saying what is wrong before anything starts. A Project already at its concurrent Runs
@@ -687,6 +702,17 @@ export function createForge(deps: ForgeDeps): Forge {
       return toProject(rows[0]);
     },
 
+    async artInfo(projectId) {
+      const { rows } = await pool.query(`SELECT ${COLUMNS} FROM projects WHERE id = $1`, [projectId]);
+      if (!rows[0]) throw new Error(`No Project ${projectId}.`);
+      const project = toProject(rows[0]);
+      const files = await listInBranch(project.localPath, project.defaultBranch);
+      const images = files.filter((f) => f.endsWith(".png"));
+      const text = await readInBranch(project.localPath, project.defaultBranch, project.artDirectionPath);
+      if (text === null) return { present: false, defaultSize: null, references: [], images };
+      return { present: true, defaultSize: parseDefaultSize(text), references: parseReferences(text).filter((p) => images.includes(p)), images };
+    },
+
     subscribe(listener) {
       listeners.add(listener);
       return () => void listeners.delete(listener);
@@ -695,9 +721,11 @@ export function createForge(deps: ForgeDeps): Forge {
     async startRun({ projectId, task, title, trackerRef, workflow = "developer", assets }) {
       const flow = workflows.get(workflow);
       if (!flow) throw new Error(`Unknown Workflow "${workflow}".`);
-      const { rows: found } = await pool.query(`SELECT art_folder FROM projects WHERE id = $1`, [projectId]);
+      const { rows: found } = await pool.query(`SELECT art_folder, local_path, default_branch FROM projects WHERE id = $1`, [projectId]);
       if (!found[0]) throw new Error(`No Project ${projectId}.`);
       const plan = flow.plan({ task, title, assets });
+      // Refused now, not after a Quota-costly generation: what the Asset Requests would overwrite or lean on must be right.
+      await checkAgainstRepository(plan.assets, found[0].art_folder, (path) => existsInBranch(found[0].local_path, found[0].default_branch, path));
       const client = await pool.connect();
       let runId: number;
       try {
@@ -710,9 +738,9 @@ export function createForge(deps: ForgeDeps): Forge {
         runId = Number(rows[0].id);
         for (const [position, a] of plan.assets.entries()) {
           await client.query(
-            `INSERT INTO assets (run_id, position, name, kind, description, width, height, fill, frames, target_path)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-            [runId, position, a.name, a.kind, a.description, a.width, a.height, a.fill === true, a.frames ?? 1, assetTargetPath(found[0].art_folder, a.kind, a.name)],
+            `INSERT INTO assets (run_id, position, name, kind, description, width, height, fill, frames, style_references, replace, target_path)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+            [runId, position, a.name, a.kind, a.description, a.width, a.height, a.fill === true, a.frames ?? 1, JSON.stringify(a.references ?? []), a.replace === true, assetTargetPath(found[0].art_folder, a.kind, a.name)],
           );
         }
         await client.query("COMMIT");

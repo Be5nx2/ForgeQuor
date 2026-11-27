@@ -59,6 +59,8 @@ export function createCodexRunner(options: CodexRunnerOptions = {}): Runner {
         "--json",
         // The Run's worktree is a git repository, but the sandbox, not that check, is what confines the Step.
         "--skip-git-repo-check",
+        // `-i` takes files up to the next flag, so each image gets its own and a flag follows.
+        ...(step.images ?? []).flatMap((image) => ["-i", image]),
         "-s", "workspace-write",
         "-c", 'approval_policy="never"',
         // A JSON string is a valid TOML basic string, so quotes and newlines stay inside the one value.

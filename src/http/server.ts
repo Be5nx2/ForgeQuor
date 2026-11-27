@@ -86,6 +86,14 @@ export async function createServer(deps: {
     }
   });
 
+  app.get<{ Params: { id: string } }>("/api/projects/:id/art-info", async (req, reply) => {
+    try {
+      return await deps.forge.artInfo(Number(req.params.id));
+    } catch (e: any) {
+      return reply.code(404).send({ error: e.message });
+    }
+  });
+
   app.get<{ Querystring: { projectId?: string; state?: RunState } }>("/api/runs", async (req) =>
     deps.forge.listRuns({
       projectId: req.query.projectId ? Number(req.query.projectId) : undefined,
