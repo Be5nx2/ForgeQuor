@@ -2,8 +2,8 @@
 
 | Folder | Audience | Loaded in Forgequor repo | Installed into Godot projects |
 |---|---|---|---|
-| `shared/` | process skills, tracker-agnostic (grilling, to-spec, to-tickets, triage, wayfinder, review, PR, teach...) | yes | yes |
-| `forgequor/` | developing the Node/Vue orchestrator (tdd, architecture, implement...) | yes | no |
+| `shared/` | process and engineering skills, tracker-agnostic (grilling, to-spec, to-tickets, triage, wayfinder, review, PR, tdd, diagnosing-bugs, codebase-design...) | yes | yes |
+| `forgequor/` | developing the Node/Vue orchestrator (architecture, implement, prototype...) | yes | no |
 | `godot/` | developing games in Godot, game design | no | yes |
 
 ## Tracker-agnostic by design
