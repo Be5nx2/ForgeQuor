@@ -219,7 +219,7 @@ Griller with a **Conversation Gate** (it writes the Project's glossary and ADRs 
 
 #### M4b Setting it up
 
-- [ ] `m4-06` **Team page**: the human sets each seat's Runner and model in the app, without a restart.
+- [x] `m4-06` **Team page**: the human sets each seat's Runner and model in the app, without a restart.
   - Spec: `docs/specs/m4-comfort.md`
   - Blocked by: none
   - Acceptance:

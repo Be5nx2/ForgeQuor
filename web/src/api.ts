@@ -50,6 +50,23 @@ export function followRuns(onUpdate: (update: RunUpdate) => void, onOpen?: () =>
   return () => source.close();
 }
 
+export interface TeamField {
+  value: string | null;
+  source: "env" | "team" | "default";
+  /** The environment variable that holds the field, when it does (the field is then locked). */
+  variable?: string;
+}
+export interface TeamSeat {
+  seat: string;
+  runner: TeamField;
+  model: TeamField;
+}
+export interface Team {
+  seats: TeamSeat[];
+  /** The model aliases offered per Runner. */
+  models: Record<string, string[]>;
+}
+
 export async function putJson<T>(url: string, body: unknown): Promise<T> {
   const res = await fetch(url, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   const data = await res.json();

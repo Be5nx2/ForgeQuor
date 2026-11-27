@@ -20,8 +20,9 @@ import { createQuotaKeeper } from "./quota.js";
 import { createRunRecords, toReview } from "./run-records.js";
 import { reviewStepType } from "./review.js";
 import { buildSeats, type RunnerName, type SeatSettings } from "./seats.js";
+import { createTeamStore, settingsOf, type Team, type TeamChange } from "./team.js";
 import { builtInExtensions } from "./builtin.js";
-import { AssetNotFoundError, GateError, InvalidInputError, RunNotFoundError, RunStateError } from "./errors.js";
+import { AssetNotFoundError, GateError, InvalidInputError, RunNotFoundError, RunStateError, SeatLockedError } from "./errors.js";
 import type { Extension, InputProducer } from "./extension.js";
 import { allows, escalationGate, finalGate, offered, refusal, reviewGate, type GateKindModule, type GateOutcome } from "./gates.js";
 import { goBackChoices, redoFailedSteps, redoSteps, redoSet, type StepRow } from "./step-states.js";
@@ -53,7 +54,7 @@ import type {
 import { placeSkillPack, SHARED_SKILL_PACK } from "./skill-pack.js";
 import { createRunWorktree, existsInBranch, inspectRepository, listInBranch, readInBranch, RegistrationError, refreshDefaultBranch, remoteHasBranch, removeRunWorktree, repositoryPath, slugify } from "./workspace.js";
 
-export { RegistrationError, AssetNotFoundError, GateError, InvalidInputError, RunNotFoundError, RunStateError };
+export { RegistrationError, AssetNotFoundError, GateError, InvalidInputError, RunNotFoundError, RunStateError, SeatLockedError };
 export type * from "./types.js";
 
 export interface Forge {
@@ -130,6 +131,10 @@ export interface Forge {
   assetImage(runId: number, assetId: number, which?: number | "replaced"): Promise<string>;
   /** Each vendor's latest Quota Reading with its age (a null reading for one never read), as the Quota bars show them. */
   quota(): Promise<QuotaStatus[]>;
+  /** Each seat's effective Runner and model with where each comes from (environment, Team, default), and the model aliases on offer. */
+  team(): Promise<Team>;
+  /** Saves a seat's Runner and/or model (the Team page). Throws InvalidInputError for an unknown seat or Runner, SeatLockedError for a field the environment holds. */
+  changeSeat(seat: string, change: TeamChange): Promise<Team>;
   /**
    * Call once when Forgequor starts: reads the Quota of the Runners that can be asked (Claude), then again every 5 minutes.
    * Every Step a Runner finishes also refreshes it, and each new reading is published to the subscribers. Returns the
@@ -338,11 +343,13 @@ export function createForge(deps: ForgeDeps): Forge {
   const now = deps.now ?? (() => new Date());
   const quotas = createQuotaKeeper({ pool, now, every: deps.every ?? realEvery, emit: (u) => emit(u) });
   const runners: Partial<Record<RunnerName, Runner>> = { claude: quotas.watch("claude", deps.runner), codex: deps.artistRunner && quotas.watch("codex", deps.artistRunner) };
-  const settings: SeatSettings = { ...deps.seats };
+  const envSettings: SeatSettings = { ...deps.seats };
   for (const [seat, model] of [["developer", deps.developerModel], ["artist", deps.artistModel]] as const) {
-    if (model && !settings[seat]?.model) settings[seat] = { ...settings[seat], model };
+    if (model && !envSettings[seat]?.model) envSettings[seat] = { ...envSettings[seat], model };
   }
-  const { agents, problems: seatProblems } = buildSeats(runners, settings);
+  const teamStore = createTeamStore(pool, envSettings);
+  /** Read each time a Run's work starts, so a Team change applies to the next Runs without a restart. */
+  const currentSeats = async () => buildSeats(runners, settingsOf(await teamStore.effective()));
   const stepTimeoutMs = deps.stepTimeoutMs ?? DEFAULT_STEP_TIMEOUT_MS;
   const inFlight = new Set<Promise<void>>();
   /** What each Run is being worked on by right now, so that archiving waits for it to let go. */
@@ -783,6 +790,7 @@ export function createForge(deps: ForgeDeps): Forge {
       const { rows: frozen } = await pool.query("SELECT definition FROM runs WHERE id = $1", [run.id]);
       const definition: WorkflowDefinition | undefined = frozen[0]?.definition ?? workflows.get(run.workflow)?.definition;
       if (!definition) throw new Error(`Unknown Workflow "${run.workflow}".`);
+      const { agents, problems: seatProblems } = await currentSeats();
       const context: WorkflowContext = {
         run,
         project,
@@ -1132,6 +1140,8 @@ export function createForge(deps: ForgeDeps): Forge {
     },
 
     quota: () => quotas.status(),
+    team: () => teamStore.team(),
+    changeSeat: (seat, change) => teamStore.change(seat, change),
     startQuotaReading: () => quotas.start(),
 
     async whenIdle() {
