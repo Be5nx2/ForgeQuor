@@ -22,6 +22,8 @@ const showReplaced = (a: Asset) => a.replace && !replacedMissing.value[a.id] && 
 const version = (a: Asset, id: number) => `/api/runs/${props.runId}/assets/${a.id}/image?version=${id}`;
 /** The versions before the current one, with the Feedback that sent each back. While an Asset is being redone it has no current version yet. */
 const past = (a: Asset) => (HAS_IMAGE.includes(a.status) ? a.versions.slice(0, -1) : a.versions);
+/** The Artist's attempts that did not pass, each with why: what made the Artist try again. */
+const retried = (a: Asset) => a.attempts.filter((t) => !t.written || t.failures.length);
 
 /** What the human decides for each Asset waiting at the open Gate. */
 const judging = computed(() => !!props.gate && !props.gate.decidedAt && props.gate.actions.includes("judge"));
@@ -93,6 +95,14 @@ function approveAll() {
             </div>
             <div class="muted">Iteration {{ v.iteration }}</div>
             <pre v-if="v.feedback">{{ v.feedback }}</pre>
+          </div>
+        </details>
+        <details v-if="retried(a).length" class="past">
+          <summary>{{ retried(a).length }} {{ retried(a).length === 1 ? "attempt" : "attempts" }} sent back by the Asset Checks</summary>
+          <div v-for="t in retried(a)" :key="`${t.iteration}-${t.attempt}`" class="earlier">
+            <div class="muted">Iteration {{ t.iteration }}, attempt {{ t.attempt }}</div>
+            <pre v-if="!t.written">Nothing was written at the target path.</pre>
+            <pre v-else>{{ t.failures.join("\n") }}</pre>
           </div>
         </details>
         <fieldset v-if="judging && verdicts[a.id]" class="verdict">

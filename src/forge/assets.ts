@@ -7,82 +7,10 @@ import { parseReferences } from "./art-direction.js";
 import { publishPullRequest } from "./publish.js";
 import { runAgentStep } from "./step.js";
 import type { RunInput, RunPlan, Workflow, WorkflowContext } from "./workflow.js";
+import type { Asset, AssetKind, AssetRequest, GateVerdict, Verdict } from "./types.js";
 import { commitPaths, existsAtHead, RUN_NOTES_DIR, slugify } from "./workspace.js";
 
-export type AssetKind = "sprite" | "tile" | "animation";
-/** Where an Asset is: not drawn yet, being drawn, drawn and waiting for the human's verdict, approved, or rejected (to be redone in the next Iteration). */
-export type AssetStatus = "pending" | "generating" | "waiting" | "approved" | "rejected";
-
-/** The human's description of one Asset to produce. */
-export interface AssetRequest {
-  name: string;
-  kind: AssetKind;
-  description: string;
-  width: number;
-  height: number;
-  /** The Asset fills its whole square, fully opaque (a ground tile). Off by default; any transparent pixel then fails the Asset Checks. */
-  fill?: boolean;
-  /** For an Animation Strip: how many frames of the chosen size sit side by side in the image. 1 for other kinds. */
-  frames?: number;
-  /** Existing repository images (PNG paths) to match the style of, besides those the Art Direction names. */
-  references?: string[];
-  /** The Asset replaces the file already at its target path. Without it, an existing file is never overwritten. */
-  replace?: boolean;
-}
-
-/** One version of an Asset that reached the human: the Artist's last passing attempt of an Iteration, and the Feedback it got. */
-export interface AssetVersion {
-  id: number;
-  iteration: number;
-  attempt: number;
-  feedback: string | null;
-}
-
-/** One Artist attempt at an Asset and what the Asset Checks found in it, so the human sees why the Artist tried again. */
-export interface AssetAttempt {
-  iteration: number;
-  attempt: number;
-  /** False when the Artist left nothing at the target path. */
-  written: boolean;
-  /** Why the Asset Checks failed this attempt; empty when it passed or wrote nothing. */
-  failures: string[];
-  /** Colours outside the palette in this attempt. */
-  warnings: string[];
-}
-
-/** The human's verdict on one Asset. */
-export interface Verdict {
-  assetId: number;
-  action: "approve" | "reject";
-  /** Required, and non-empty, to reject. */
-  feedback?: string;
-}
-
-/** A recorded verdict, as the Gate it was given at shows it. */
-export interface GateVerdict {
-  assetId: number;
-  verdict: "approve" | "reject";
-  feedback: string | null;
-}
-
-export interface Asset extends AssetRequest {
-  id: number;
-  fill: boolean;
-  frames: number;
-  references: string[];
-  replace: boolean;
-  /** Order in which the Artist handles the Run's Assets, from 0. */
-  position: number;
-  /** Where the Artist writes the final Asset, relative to the Run's worktree. */
-  targetPath: string;
-  status: AssetStatus;
-  /** What the Asset Checks warned about in its current version (colours outside the palette). Warnings never fail an Asset. */
-  warnings: string[];
-  /** The versions the human saw, oldest first; the last is the current one once the Asset has been drawn. */
-  versions: AssetVersion[];
-  /** Every Artist attempt at the Asset that ended with a result to check, oldest first, across Iterations. */
-  attempts: AssetAttempt[];
-}
+export type { Asset, AssetAttempt, AssetKind, AssetRequest, AssetStatus, AssetVersion, GateVerdict, Verdict } from "./types.js";
 
 /** An error in the verdicts the human gave. */
 export class VerdictError extends Error {}

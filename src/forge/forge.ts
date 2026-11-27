@@ -16,18 +16,32 @@ import {
   repositoryPath,
   servableAssetFile,
   VerdictError,
-  type Asset,
-  type AssetRequest,
-  type GateVerdict,
-  type Verdict,
 } from "./assets.js";
 import type { AgentSeat, Workflow } from "./workflow.js";
 import type { CodeHost } from "../codehost/codehost.js";
 import { parseDefaultSize, parseReferences } from "./art-direction.js";
+import type {
+  ApprovedRun,
+  ArtInfo,
+  AssetRequest,
+  CheckResult,
+  Gate,
+  GateAction,
+  GateKind,
+  Iteration,
+  OpenGate,
+  Project,
+  Run,
+  RunDetail,
+  RunState,
+  RunUpdate,
+  StepAttempt,
+  Verdict,
+} from "./types.js";
 import { createRunWorktree, existsInBranch, inspectRepository, listInBranch, readInBranch, RegistrationError, refreshDefaultBranch, slugify } from "./workspace.js";
 
 export { RegistrationError, AssetNotFoundError };
-export type { Asset, AssetRequest, GateVerdict, Verdict };
+export type * from "./types.js";
 
 /** A Gate decision that cannot be made: unknown Gate, already decided, or a choice it does not offer. */
 export class GateError extends Error {}
@@ -40,139 +54,6 @@ export class InvalidInputError extends Error {}
 
 /** No such Run. */
 export class RunNotFoundError extends Error {}
-
-export type RunState = "queued" | "running" | "waiting" | "paused" | "approved" | "merged" | "closed" | "abandoned";
-export type GateKind = "final" | "escalation" | "asset";
-/** `judge` is the verdicts of an Asset Gate: its decision is recorded as approve when every Asset was approved, reject when any was not. */
-/** What a Gate records as decided. */
-export type GateDecision = "approve" | "reject" | "abandon";
-export type GateAction = "approve" | "reject" | "abandon" | "judge";
-
-export interface Run {
-  id: number;
-  projectId: number;
-  /** Name of the Workflow the Run follows. */
-  workflow: string;
-  /** The Run's current Iteration, from 1; each rejection of the final Gate with Feedback starts the next. */
-  iteration: number;
-  title: string;
-  task: string;
-  trackerRef: string | null;
-  state: RunState;
-  branch: string | null;
-  worktreePath: string | null;
-  prNumber: number | null;
-  prUrl: string | null;
-  /** When a Paused Run restarts its current Step (the Runner's Quota reset time); null otherwise. */
-  resumeAt: Date | null;
-  createdAt: Date;
-}
-
-export interface StepAttempt {
-  id: number;
-  iteration: number;
-  step: string;
-  attempt: number;
-  runner: string;
-  model: string | null;
-  /** The Asset an Artist attempt worked on. */
-  assetId: number | null;
-  status: "running" | "succeeded" | "failed" | "quota_exhausted";
-  startedAt: Date;
-  endedAt: Date | null;
-  summary: string | null;
-  error: string | null;
-  quotaResetsAt: Date | null;
-  eventLog: string;
-}
-
-export interface CheckResult {
-  id: number;
-  iteration: number;
-  /** The Developer attempt whose work this Check validated. */
-  attempt: number;
-  command: string;
-  /** Null when the command was killed. */
-  exitStatus: number | null;
-  output: string;
-  ranAt: Date;
-}
-
-export interface Gate {
-  id: number;
-  runId: number;
-  /** The Iteration of its Run the Gate was opened in. */
-  iteration: number;
-  kind: GateKind;
-  reason: string;
-  evidence: string | null;
-  /** What the human can do here. A final Gate may be approved or rejected with Feedback; an Asset Gate approved; an Escalation can only be abandoned. */
-  actions: GateAction[];
-  /** The human's written reason, when the Gate was rejected. */
-  feedback: string | null;
-  /** The verdict on each Asset, once an Asset Gate was judged. */
-  verdicts: GateVerdict[];
-  openedAt: Date;
-  decidedAt: Date | null;
-  /** What was decided: approve or reject (an Asset Gate judged by verdicts is approve when all were approved), or abandon. */
-  decision: GateDecision | null;
-}
-
-/** One pass through the produce → review loop; the Feedback is what started it (null for the first). */
-export interface Iteration {
-  number: number;
-  feedback: string | null;
-}
-
-export interface RunDetail extends Run {
-  /** The Asset Requests of an `assets` Run and where each stands; empty for other Workflows. */
-  assets: Asset[];
-  iterations: Iteration[];
-  attempts: StepAttempt[];
-  checks: CheckResult[];
-  gates: Gate[];
-}
-
-/** The Art Direction facts of a Project and the images a Run form can offer as references. */
-export interface ArtInfo {
-  present: boolean;
-  defaultSize: { width: number; height: number } | null;
-  references: string[];
-  images: string[];
-}
-
-/** An Approved Run, with its Project's name, as the merge list shows it: its pull request awaits the human's merge. */
-export interface ApprovedRun extends Run {
-  projectName: string;
-}
-
-/** An open Gate with enough of its Run and Project to be listed on its own. */
-export interface OpenGate extends Gate {
-  runTitle: string;
-  projectName: string;
-}
-
-export interface Project {
-  id: number;
-  name: string;
-  localPath: string;
-  remoteOwner: string;
-  remoteName: string;
-  defaultBranch: string;
-  checks: string[];
-  /** Commands run in a Run's new worktree, in order, before the Developer. */
-  setup: string[];
-  maxConcurrentRuns: number;
-  /** The Art Direction document, relative to the repository. */
-  artDirectionPath: string;
-  /** Where an `assets` Run commits its Assets, relative to the repository. */
-  artFolder: string;
-}
-
-/** What a subscriber hears about live: a Step's progress, or that a Run changed (state, Steps, Checks, Gates, pull request). */
-export type RunUpdate =
-  | { type: "progress"; runId: number; attemptId: number; kind: "text" | "tool" | "other"; summary: string }
-  | { type: "changed"; runId: number };
 
 export interface Forge {
   /** Hears every RunUpdate from now on. Returns the function that stops it. A throwing listener never disturbs a Run. */
