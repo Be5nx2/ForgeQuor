@@ -54,6 +54,7 @@ export function createCodexRunner(options: CodexRunnerOptions = {}): Runner {
   const env = options.env ?? process.env;
   return {
     async run(step: StepRequest, onEvent): Promise<StepResult> {
+      if (step.session) return { status: "failed", error: "The Codex Runner cannot keep a session, which this Step needs: set the Agent's seat to the claude Runner." };
       const args = [
         "exec",
         "--json",

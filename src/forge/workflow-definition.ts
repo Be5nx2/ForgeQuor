@@ -25,8 +25,8 @@ export const REVIEW_MODES: readonly ReviewMode[] = ["solo", "duo"];
 /** The mode a Workflow that takes the `review` input defaults to when it does not say. */
 export const DEFAULT_REVIEW_MODE: ReviewMode = "solo";
 
-export type StepType = "agent" | "checks" | "gate" | "publish" | "artist" | "review";
-const STEP_TYPES: readonly StepType[] = ["agent", "checks", "gate", "publish", "artist", "review"];
+export type StepType = "agent" | "conversation" | "checks" | "gate" | "publish" | "artist" | "review";
+const STEP_TYPES: readonly StepType[] = ["agent", "conversation", "checks", "gate", "publish", "artist", "review"];
 
 /** The Gate kinds a Workflow can place; Escalations are opened by Forgequor, never declared. */
 export type WorkflowGateKind = Exclude<GateKind, "escalation">;
@@ -52,6 +52,8 @@ interface StepCommon {
 export type StepDefinition = StepCommon &
   (
     | { type: "agent"; agent: string }
+    /** An Agent that talks with the human over several turns at a Conversation Gate (the Griller). */
+    | { type: "conversation"; agent: string }
     | { type: "gate"; gate: WorkflowGateKind }
     | { type: "checks" }
     | { type: "publish" }
@@ -84,6 +86,8 @@ export type ParsedWorkflow = { ok: true; definition: WorkflowDefinition } | { ok
 /** The coded parts a Workflow can name: each Agent, and the inputs it produces for the Steps after it. */
 export interface StepCatalogue {
   agents: Record<string, { produces: readonly WorkflowInput[] }>;
+  /** The Agents a conversation Step can name. */
+  conversations?: readonly string[];
 }
 
 /** Forgequor's Agents today. */
@@ -222,9 +226,9 @@ export function parseWorkflow(text: string, catalogue: StepCatalogue = DEFAULT_C
     if (raw.type === undefined) fail(at("type"), `${label} needs a type, one of ${list(STEP_TYPES)}.`);
     else if (!STEP_TYPES.includes(type)) fail(at("type"), `${label} has an unknown type ${JSON.stringify(raw.type)}; it must be one of ${list(STEP_TYPES)}.`);
 
-    const agents = Object.keys(catalogue.agents);
-    if (type === "agent") {
-      if (raw.agent === undefined) fail(at("agent"), `${label} is an Agent Step, so it needs an agent, one of ${list(agents)}.`);
+    const agents = type === "conversation" ? [...(catalogue.conversations ?? [])] : Object.keys(catalogue.agents);
+    if (type === "agent" || type === "conversation") {
+      if (raw.agent === undefined) fail(at("agent"), `${label} is ${type === "agent" ? "an Agent Step" : "a conversation Step"}, so it needs an agent, one of ${list(agents)}.`);
       else if (!agents.includes(raw.agent as string)) {
         fail(at("agent"), `${label} names an unknown Agent ${JSON.stringify(raw.agent)}; it must be one of ${list(agents)}.`);
       }
@@ -271,7 +275,7 @@ export function parseWorkflow(text: string, catalogue: StepCatalogue = DEFAULT_C
     const step = {
       id: id ?? "",
       type,
-      ...(type === "agent" ? { agent: raw.agent } : {}),
+      ...(type === "agent" || type === "conversation" ? { agent: raw.agent } : {}),
       ...(type === "gate" ? { gate: raw.gate } : {}),
       needs,
       // A review reads the change and never edits it.

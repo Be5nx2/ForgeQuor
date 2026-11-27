@@ -2,6 +2,7 @@ import type pg from "pg";
 import type { StepResult } from "../runner/runner.js";
 import type { CheckOutcome } from "./checks.js";
 import type { GateDecision, Review, ReviewMode, ReviewVerdict } from "./types.js";
+import { createConversationRecords, type ConversationRecords } from "./conversation-records.js";
 import { createStepStates, type StepStates } from "./step-states.js";
 import type { WorkflowInput } from "./workflow-definition.js";
 
@@ -39,6 +40,8 @@ export interface RunRecords {
   markSetupDone(): Promise<void>;
   /** Where each Step of the Run stands in its current Iteration. */
   steps: StepStates;
+  /** What was said at the Run's Conversation Gates. */
+  conversation: ConversationRecords;
   /** The inputs the Run has: given at launch, or produced by a Step. */
   inputs(): Promise<WorkflowInput[]>;
   /** Adds an input the Step `stepId` produced; it goes again when that Step is replayed. */
@@ -110,6 +113,7 @@ export function createRunRecords(pool: pg.Pool, runId: number, iteration: number
       await pool.query("UPDATE runs SET setup_done = true WHERE id = $1", [runId]);
     },
     steps: createStepStates(pool, runId, iteration),
+    conversation: createConversationRecords(pool, runId),
     async inputs() {
       const { rows } = await pool.query("SELECT inputs FROM runs WHERE id = $1", [runId]);
       return rows[0].inputs;

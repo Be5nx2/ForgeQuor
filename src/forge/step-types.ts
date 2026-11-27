@@ -39,8 +39,8 @@ export interface AgentModule {
 }
 
 /** What a Workflow definition can name of the Agents. */
-export function catalogueOf(agents: Iterable<AgentModule>): StepCatalogue {
-  return { agents: Object.fromEntries([...agents].map((a) => [a.name, { produces: a.produces ?? [] }])) };
+export function catalogueOf(agents: Iterable<AgentModule>, conversations: Iterable<string> = []): StepCatalogue {
+  return { agents: Object.fromEntries([...agents].map((a) => [a.name, { produces: a.produces ?? [] }])), conversations: [...conversations] };
 }
 
 const capitalised = (name: string) => name.charAt(0).toUpperCase() + name.slice(1);

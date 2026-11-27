@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { runCli } from "./process.js";
 import type { Runner, RunnerEvent, StepRequest, StepResult } from "./runner.js";
 
@@ -34,7 +35,9 @@ function fromEpochSeconds(n: unknown): Date | null {
 }
 
 /** Decides how a Step ended from what the CLI printed and how the process exited. */
-function interpret(final: any, rateLimit: any, exit: { code: number | null; signal: NodeJS.Signals | null; stderr: string }): StepResult {
+const SESSION_MISSING = /no conversation found/i;
+
+function interpret(final: any, rateLimit: any, exit: { code: number | null; signal: NodeJS.Signals | null; stderr: string }, session?: string): StepResult {
   const text = typeof final?.result === "string" ? final.result : "";
   const completed = final && !final.is_error;
   if (!completed && (rateLimit?.status === "rejected" || (final?.is_error && QUOTA_TEXT.test(text)))) {
@@ -45,12 +48,17 @@ function interpret(final: any, rateLimit: any, exit: { code: number | null; sign
   if (!final) {
     const detail = exit.stderr.trim();
     if (exit.signal) return { status: "failed", error: `claude was killed by ${exit.signal}${detail ? `: ${detail}` : ""}` };
+    if (session && SESSION_MISSING.test(exit.stderr)) return { status: "failed", error: detail, sessionLost: true };
     return exit.code
       ? { status: "failed", error: `claude exited with code ${exit.code}${detail ? `: ${detail}` : ""}` }
       : { status: "failed", error: "claude produced unreadable output: no result message" };
   }
-  if (final.is_error) return { status: "failed", error: text || `claude reported ${final.subtype ?? "an error"}` };
-  return { status: "succeeded", summary: text };
+  if (final.is_error) {
+    const errors = Array.isArray(final.errors) ? final.errors.join("\n") : "";
+    const error = text || errors || `claude reported ${final.subtype ?? "an error"}`;
+    return session && SESSION_MISSING.test(`${errors}\n${text}\n${exit.stderr}`) ? { status: "failed", error, sessionLost: true } : { status: "failed", error };
+  }
+  return session ? { status: "succeeded", summary: text, sessionId: typeof final.session_id === "string" ? final.session_id : session } : { status: "succeeded", summary: text };
 }
 
 /** Drives `claude` headless (stream-json) in the Step's directory, on the user's subscription. */
@@ -59,11 +67,14 @@ export function createClaudeRunner(options: ClaudeRunnerOptions = {}): Runner {
     async run(step: StepRequest, onEvent): Promise<StepResult> {
       // The Agent must edit files and run git unattended, so permission prompts are off.
       // It is confined only by the Run's worktree (ADR 0005).
+      // Only a Step that asked for a session leaves one behind for the CLI to resume; the others are forgotten.
+      const session = step.session ? ("resume" in step.session ? step.session.resume : randomUUID()) : undefined;
+      const sessionArgs = !step.session ? ["--no-session-persistence"] : "resume" in step.session ? ["--resume", session!] : ["--session-id", session!];
       const args = [
         "-p",
         "--output-format", "stream-json",
         "--verbose",
-        "--no-session-persistence",
+        ...sessionArgs,
         "--permission-mode", "bypassPermissions",
         // No human is there to answer: these tools would wait forever.
         "--disallowedTools", HUMAN_WAIT_TOOLS.join(" "),
@@ -84,7 +95,7 @@ export function createClaudeRunner(options: ClaudeRunnerOptions = {}): Runner {
         if (msg?.type === "rate_limit_event") rateLimit = msg.rate_limit_info;
       });
       if (!outcome.ran) return { status: "failed", error: outcome.error };
-      return interpret(final, rateLimit, outcome);
+      return interpret(final, rateLimit, outcome, session);
     },
   };
 }

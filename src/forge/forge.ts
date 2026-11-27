@@ -4,6 +4,9 @@ import { isDeepStrictEqual } from "node:util";
 import type pg from "pg";
 import type { Runner } from "../runner/runner.js";
 import { bugfixAgent, bugfixWorkflow, developerAgent, developerWorkflow } from "./developer.js";
+import { createConversationRecords } from "./conversation-records.js";
+import { conversationGate, conversationStepType, type ConversationAgent } from "./conversation.js";
+import { featureWorkflow, grillerAgent } from "./feature.js";
 import { runEngine, type StepTypeModule } from "./engine.js";
 import { agentStepType, catalogueOf, checksStepType, gateStepType, publishStepType, type AgentModule } from "./step-types.js";
 import { describeInvalid, resolveWorkflows, type ResolvedWorkflow } from "./project-workflows.js";
@@ -15,7 +18,7 @@ import { buildSeats, type RunnerName, type SeatSettings } from "./seats.js";
 import { builtInExtensions } from "./builtin.js";
 import { AssetNotFoundError, GateError, InvalidInputError, RunNotFoundError, RunStateError } from "./errors.js";
 import type { Extension } from "./extension.js";
-import { allows, escalationGate, finalGate, refusal, type GateKindModule, type GateOutcome } from "./gates.js";
+import { allows, escalationGate, finalGate, offered, refusal, type GateKindModule, type GateOutcome } from "./gates.js";
 import { goBackChoices, redoFailedSteps, redoSteps, redoSet, type StepRow } from "./step-states.js";
 import type { Publication, RunInput, Workflow, WorkflowContext } from "./workflow.js";
 import type { CodeHost } from "../codehost/codehost.js";
@@ -91,7 +94,7 @@ export interface Forge {
    * unknown or already decided Gate or a choice it does not offer, and an InvalidInputError for a rejection without
    * Feedback or verdicts that do not fit the Assets waiting.
    */
-  decideGate(input: { gateId: number; action: GateAction; feedback?: string; verdicts?: Verdict[]; target?: string }): Promise<RunDetail>;
+  decideGate(input: { gateId: number; action: GateAction; feedback?: string; verdicts?: Verdict[]; target?: string; message?: string }): Promise<RunDetail>;
   /**
    * Abandons a Run in any state before Merged: closes its pull request if it has one, settles its open Gate, and keeps
    * its branch and worktree. Throws a RunStateError when the Run is already over. A pull request merged on GitHub in
@@ -273,7 +276,7 @@ export function createForge(deps: ForgeDeps): Forge {
   const { pool } = deps;
   /** The Workflows a Run can follow, by name. */
   const extensions = deps.extensions ?? builtInExtensions(pool);
-  const workflows = new Map<string, Workflow>([developerWorkflow, bugfixWorkflow, ...extensions.flatMap((e) => e.workflows)].map((w) => [w.name, w]));
+  const workflows = new Map<string, Workflow>([developerWorkflow, bugfixWorkflow, featureWorkflow, ...extensions.flatMap((e) => e.workflows)].map((w) => [w.name, w]));
   /** How each built-in Workflow's pull request is made, when it is not the default. */
   const publications = new Map<string, Publication>([...workflows.values()].flatMap((w) => (w.publication ? [[w.name, w.publication] as const] : [])));
   /**
@@ -288,13 +291,19 @@ export function createForge(deps: ForgeDeps): Forge {
     return [...workflows.values()].find((w) => w.inputs.length === frozen.inputs.length && frozen.inputs.every((i) => w.inputs.includes(i)))?.publication;
   }
   /** The Gate kinds, by kind: each decides its own Gates. */
-  const gateKinds = new Map<GateKind, GateKindModule>([finalGate, escalationGate, ...extensions.flatMap((e) => e.gateKinds)].map((k) => [k.kind, k]));
-  const gateOf = (r: Record<string, any>): Gate => toGate(r, gateKinds.get(r.kind)?.actions ?? []);
+  const gateKinds = new Map<GateKind, GateKindModule>([finalGate, escalationGate, conversationGate, ...extensions.flatMap((e) => e.gateKinds)].map((k) => [k.kind, k]));
+  const gateOf = (r: Record<string, any>): Gate => {
+    const kind = gateKinds.get(r.kind);
+    const gate = toGate(r, kind?.actions ?? []);
+    return kind ? { ...gate, actions: offered(kind, gate) } : gate;
+  };
   /** The Agents a Workflow's Agent Step can name. */
   const agentModules = new Map<string, AgentModule>([developerAgent, bugfixAgent, ...extensions.flatMap((e) => e.agents ?? [])].map((a) => [a.name, a]));
+  /** The Agents a conversation Step can name. */
+  const conversationAgents = new Map<string, ConversationAgent>([grillerAgent].map((a) => [a.name, a]));
   /** What the engine runs, by Step type. */
   const stepTypes = new Map<StepTypeModule["type"], StepTypeModule>(
-    [agentStepType(agentModules), checksStepType, publishStepType(publicationOf), gateStepType(gateKinds), reviewStepType, ...extensions.flatMap((e) => e.stepTypes ?? [])].map((t) => [t.type, t]),
+    [agentStepType(agentModules), checksStepType, publishStepType(publicationOf), gateStepType(gateKinds), reviewStepType, conversationStepType(conversationAgents), ...extensions.flatMap((e) => e.stepTypes ?? [])].map((t) => [t.type, t]),
   );
   /** Each Agent seat's Runner and model: its setting, else its default (Claude Code for most, Codex for the second Reviewer and the Artist). */
   const runners: Partial<Record<RunnerName, Runner>> = { claude: deps.runner, codex: deps.artistRunner };
@@ -595,7 +604,7 @@ export function createForge(deps: ForgeDeps): Forge {
     if (gate.decidedAt || !gateKinds.get(gate.kind)?.redo) return gate;
     const definition = gate.stepId ? await definitionOf(gate.runId) : undefined;
     const choices = definition && gate.stepId ? goBackChoices(definition, await statesOf(gate.runId, gate.iteration), gate.stepId) : [];
-    const goBack = choices.map((s) => ({ stepId: s.id, type: s.type, detail: s.type === "agent" ? s.agent : s.type === "gate" ? s.gate : null }));
+    const goBack = choices.map((s) => ({ stepId: s.id, type: s.type, detail: s.type === "agent" || s.type === "conversation" ? s.agent : s.type === "gate" ? s.gate : null }));
     return { ...gate, redo: { goBack } };
   }
 
@@ -610,7 +619,7 @@ export function createForge(deps: ForgeDeps): Forge {
     return definition.steps.map((s) => ({
       id: s.id,
       type: s.type,
-      detail: s.type === "agent" ? s.agent : s.type === "gate" ? s.gate : null,
+      detail: s.type === "agent" || s.type === "conversation" ? s.agent : s.type === "gate" ? s.gate : null,
       needs: s.needs,
       iteration: run.iteration,
       status: recorded.get(s.id)?.status ?? (wentThrough ? "done" : "waiting"),
@@ -641,7 +650,7 @@ export function createForge(deps: ForgeDeps): Forge {
   async function projectWorkflows(project: Project, branch?: string | null): Promise<ResolvedWorkflow[]> {
     return resolveWorkflows(project.localPath, branch === undefined ? await freshDefaultBranch(project.id, project.localPath) : branch, {
       builtIn: [...workflows.values()],
-      catalogue: catalogueOf(agentModules.values()),
+      catalogue: catalogueOf(agentModules.values(), conversationAgents.keys()),
       stepTypes: new Set(stepTypes.keys()),
       gateKinds: new Set(gateKinds.keys()),
     });
@@ -867,6 +876,7 @@ export function createForge(deps: ForgeDeps): Forge {
         attempts: attempts.rows.map(toAttempt),
         checks: checks.rows.map(toCheck),
         reviews: (await pool.query("SELECT * FROM reviews WHERE run_id = $1 ORDER BY id", [id])).rows.map(toReview),
+        conversation: await createConversationRecords(pool, id).all(),
         gates: await Promise.all(gates.rows.map((g) => withRedo({ ...gateOf(g), verdicts: verdictsOf(Number(g.id)) }))),
       };
     },
@@ -899,15 +909,15 @@ export function createForge(deps: ForgeDeps): Forge {
       return rows.map((r) => ({ ...toRun(r), projectName: r.project_name }));
     },
 
-    async decideGate({ gateId, action, feedback, verdicts, target }) {
+    async decideGate({ gateId, action, feedback, verdicts, target, message }) {
       const { rows } = await pool.query("SELECT * FROM gates WHERE id = $1", [gateId]);
       if (!rows[0]) throw new GateError(`No Gate ${gateId}.`);
       const gate = gateOf(rows[0]);
       if (gate.decidedAt) throw new GateError(`Gate ${gateId} is already decided.`);
       const kind = gateKinds.get(gate.kind)!;
-      if (!allows(kind, action)) throw new GateError(refusal(kind, action));
+      if (!allows(kind, action, gate)) throw new GateError(refusal(kind, action, gate));
       // The kind validates the decision and says where the Run goes; the core carries it out.
-      const outcome = await kind.decide(gate, { action, feedback, verdicts, target });
+      const outcome = await kind.decide(gate, { action, feedback, verdicts, target, message });
       if (outcome.next === "redo") return redoEscalation(gate, outcome);
       if (outcome.next === "continue") return decideAndContinue(gate, outcome);
       if (outcome.next === "abandon") {
