@@ -166,7 +166,9 @@ Griller with a **Conversation Gate** (it writes the Project's glossary and ADRs 
 
 ### M4 Comfort
 
-**Quota** gauges refreshed after every Step (unknown shown greyed), **Archive** and purge after 60 days, macOS notifications, choosing **Skill Packs** per Project (M3b already provides the `shared` pack to every Run), one-click Runner assignment (default and per Run), read-only Workflow preview, `/to-workflow` skill (checks for a close existing Workflow before writing a new one).
+- Spec: `docs/specs/m4-comfort.md`. Items cut with `/to-tickets`.
+- **M4a, running it day to day:** **Archive** as soon as a Run ends (worktree and local branch removed, remote branch too when abandoned or closed unmerged, startup catch-up), purge after `FORGEQUOR_ARCHIVE_DAYS` (60), macOS notifications (Gate, Escalation, Quota pause, pull request merged or closed; `FORGEQUOR_NOTIFICATIONS=off`), one **Quota** bar per vendor at the top (Claude from the free `claude -p "/usage"` at startup, after each Step and every 5 minutes; Codex from its session file after each Step; greyed when unknown).
+- **M4b, setting it up:** Team page for seats in the database (an environment variable wins and locks the seat), per-Run seat overrides in New Run frozen at start, **Skill Packs** per Project (`forgequor` excluded), read-only Workflows page with validation errors and `POST /api/workflows/validate`, `/to-workflow` shared skill (reuse a close Workflow first, Step-type reference kept in sync by a test).
 
 ### Dogfood Notes
 
