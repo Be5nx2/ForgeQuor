@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { basename, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import type pg from "pg";
@@ -52,7 +52,7 @@ import type {
   WorkflowValidation,
 } from "./types.js";
 import { placeSkillPack, SHARED_SKILL_PACK } from "./skill-pack.js";
-import { createRunWorktree, existsInBranch, inspectRepository, listInBranch, readInBranch, RegistrationError, refreshDefaultBranch, remoteHasBranch, removeRunWorktree, repositoryPath, slugify } from "./workspace.js";
+import { createRunWorktree, existsInBranch, inspectRepository, listInBranch, readInBranch, RegistrationError, refreshDefaultBranch, remoteHasBranch, removeRunWorktree, repositoryPath, runFoldersUnder, slugify } from "./workspace.js";
 
 export { RegistrationError, AssetNotFoundError, GateError, InvalidInputError, RunNotFoundError, RunStateError, SeatLockedError };
 export type * from "./types.js";
@@ -119,7 +119,8 @@ export interface Forge {
   /** One pass over Paused Runs: those whose reset time has passed restart their current Step. */
   resumePausedRuns(): Promise<void>;
   /**
-   * Call once when Forgequor starts: every Running Run restarts its current Step, the Queued Runs that fit the free
+   * Call once when Forgequor starts: first, every finished Run not yet archived is archived and the folders of Runs
+   * already archived (or gone) are swept from the worktrees root; then every Running Run restarts its current Step, the Queued Runs that fit the free
    * slots start, and Approved Runs have their pull request checked again.
    */
   recoverAfterRestart(): Promise<void>;
@@ -141,6 +142,12 @@ export interface Forge {
    * function that stops the refreshing.
    */
   startQuotaReading(): Promise<() => void>;
+  /**
+   * Call once when Forgequor starts: deletes the Runs archived more than `archiveDays` days ago, with everything that
+   * belongs to them (never a Run that is not Archived), now and then every 24 hours, logging how many it deleted.
+   * Returns the function that stops it.
+   */
+  startPurging(): Promise<() => void>;
   /** Resolves once no Run is being worked on in the background. */
   whenIdle(): Promise<void>;
 }
@@ -172,6 +179,8 @@ export interface ForgeDeps {
   extensions?: Extension[];
   /** Folder of the Skill Pack placed in every Run's worktree. Default: Forgequor's own `skills/shared`. */
   skillPack?: string;
+  /** How many days an Archived Run is kept before the purge deletes it. Default: 60. */
+  archiveDays?: number;
   /** The clock, so tests can move time. */
   now?: () => Date;
   /** The timer, so tests can move time: runs a task every so many milliseconds. Default: the real one. */
@@ -259,6 +268,7 @@ const DEFAULT_STEP_TIMEOUT_MS = 60 * 60 * 1000;
 /** How long abandoning waits for a Run's work to stop before removing its worktree anyway. */
 const ARCHIVE_WAIT_MS = 2000;
 /** States a Run cannot leave. A Run in one of them no longer holds its Project's slot. */
+const DAY_MS = 24 * 60 * 60 * 1000;
 const OVER: RunState[] = ["merged", "closed", "abandoned"];
 const ACTIVE: RunState[] = ["queued", "running", "waiting", "paused", "approved"];
 /**
@@ -544,6 +554,39 @@ export function createForge(deps: ForgeDeps): Forge {
       changed(runId);
     } catch (e) {
       console.error(`Run ${runId}: could not archive:`, (e as Error)?.message ?? e);
+    }
+  }
+
+  /** Archives every finished Run that is not yet, then sweeps the Run folders of Runs archived or gone. Never throws. */
+  async function catchUpArchiving(): Promise<void> {
+    try {
+      const { rows } = await pool.query("SELECT id FROM runs WHERE state = ANY($1) AND archived_at IS NULL ORDER BY id", [OVER]);
+      for (const r of rows) await archive(Number(r.id));
+      // Only `run-<id>` folders under the worktrees root, and only those of a Run archived or no longer there.
+      for (const folder of runFoldersUnder(deps.worktreesRoot)) {
+        const { rows: found } = await pool.query("SELECT archived_at IS NOT NULL AS archived FROM runs WHERE id = $1", [folder.runId]);
+        if (found[0] && !found[0].archived) continue;
+        const { rows: owner } = await pool.query("SELECT local_path FROM projects WHERE id = $1", [folder.projectId]);
+        try {
+          if (owner[0]) await removeRunWorktree({ repoRoot: owner[0].local_path, worktreePath: folder.path, branch: null });
+          rmSync(folder.path, { recursive: true, force: true });
+        } catch (e) {
+          console.error(`Run ${folder.runId}: could not remove its stray folder ${folder.path}:`, (e as Error)?.message ?? e);
+        }
+      }
+    } catch (e) {
+      console.error("Archiving the finished Runs at startup failed:", (e as Error)?.message ?? e);
+    }
+  }
+
+  /** Deletes the Runs archived more than `archiveDays` ago, with everything that belongs to them. Never throws. */
+  async function purge(): Promise<void> {
+    try {
+      const days = deps.archiveDays ?? 60;
+      const { rowCount } = await pool.query("DELETE FROM runs WHERE archived_at IS NOT NULL AND archived_at < $1", [new Date(now().getTime() - days * DAY_MS)]);
+      console.log(`Purge: ${rowCount} archived Run${rowCount === 1 ? "" : "s"} deleted (archived more than ${days} days ago).`);
+    } catch (e) {
+      console.error("Purging the archived Runs failed:", (e as Error)?.message ?? e);
     }
   }
 
@@ -1114,6 +1157,7 @@ export function createForge(deps: ForgeDeps): Forge {
     },
 
     async recoverAfterRestart() {
+      await catchUpArchiving();
       // Nothing can be running yet, so any attempt still marked Running was cut short by the restart.
       const interrupted = await pool.query(
         `UPDATE step_attempts SET status = 'failed', ended_at = now(), error = 'Interrupted by a restart of Forgequor.'
@@ -1143,6 +1187,11 @@ export function createForge(deps: ForgeDeps): Forge {
     team: () => teamStore.team(),
     changeSeat: (seat, change) => teamStore.change(seat, change),
     startQuotaReading: () => quotas.start(),
+
+    async startPurging() {
+      await purge();
+      return (deps.every ?? realEvery)(() => void purge(), DAY_MS);
+    },
 
     async whenIdle() {
       do {
