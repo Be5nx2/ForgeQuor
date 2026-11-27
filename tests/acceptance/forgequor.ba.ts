@@ -64,7 +64,7 @@ describe.sequential("1–2. slots, merge list and a developer Run end to end", (
     project = await registerProject(cloneSandbox("slots"), { checks: ["true"], max: 1 });
     expect(project.maxConcurrentRuns).toBe(1);
     const workflows = await ok<WorkflowList>("GET", `/api/projects/${project.id}/workflows`);
-    expect(workflows.workflows.map((w) => `${w.name}:${w.origin}`).sort()).toEqual(["assets:built-in", "developer:built-in"]);
+    expect(workflows.workflows.map((w) => `${w.name}:${w.origin}`).sort()).toEqual(["assets:built-in", "bugfix:built-in", "developer:built-in", "feature:built-in"]);
   });
 
   it("queues a second Run while the first holds the only slot", async () => {
