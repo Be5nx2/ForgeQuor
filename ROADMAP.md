@@ -114,6 +114,13 @@ Codex **Runner**, **Artist**, an `assets` **Workflow** (Artist → asset **Gate*
     - the Run form's list of repository PNGs and the Art Direction facts it shows come from the freshly fetched default branch;
     - a replacement's commit says it replaces (e.g. `feat(art): replace 1 asset`, or add and replace counted apart), and the Review Brief marks each replaced Asset;
     - the Asset Gate shows the image being replaced beside the new version, magnified alike, so they can be compared.
+- [ ] `m2-11` **Overwrite check when an assets Run really starts**: a Run that waited in the queue cannot overwrite art merged in the meantime.
+  - Spec: `docs/specs/m2-assets.md`
+  - Blocked by: `m2-10`
+  - Acceptance:
+    - when an `assets` Run starts (or restarts), after its worktree is made from the freshly fetched default branch, an Asset not marked as replacing whose target path already holds a file opens an Escalation naming that file, before anything is generated;
+    - tested: start a Run that has to wait Queued, merge a file at one of its target paths on the remote meanwhile, free a slot; the Run escalates instead of overwriting;
+    - an Asset marked as replacing still proceeds, and the Asset the Artist itself wrote in an earlier attempt of the same Run is never taken for existing art.
 
 ## Next
 
