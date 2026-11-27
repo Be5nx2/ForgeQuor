@@ -37,16 +37,42 @@ export interface RunnerEvent {
   raw: string;
 }
 
-export type StepResult =
+/** One rolling window of a Quota: how much is used and when it reopens; each is null when the Runner did not say. */
+export interface QuotaWindow {
+  percentUsed: number | null;
+  resetsAt: Date | null;
+}
+
+/**
+ * What a Runner last said about its Quota: the five-hour and weekly windows, whether it is used up, and when this was read.
+ * A reading that knows nothing (both windows empty, not exhausted) is "unknown".
+ */
+export interface QuotaReading {
+  fiveHour: QuotaWindow;
+  weekly: QuotaWindow;
+  exhausted: boolean;
+  readAt: Date;
+}
+
+export type StepResult = (
   /** `files` are the files the Runner itself produced outside the worktree (Codex's generated images), as absolute paths in creation order; empty for Runners that produce none. */
   | { status: "succeeded"; summary: string; files?: string[]; /** The session the Step ran in, when it asked for one. */ sessionId?: string }
   /** `sessionLost` says the failure is that the Runner no longer has the session a `resume` named. */
   | { status: "failed"; error: string; sessionLost?: true }
   /** The Runner's Quota is used up; `resetsAt` is null when the Runner did not say when. */
-  | { status: "quota_exhausted"; resetsAt: Date | null };
+  | { status: "quota_exhausted"; resetsAt: Date | null }
+) & {
+  /** What the Step's own output said about the Quota, when it said something (often partial). */
+  quota?: QuotaReading;
+};
 
 /** The seam between Forge core and an AI tool (Claude Code, Codex). */
 export interface Runner {
   /** Runs one Step in a fresh session (or the one it asks to keep or resume), reporting progress as it goes. Never rejects: failures are results. */
   run(step: StepRequest, onEvent: (event: RunnerEvent) => void): Promise<StepResult>;
+  /**
+   * Reads the Quota on demand, at no cost to it, for the Runners that can. A reading it cannot make sense of is an
+   * unknown reading; nothing means the Runner could not be asked. Never rejects.
+   */
+  readQuota?(): Promise<QuotaReading | null>;
 }

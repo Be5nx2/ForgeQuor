@@ -198,7 +198,7 @@ Griller with a **Conversation Gate** (it writes the Project's glossary and ADRs 
     - the message names the Run (`Run #42 "Title"`) and what happened;
     - a throwing Notifier is logged and never changes a Run;
     - the BA keeps notifications off.
-- [ ] `m4-04` **Claude Quota bar**: the human sees Claude's five-hour and weekly percentages at the top of the app.
+- [x] `m4-04` **Claude Quota bar**: the human sees Claude's five-hour and weekly percentages at the top of the app.
   - Spec: `docs/specs/m4-comfort.md`
   - Blocked by: none
   - Acceptance:

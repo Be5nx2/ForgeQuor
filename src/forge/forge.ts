@@ -14,6 +14,8 @@ import { agentStepType, catalogueOf, checksStepType, gateStepType, publishStepTy
 import { describeInvalid, resolveWorkflows, type ResolvedWorkflow } from "./project-workflows.js";
 import { DEFAULT_REVIEW_MODE, REVIEW_MODES, type WorkflowDefinition, type WorkflowInput } from "./workflow-definition.js";
 import { publishPullRequest } from "./publish.js";
+import { realEvery, type Every } from "./clock.js";
+import { createQuotaKeeper } from "./quota.js";
 import { createRunRecords, toReview } from "./run-records.js";
 import { reviewStepType } from "./review.js";
 import { buildSeats, type RunnerName, type SeatSettings } from "./seats.js";
@@ -35,6 +37,7 @@ import type {
   Iteration,
   OpenGate,
   Project,
+  QuotaStatus,
   Run,
   RunDetail,
   RunState,
@@ -118,6 +121,14 @@ export interface Forge {
    * comes from the caller.
    */
   assetImage(runId: number, assetId: number, which?: number | "replaced"): Promise<string>;
+  /** Each vendor's latest Quota Reading with its age (a null reading for one never read), as the Quota bars show them. */
+  quota(): Promise<QuotaStatus[]>;
+  /**
+   * Call once when Forgequor starts: reads the Quota of the Runners that can be asked (Claude), then again every 5 minutes.
+   * Every Step a Runner finishes also refreshes it, and each new reading is published to the subscribers. Returns the
+   * function that stops the refreshing.
+   */
+  startQuotaReading(): Promise<() => void>;
   /** Resolves once no Run is being worked on in the background. */
   whenIdle(): Promise<void>;
 }
@@ -151,6 +162,8 @@ export interface ForgeDeps {
   skillPack?: string;
   /** The clock, so tests can move time. */
   now?: () => Date;
+  /** The timer, so tests can move time: runs a task every so many milliseconds. Default: the real one. */
+  every?: Every;
 }
 
 const COLUMNS =
@@ -310,13 +323,14 @@ export function createForge(deps: ForgeDeps): Forge {
     [agentStepType(agentModules), checksStepType, publishStepType(publicationOf), gateStepType(gateKinds), reviewStepType, conversationStepType(conversationAgents, inputProducers), ...extensions.flatMap((e) => e.stepTypes ?? [])].map((t) => [t.type, t]),
   );
   /** Each Agent seat's Runner and model: its setting, else its default (Claude Code for most, Codex for the second Reviewer and the Artist). */
-  const runners: Partial<Record<RunnerName, Runner>> = { claude: deps.runner, codex: deps.artistRunner };
+  const now = deps.now ?? (() => new Date());
+  const quotas = createQuotaKeeper({ pool, now, every: deps.every ?? realEvery, emit: (u) => emit(u) });
+  const runners: Partial<Record<RunnerName, Runner>> = { claude: quotas.watch("claude", deps.runner), codex: deps.artistRunner && quotas.watch("codex", deps.artistRunner) };
   const settings: SeatSettings = { ...deps.seats };
   for (const [seat, model] of [["developer", deps.developerModel], ["artist", deps.artistModel]] as const) {
     if (model && !settings[seat]?.model) settings[seat] = { ...settings[seat], model };
   }
   const { agents, problems: seatProblems } = buildSeats(runners, settings);
-  const now = deps.now ?? (() => new Date());
   const stepTimeoutMs = deps.stepTimeoutMs ?? DEFAULT_STEP_TIMEOUT_MS;
   const inFlight = new Set<Promise<void>>();
   const listeners = new Set<(update: RunUpdate) => void>();
@@ -1023,8 +1037,14 @@ export function createForge(deps: ForgeDeps): Forge {
       throw new AssetNotFoundError(`No such Asset ${assetId} in Run ${runId}, or it has no image yet.`);
     },
 
+    quota: () => quotas.status(),
+    startQuotaReading: () => quotas.start(),
+
     async whenIdle() {
-      while (inFlight.size) await Promise.all([...inFlight]);
+      do {
+        while (inFlight.size) await Promise.all([...inFlight]);
+        await quotas.whenIdle();
+      } while (inFlight.size);
     },
   };
   return forge;

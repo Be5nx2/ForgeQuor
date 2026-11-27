@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { getJson } from "./api";
+import QuotaBar from "./components/QuotaBar.vue";
 import NewRunView from "./views/NewRunView.vue";
 import ProjectsView from "./views/ProjectsView.vue";
 import RunDetailView from "./views/RunDetailView.vue";
@@ -41,6 +42,7 @@ onMounted(async () => {
 
 <template>
   <main>
+    <QuotaBar />
     <h1>FORGE<span>QUOR</span></h1>
     <div v-for="t in tools.filter((t) => t.status !== 'ok')" :key="t.tool" class="warn">{{ t.tool }}: {{ t.detail }}</div>
 

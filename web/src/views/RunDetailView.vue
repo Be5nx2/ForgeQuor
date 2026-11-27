@@ -48,7 +48,7 @@ let stopFollowing: () => void;
 onMounted(() => {
   load();
   stopFollowing = followRuns((u) => {
-    if (u.runId !== props.id) return;
+    if (u.type === "quota" || u.runId !== props.id) return;
     if (u.type === "changed") return void load();
     live.value = [...live.value, { attemptId: u.attemptId, kind: u.kind, summary: u.summary }].slice(-LIVE_LINES);
   }, load);

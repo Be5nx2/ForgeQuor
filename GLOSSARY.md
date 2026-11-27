@@ -120,6 +120,10 @@ _Avoid_: Merger, aggregator, judge
 The share of a **Runner**'s subscription usage limits still available in its rolling windows (five-hour and weekly).
 _Avoid_: Credits, rate limit, usage
 
+**Quota Reading**:
+What Forgequor last learned about one **Runner**'s **Quota**: for each window (five-hour, weekly) the percent used and the reset time, either possibly unknown; whether it is exhausted; and when it was read. A reading that knows nothing is "unknown".
+_Avoid_: Quota status, usage snapshot
+
 **Skill**:
 A packaged set of instructions an **Agent** follows for one kind of work.
 _Avoid_: Prompt, command, recipe

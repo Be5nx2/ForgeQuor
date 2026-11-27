@@ -31,6 +31,8 @@ export type RunDetail = Json<Server.RunDetail>;
 export type OpenGate = Json<Server.OpenGate>;
 export type ApprovedRun = Json<Server.ApprovedRun>;
 export type RunUpdate = Json<Server.RunUpdate>;
+export type QuotaReading = Json<Server.QuotaReading>;
+export type QuotaStatus = Json<Server.QuotaStatus>;
 
 /** Records the human's decision at a Gate and returns the updated Run. */
 export function decideGate(gateId: number, action: GateAction, feedback?: string, verdicts?: Verdict[], target?: string, message?: string): Promise<RunDetail> {

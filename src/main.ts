@@ -62,6 +62,8 @@ const forge = createForge({
 const POLL_MS = Number(process.env.FORGEQUOR_PR_POLL_SECONDS ?? 60) * 1000;
 // Runs that were Running restart their Step, Queued Runs start, Approved Runs are followed again.
 forge.recoverAfterRestart().catch((e) => console.error("Recovery after restart failed:", e));
+// Claude's Quota is read now and every 5 minutes (and after each of its Steps), at no cost to it.
+forge.startQuotaReading().catch((e) => console.error("Reading the Quota failed:", e));
 setInterval(() => {
   forge.checkPullRequests().catch((e) => console.error("Pull request check failed:", e));
   forge.resumePausedRuns().catch((e) => console.error("Resuming Paused Runs failed:", e));
