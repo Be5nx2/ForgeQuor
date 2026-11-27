@@ -94,7 +94,7 @@ The engine behind every Workflow, with no change visible to the human: a deeper 
 
 Griller with a **Conversation Gate** (it writes the Project's glossary and ADRs and produces Asset Requests), Spec Writer, Architect, solo or duo review (chosen at Run launch) with **Consolidator** (an unsettled reviewer disagreement opens a **Gate** with its recommendation), and the default `feature` and `bugfix` Workflows. `feature`: Griller ⇄ human → spec Gate → Spec Writer → Gate → Architect → Artist → Asset Gate (skipped without Asset Requests) → Developer → Checks → Reviewer(s) + Consolidator ⇄ Developer → pull request + Review Brief → final Gate.
 
-- Spec: to write with `/to-spec M3b` before `m3-11`; the items below follow the grilling decisions.
+- Spec: `docs/specs/m3b-the-team.md`. Items below.
 - Decided in the grilling (round 1):
   - the Griller writes its transcript to the Run Notes, the Project's glossary and ADRs as Deliverables, and Asset Requests in a structured Run Note that Forgequor validates like launch input (fresh fetch), sending invalid ones back to the Griller;
   - Conversation Gate: one round of questions at a time, the human answers in one message, the Griller resumes the same Claude session (the Claude Runner gains session persistence for this only), proposes a summary at the end and the human confirms or goes on; the transcript is saved at each exchange;
@@ -108,14 +108,14 @@ Griller with a **Conversation Gate** (it writes the Project's glossary and ADRs 
   - the `feature` Developer gets the task, the spec, the Implementation Plan and the approved Assets' paths; a final Gate rejection sends it back with the Feedback; an Escalation can go back to any earlier Step, the Griller included, which reopens the conversation;
   - a `feature` Run starts from a free-text subject and a solo or duo review choice (duo by default; solo by default for `bugfix`).
 - [ ] `m3-10` **Shared Skill Pack in every Run**: Agents find the skills they need in any Project.
-  - Spec: to write (`docs/specs/m3b-the-team.md`), from the grilling decisions above
+  - Spec: `docs/specs/m3b-the-team.md`
   - Blocked by: none
   - Acceptance:
     - at a Run's start Forgequor places its `shared` Skill Pack in the worktree, for Claude and for Codex, never committed;
     - a skill the Project already has wins over the pack's;
     - tested with a Project that has none of the skills and one that overrides one.
 - [ ] `m3-11` **`bugfix` with a solo Reviewer**: a bug goes from description to reviewed pull request.
-  - Spec: to write (`docs/specs/m3b-the-team.md`), from the grilling decisions above
+  - Spec: `docs/specs/m3b-the-team.md`
   - Blocked by: `m3-04`, `m3-10`
   - Acceptance:
     - a Reviewer Agent (Claude by default) uses `code-review` against the Project's standards and the Run's task or spec, and writes a Review ending in pass or changes requested;
@@ -123,7 +123,7 @@ Griller with a **Conversation Gate** (it writes the Project's glossary and ADRs 
     - `bugfix` takes a bug description; the Developer uses `diagnosing-bugs` and writes a failing test first; then Checks, review, pull request, final Gate;
     - the Run form offers solo or duo review, solo by default for `bugfix`.
 - [ ] `m3-12` **Duo review and Consolidator**: two models review, one review reaches the Developer.
-  - Spec: to write (`docs/specs/m3b-the-team.md`), from the grilling decisions above
+  - Spec: `docs/specs/m3b-the-team.md`
   - Blocked by: `m3-11`, `m3-06`
   - Acceptance:
     - duo runs a Claude Reviewer and a Codex Reviewer in parallel, both read-only (Codex in its read-only sandbox);
@@ -131,7 +131,7 @@ Griller with a **Conversation Gate** (it writes the Project's glossary and ADRs 
     - a disagreement it cannot settle opens a Gate carrying its recommendation;
     - Runners per Agent default as decided and can be changed through environment variables.
 - [ ] `m3-13` **`feature` v0: Griller and Conversation Gate**: a subject becomes code after a grilling.
-  - Spec: to write (`docs/specs/m3b-the-team.md`), from the grilling decisions above
+  - Spec: `docs/specs/m3b-the-team.md`
   - Blocked by: `m3-11`, `m3-10`, `m3-08`
   - Acceptance:
     - the Claude Runner can keep and resume a session, for Conversation Gates only;
@@ -141,21 +141,21 @@ Griller with a **Conversation Gate** (it writes the Project's glossary and ADRs 
     - `feature` v0 is Griller → Developer → Checks → review (duo by default) → pull request → final Gate, launched from a free-text subject;
     - going back to the Griller from an Escalation reopens the conversation.
 - [ ] `m3-14` **Spec Writer and spec Gate**: the grilling becomes a spec the human approves.
-  - Spec: to write (`docs/specs/m3b-the-team.md`), from the grilling decisions above
+  - Spec: `docs/specs/m3b-the-team.md`
   - Blocked by: `m3-13`
   - Acceptance:
     - the Spec Writer uses `to-spec` without asking questions and writes `docs/specs/<slug>.md` in the Project, committed in the pull request, with no tickets;
     - a spec Gate shows the spec rendered; approve goes on, reject with Feedback has it redone;
     - the Developer is given the spec.
 - [ ] `m3-15` **Architect and Implementation Plan**: the Developer follows a plan.
-  - Spec: to write (`docs/specs/m3b-the-team.md`), from the grilling decisions above
+  - Spec: `docs/specs/m3b-the-team.md`
   - Blocked by: `m3-14`
   - Acceptance:
     - the Architect reads the spec and the code and writes an Implementation Plan to the Run Notes (modules, test seams, order of small steps);
     - it writes a Project ADR when a decision warrants one; no Gate follows it;
     - the Developer is given the plan.
 - [ ] `m3-16` **Art inside `feature`**: the grilling can order art that the code then uses.
-  - Spec: to write (`docs/specs/m3b-the-team.md`), from the grilling decisions above
+  - Spec: `docs/specs/m3b-the-team.md`
   - Blocked by: `m3-13`, `m3-05`
   - Acceptance:
     - the Griller produces Asset Requests in a structured Run Note, validated like launch input on the fresh branch, invalid ones going back to it;
