@@ -139,6 +139,11 @@ export interface ArtInfo {
   images: string[];
 }
 
+/** An Approved Run, with its Project's name, as the merge list shows it: its pull request awaits the human's merge. */
+export interface ApprovedRun extends Run {
+  projectName: string;
+}
+
 /** An open Gate with enough of its Run and Project to be listed on its own. */
 export interface OpenGate extends Gate {
   runTitle: string;
@@ -195,6 +200,8 @@ export interface Forge {
   listRuns(filter?: { projectId?: number; state?: RunState }): Promise<Run[]>;
   /** Every Gate still waiting for the human, across all Projects. */
   listOpenGates(): Promise<OpenGate[]>;
+  /** The merge list: every Approved Run of every Project, oldest first, until its pull request is merged or closed or the Run is abandoned. */
+  listApprovedRuns(): Promise<ApprovedRun[]>;
   /**
    * The human's decision at an open Gate: approve (final Gate) moves the Run to Approved, abandon to Abandoned (its branch
    * and worktree are kept), reject (final Gate only, with a non-empty `feedback`) starts the Run's next Iteration. An Asset
@@ -329,8 +336,11 @@ const workflows = new Map<string, Workflow>([developerWorkflow, assetsWorkflow].
 /** States a Run cannot leave. A Run in one of them no longer holds its Project's slot. */
 const OVER: RunState[] = ["merged", "closed", "abandoned"];
 const ACTIVE: RunState[] = ["queued", "running", "waiting", "paused", "approved"];
-/** States that hold one of their Project's slots. A Queued Run does not. */
-const HOLDING_A_SLOT: RunState[] = ["running", "waiting", "paused", "approved"];
+/**
+ * States that hold one of their Project's slots. A Queued Run does not, nor an Approved one: its pull request waits for
+ * the human's merge, not for an Agent.
+ */
+const HOLDING_A_SLOT: RunState[] = ["running", "waiting", "paused"];
 
 /** What the human can do at each kind of Gate. */
 const GATE_ACTIONS: Record<GateKind, GateAction[]> = {
@@ -363,6 +373,8 @@ function toGate(r: Record<string, any>): Gate {
 }
 
 const RUN_COLUMNS = "id, project_id, workflow, iteration, title, task, tracker_ref, state, branch, worktree_path, pr_number, pr_url, resume_at, created_at";
+/** The same columns, read through the alias `r` in a query that joins another table. */
+const RUN_COLUMNS_OF_R = RUN_COLUMNS.split(", ").map((c) => `r.${c}`).join(", ");
 
 export function createForge(deps: ForgeDeps): Forge {
   const { pool } = deps;
@@ -583,10 +595,16 @@ export function createForge(deps: ForgeDeps): Forge {
     changed(runId);
   }
 
-  /** The Run's work is done and its pull request is open: Approved, unless it was abandoned meanwhile. */
+  /** The Run's work is done and its pull request is open: Approved, unless it was abandoned meanwhile. Its slot is then free. */
   async function approveRun(runId: number) {
-    await pool.query("UPDATE runs SET state = 'approved', updated_at = now() WHERE id = $1 AND state = 'running'", [runId]);
+    const { rows } = await pool.query(
+      "UPDATE runs SET state = 'approved', updated_at = now() WHERE id = $1 AND state = 'running' RETURNING project_id",
+      [runId],
+    );
     changed(runId);
+    if (!rows[0]) return;
+    // This Run is done: failing to start the next one is not its failure. Restart recovery starts Queued Runs again.
+    await promote(Number(rows[0].project_id)).catch((e) => console.error(`Run ${runId}: could not start the next Queued Run:`, e));
   }
 
   /** Works on a Run until it waits at a Gate, pauses, or is abandoned; starts over from what is recorded if it was worked on before. */
@@ -814,6 +832,15 @@ export function createForge(deps: ForgeDeps): Forge {
       return rows.map((r) => ({ ...toGate(r), runTitle: r.run_title, projectName: r.project_name }));
     },
 
+    async listApprovedRuns() {
+      const { rows } = await pool.query(
+        `SELECT ${RUN_COLUMNS_OF_R}, p.name AS project_name
+         FROM runs r JOIN projects p ON p.id = r.project_id
+         WHERE r.state = 'approved' ORDER BY r.id`,
+      );
+      return rows.map((r) => ({ ...toRun(r), projectName: r.project_name }));
+    },
+
     async decideGate({ gateId, action, feedback, verdicts }) {
       const { rows } = await pool.query("SELECT * FROM gates WHERE id = $1", [gateId]);
       if (!rows[0]) throw new GateError(`No Gate ${gateId}.`);
@@ -850,11 +877,15 @@ export function createForge(deps: ForgeDeps): Forge {
         }
       }
       const client = await pool.connect();
+      let projectId: number;
       try {
         await client.query("BEGIN");
         // The Run row first, as in `settle`, so that approving while the human abandons cannot deadlock; guarded on the Run
         // still waiting and the Gate undecided, so two decisions racing for the same Gate cannot both win.
-        const moved = await client.query("UPDATE runs SET state = 'approved', updated_at = now() WHERE id = $1 AND state = 'waiting'", [gate.runId]);
+        const moved = await client.query(
+          "UPDATE runs SET state = 'approved', updated_at = now() WHERE id = $1 AND state = 'waiting' RETURNING project_id",
+          [gate.runId],
+        );
         const decided = moved.rowCount
           ? await client.query("UPDATE gates SET decided_at = now(), decision = $2 WHERE id = $1 AND decided_at IS NULL RETURNING run_id", [gateId, action])
           : null;
@@ -863,6 +894,7 @@ export function createForge(deps: ForgeDeps): Forge {
           throw new GateError(`Gate ${gateId} is already decided.`);
         }
         await client.query("COMMIT");
+        projectId = Number(moved.rows[0].project_id);
       } catch (e) {
         if (!(e instanceof GateError)) await client.query("ROLLBACK").catch(() => {});
         throw e;
@@ -870,6 +902,8 @@ export function createForge(deps: ForgeDeps): Forge {
         client.release();
       }
       changed(gate.runId);
+      // Approved: the pull request waits for the human's merge, so the slot is free for the next Queued Run.
+      await promote(projectId);
       return forge.getRun(gate.runId);
     },
 

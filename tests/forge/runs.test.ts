@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type pg from "pg";
-import { createForge, type Forge, type ForgeDeps, type Project, type RunUpdate } from "../../src/forge/forge.js";
+import { createForge, type Forge, type ForgeDeps, type Project, type RunDetail, type RunUpdate } from "../../src/forge/forge.js";
 import { createTestDatabase } from "../harness/database.js";
 import { createFakeCodeHost } from "../harness/fake-codehost.js";
 import { createFakeRunner } from "../harness/fake-runner.js";
@@ -719,6 +719,48 @@ describe("detecting a merge or close", () => {
   });
 });
 
+describe("waiting for the human's merge", () => {
+  const mine = async (ids: number[]) => (await forge.listApprovedRuns()).filter((r) => ids.includes(r.id));
+
+  it("lists every Approved Run of every Project with its pull request, and no other Run", async () => {
+    const one = await projectWithRemote();
+    const two = await projectWithRemote();
+    const first = await approvedRun(one.project);
+    const second = await approvedRun(two.project);
+    runner.use(() => {});
+    const waiting = await runToEnd(one.project);
+
+    const listed = await mine([first.id, second.id, waiting.id]);
+
+    expect(listed.map((r) => r.id).sort()).toEqual([first.id, second.id].sort());
+    expect(listed.find((r) => r.id === first.id)).toMatchObject({
+      title: first.title,
+      projectName: one.project.name,
+      prNumber: first.prNumber,
+      prUrl: first.prUrl,
+      state: "approved",
+    });
+    expect(listed.find((r) => r.id === second.id)).toMatchObject({ projectName: two.project.name, prUrl: second.prUrl });
+  });
+
+  it("drops a Run once its pull request is merged or closed, or the Run is abandoned", async () => {
+    const { project } = await projectWithRemote();
+    await forge.setMaxConcurrentRuns(project.id, 3);
+    const merged = await approvedRun(project);
+    const closed = await approvedRun(project);
+    const abandoned = await approvedRun(project);
+    const ids = [merged.id, closed.id, abandoned.id];
+    expect(await mine(ids)).toHaveLength(3);
+
+    codeHost.setState(merged.prNumber!, "merged");
+    codeHost.setState(closed.prNumber!, "closed");
+    await forge.checkPullRequests();
+    await forge.abandonRun(abandoned.id);
+
+    expect(await mine(ids)).toEqual([]);
+  });
+});
+
 /** A Developer that blocks until released, so Runs can be held in the Running state. */
 function gatedDeveloper() {
   const waiters: Array<() => void> = [];
@@ -763,28 +805,39 @@ describe("the concurrency limit and the queue", () => {
   });
 
   it.each([
-    ["Merged", async (id: number) => (codeHost.setState(id, "merged"), forge.checkPullRequests())],
-    ["Closed", async (id: number) => (codeHost.setState(id, "closed"), forge.checkPullRequests())],
-    ["Abandoned", async (id: number, runId: number) => void (await forge.abandonRun(runId))],
+    ["Approved", async (run: RunDetail) => void (await forge.decideGate({ gateId: run.gates[0]!.id, action: "approve" }))],
+    ["Abandoned", async (run: RunDetail) => void (await forge.abandonRun(run.id))],
   ])("a Run becoming %s frees its slot and starts the next Queued Run", async (_name, free) => {
     const { project } = await projectWithRemote();
     await forge.setMaxConcurrentRuns(project.id, 1);
-    const first = await approvedRun(project);
+    runner.use((step) => developerCommits(step));
+    const first = await runToEnd(project);
     runner.use(() => {});
     const next = await forge.startRun({ projectId: project.id, task: "Next" });
     await forge.whenIdle();
     expect((await forge.getRun(next.id)).state).toBe("queued");
 
-    await free(first.prNumber!, first.id);
+    await free(first);
     await forge.whenIdle();
 
     expect((await forge.getRun(next.id)).state).toBe("waiting");
   });
 
+  it("does not count Approved Runs: their pull request waits for the merge without holding the queue", async () => {
+    const { project } = await projectWithRemote();
+    await forge.setMaxConcurrentRuns(project.id, 1);
+    await approvedRun(project);
+    runner.use(() => {});
+
+    const next = await runToEnd(project);
+
+    expect(next.state).toBe("waiting");
+  });
+
   it("starts Queued Runs in creation order", async () => {
     const { project } = await projectWithRemote();
     await forge.setMaxConcurrentRuns(project.id, 1);
-    const first = await approvedRun(project);
+    const first = await runToEnd(project);
     runner.use(() => {});
     const second = await forge.startRun({ projectId: project.id, task: "Second" });
     const third = await forge.startRun({ projectId: project.id, task: "Third" });
