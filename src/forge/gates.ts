@@ -72,6 +72,24 @@ export const finalGate: GateKindModule = {
   },
 };
 
+/**
+ * The Reviewers disagree and the Consolidator could not settle it: the human sees its recommendation and both Reviews.
+ * Approving goes on as if the Review passed; rejecting with Feedback sends the Developer back, as changes requested would
+ * (the Iteration does not change); or the human abandons the Run. The review Step reads the decision when the Run goes on.
+ */
+export const reviewGate: GateKindModule = {
+  kind: "review",
+  label: "A review Gate",
+  actions: ["approve", "reject", "abandon"],
+  async decide(_gate, { action, feedback }) {
+    if (action === "abandon") return { next: "abandon" };
+    if (action === "approve") return { next: "continue", decision: "approve", nextIteration: false };
+    const reason = feedback?.trim();
+    if (!reason) throw new InvalidInputError("Rejecting a Gate needs a Feedback saying what to change.");
+    return { next: "continue", decision: "reject", feedback: reason, nextIteration: false };
+  },
+};
+
 /** Whether the human can decide a Gate of this kind with `action`: what it lists, and for an Escalation retrying and going back. */
 export function allows(gate: GateKindModule, action: GateAction): boolean {
   return gate.actions.includes(action) || (!!gate.redo && (action === "retry" || action === "go_back"));

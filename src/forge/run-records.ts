@@ -45,6 +45,8 @@ export interface RunRecords {
   giveInput(input: WorkflowInput, stepId: string): Promise<void>;
   /** The decision of the latest Gate the Step opened in the current Iteration: null when it is still open, undefined when it opened none. */
   gateDecision(stepId: string): Promise<GateDecision | null | undefined>;
+  /** The Feedback the human gave when they rejected the Gate `gateDecision` reads, or null when they gave none. */
+  gateFeedback(stepId: string): Promise<string | null>;
   /** How the Run is reviewed; solo for a Run that was not given a mode. */
   reviewMode(): Promise<ReviewMode>;
   /** Keeps a Review in the Run's records, where the Run detail shows it. */
@@ -130,6 +132,15 @@ export function createRunRecords(pool: pg.Pool, runId: number, iteration: number
         [runId, iteration, stepId],
       );
       return rows[0] ? rows[0].decision : undefined;
+    },
+    async gateFeedback(stepId) {
+      const { rows } = await pool.query(
+        `SELECT feedback FROM gates WHERE run_id = $1 AND iteration = $2 AND step = $3
+           AND id > COALESCE((SELECT since_gate FROM step_states WHERE run_id = $1 AND iteration = $2 AND step = $3), 0)
+         ORDER BY id DESC LIMIT 1`,
+        [runId, iteration, stepId],
+      );
+      return rows[0]?.feedback ?? null;
     },
     async reviewMode() {
       const { rows } = await pool.query("SELECT review_mode FROM runs WHERE id = $1", [runId]);

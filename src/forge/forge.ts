@@ -15,7 +15,7 @@ import { buildSeats, type RunnerName, type SeatSettings } from "./seats.js";
 import { builtInExtensions } from "./builtin.js";
 import { AssetNotFoundError, GateError, InvalidInputError, RunNotFoundError, RunStateError } from "./errors.js";
 import type { Extension } from "./extension.js";
-import { allows, escalationGate, finalGate, refusal, type GateKindModule, type GateOutcome } from "./gates.js";
+import { allows, escalationGate, finalGate, refusal, reviewGate, type GateKindModule, type GateOutcome } from "./gates.js";
 import { goBackChoices, redoFailedSteps, redoSteps, redoSet, type StepRow } from "./step-states.js";
 import type { Publication, RunInput, Workflow, WorkflowContext } from "./workflow.js";
 import type { CodeHost } from "../codehost/codehost.js";
@@ -288,7 +288,7 @@ export function createForge(deps: ForgeDeps): Forge {
     return [...workflows.values()].find((w) => w.inputs.length === frozen.inputs.length && frozen.inputs.every((i) => w.inputs.includes(i)))?.publication;
   }
   /** The Gate kinds, by kind: each decides its own Gates. */
-  const gateKinds = new Map<GateKind, GateKindModule>([finalGate, escalationGate, ...extensions.flatMap((e) => e.gateKinds)].map((k) => [k.kind, k]));
+  const gateKinds = new Map<GateKind, GateKindModule>([finalGate, escalationGate, reviewGate, ...extensions.flatMap((e) => e.gateKinds)].map((k) => [k.kind, k]));
   const gateOf = (r: Record<string, any>): Gate => toGate(r, gateKinds.get(r.kind)?.actions ?? []);
   /** The Agents a Workflow's Agent Step can name. */
   const agentModules = new Map<string, AgentModule>([developerAgent, bugfixAgent, ...extensions.flatMap((e) => e.agents ?? [])].map((a) => [a.name, a]));

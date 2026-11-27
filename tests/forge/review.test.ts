@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type pg from "pg";
 import { createForge, type Forge, type ForgeDeps, type Project, type RunDetail } from "../../src/forge/forge.js";
-import { parseReview, reviewNote } from "../../src/forge/review.js";
+import { parseConsolidation, parseReview, recommendationOf, reviewNote } from "../../src/forge/review.js";
 import { seatSettingsFromEnv } from "../../src/forge/seats.js";
 import type { StepRequest, StepResult } from "../../src/runner/runner.js";
 import { createTestDatabase } from "../harness/database.js";
@@ -26,13 +26,14 @@ const forges: Forge[] = [];
 let counter = 0;
 
 const isReviewer = (step: StepRequest) => step.instructions.includes("You are the Reviewer");
+const isConsolidator = (step: StepRequest) => step.instructions.includes("You are the Consolidator");
 const review = (verdict: string, body = "Summary: It fixes the bug.\n\nFindings:\n- None.\n\nDoubts: None.") => `${body}\n\nVerdict: ${verdict}`;
 
-/** The Reviewer's answers, one per Review in turn (the last repeats); the Developer just works. */
+/** The Reviewer's answers, one per Review in turn (the last repeats; the Consolidator of a duo Run takes its turn too); the Developer just works. */
 function script(reviews: (string | ((step: StepRequest) => StepResult | void))[]) {
   let n = 0;
   return (step: StepRequest): StepResult | void => {
-    if (!isReviewer(step)) {
+    if (!isReviewer(step) && !isConsolidator(step)) {
       writeFileSync(join(step.cwd, "fix.txt"), `fix ${claude.steps.length}\n`);
       writeFileSync(join(step.cwd, ".forgequor", "review-brief.md"), "What the Developer did.\n");
       return;
@@ -83,7 +84,7 @@ async function bugfix(p: Project, input: { review?: "solo" | "duo"; workflow?: s
 }
 
 const reviewers = () => claude.steps.filter(isReviewer);
-const developers = () => claude.steps.filter((s) => !isReviewer(s));
+const developers = () => claude.steps.filter((s) => !isReviewer(s) && !isConsolidator(s));
 const stepsOf = (r: RunDetail) => r.steps.map((s) => `${s.id}:${s.status}`);
 const escalation = (r: RunDetail) => r.gates.find((g) => g.kind === "escalation" && !g.decidedAt);
 
@@ -309,7 +310,7 @@ describe("a Review without a usable verdict", () => {
 
     const run = await bugfix(p);
 
-    expect(escalation(run)).toMatchObject({ stepId: "review", reason: "The Reviewer-a failed.", evidence: "boom" });
+    expect(escalation(run)).toMatchObject({ stepId: "review", reason: "Reviewer A (reviewer-a) failed.", evidence: "boom" });
   });
 });
 
@@ -378,6 +379,7 @@ steps:
 `,
     );
     claude.use(script([review("pass")]));
+    codex.use(() => ({ status: "succeeded", summary: review("pass") }));
 
     const run = await bugfix(p, { workflow: "careful" });
     const solo = await bugfix(p, { workflow: "careful", review: "solo" });
@@ -386,16 +388,6 @@ steps:
     expect(solo.review).toBe("solo");
     expect((await forge.listWorkflows(p.id)).workflows.find((w) => w.name === "careful")).toMatchObject({ origin: "project", inputs: ["task", "review"], reviewDefault: "duo", errors: [] });
     expect(run.state).toBe("approved");
-  });
-
-  it("runs a duo Run's review solo for now (duo comes with the Consolidator)", async () => {
-    const { project: p } = await project();
-    claude.use(script([review("pass")]));
-
-    const run = await bugfix(p, { review: "duo" });
-
-    expect(reviewers()).toHaveLength(1);
-    expect(run.gates).toMatchObject([{ kind: "final", decision: null }]);
   });
 });
 
@@ -482,5 +474,366 @@ describe("seat settings from the environment", () => {
       "reviewer-b": { runner: "claude", model: "sonnet" },
       artist: { runner: undefined, model: "gpt-image" },
     });
+  });
+});
+
+describe("duo review", () => {
+  const consolidated = (verdict: string, body = "Summary: Checked both Reviews against the code.\n\nFindings:\n- None.\n\nDropped: None.\n\nDoubts: None.") => review(verdict, body);
+  const disagreement = (recommendation = "Recommendation: Keep the double jump behind the flag, as Reviewer B says.") =>
+    consolidated("disagreement", `Summary: The Reviewers disagree about the flag.\n\nFindings:\n- None.\n\nDoubts: Whether the flag is in scope.\n\n${recommendation}`);
+
+  /** The Developer works; Reviewer A and the Consolidator are Claude's, each given its own answers (the Consolidator's in turn, the last repeating). */
+  function claudeScript(a: string | ((step: StepRequest) => StepResult | void | Promise<StepResult | void>), consolidations: string[]) {
+    let c = 0;
+    return async (step: StepRequest): Promise<StepResult | void> => {
+      if (isReviewer(step)) return typeof a === "function" ? a(step) : { status: "succeeded", summary: a };
+      if (isConsolidator(step)) return { status: "succeeded", summary: consolidations[Math.min(c++, consolidations.length - 1)]! };
+      writeFileSync(join(step.cwd, "fix.txt"), `fix ${claude.steps.length}\n`);
+      writeFileSync(join(step.cwd, ".forgequor", "review-brief.md"), "What the Developer did.\n");
+    };
+  }
+  const reviewerBAnswers = (...answers: string[]) => {
+    let n = 0;
+    codex.use(() => ({ status: "succeeded", summary: answers[Math.min(n++, answers.length - 1)]! }));
+  };
+  const consolidators = () => claude.steps.filter(isConsolidator);
+  const open = (run: RunDetail) => run.gates.find((g) => !g.decidedAt);
+
+  it("runs a Claude Reviewer and a Codex Reviewer at the same time, both read-only, then the Consolidator", async () => {
+    const { project: p } = await project();
+    // Each Reviewer waits for the other to have started: they only finish if they overlap.
+    let started = 0;
+    let bothStarted!: () => void;
+    const overlap = new Promise<void>((r) => (bothStarted = r));
+    const meet = async () => {
+      if (++started === 2) bothStarted();
+      await overlap;
+    };
+    claude.use(
+      claudeScript(
+        async () => {
+          await meet();
+          return { status: "succeeded", summary: review("pass", "Summary: A is happy.\n\nFindings:\n- None.") };
+        },
+        [consolidated("pass")],
+      ),
+    );
+    codex.use(async () => {
+      await meet();
+      return { status: "succeeded", summary: review("pass", "Summary: B is happy.\n\nFindings:\n- None.") };
+    });
+
+    const run = await bugfix(p, { review: "duo" });
+
+    expect(run.attempts.filter((a) => a.stepId === "review").map((a) => [a.step, a.runner]).sort()).toEqual([
+      ["consolidator", "claude"],
+      ["reviewer-a", "claude"],
+      ["reviewer-b", "codex"],
+    ]);
+    const at = (name: string) => run.attempts.find((a) => a.step === name)!;
+    expect(at("consolidator").startedAt.getTime()).toBeGreaterThanOrEqual(Math.max(at("reviewer-a").endedAt!.getTime(), at("reviewer-b").endedAt!.getTime()));
+    expect(reviewers()[0]!.readonly).toBe(true);
+    expect(codex.steps).toHaveLength(1);
+    expect(codex.steps[0]!.readonly).toBe(true);
+    expect(codex.steps[0]!.instructions).toContain("You are the Reviewer");
+    expect(consolidators()).toHaveLength(1);
+    expect(consolidators()[0]!.readonly).toBe(true);
+    expect(run.state).toBe("waiting");
+    expect(stepsOf(run)).toEqual(["developer:done", "checks:done", "review:done", "publish:done", "final:running"]);
+  });
+
+  it("gives the Consolidator both Reviews and the change to check them against, and keeps all three Reviews with the consolidated one final", async () => {
+    const { project: p } = await project();
+    claude.use(claudeScript(review("pass", "Summary: A.\n\nFindings:\n- fix.txt:1 - A's remark."), [consolidated("pass", "Summary: One Review.\n\nFindings:\n- None.\n\nDropped: A's remark was wrong.")]));
+    reviewerBAnswers(review("pass", "Summary: B.\n\nFindings:\n- fix.txt:1 - B's remark."));
+
+    const run = await bugfix(p, { review: "duo" });
+
+    const [consolidator] = consolidators();
+    expect(consolidator!.instructions).toMatch(/Check every remark/);
+    expect(consolidator!.prompt).toContain("The player cannot jump twice.");
+    expect(consolidator!.prompt).toContain("A's remark.");
+    expect(consolidator!.prompt).toContain("B's remark.");
+    expect(consolidator!.prompt).toMatch(/git diff origin\/main\.\.\.HEAD/);
+    expect(run.reviews.map((r) => [r.author, r.verdict, r.final]).sort()).toEqual([
+      ["consolidator", "pass", true],
+      ["reviewer-a", "pass", false],
+      ["reviewer-b", "pass", false],
+    ]);
+    // The Review Brief summarises the consolidated Review only.
+    const [brief] = codeHost.pullRequests[0]!.comments;
+    expect(brief).toContain("## Review (pass)");
+    expect(brief).toContain("One Review.");
+    expect(brief).not.toContain("B's remark.");
+  });
+
+  it("sends the Developer the Consolidator's Review, not the Reviewers', when changes are requested, and checks again", async () => {
+    const { project: p } = await project(["true"]);
+    claude.use(claudeScript(review("changes requested", "Summary: A wants more.\n\nFindings:\n- A only."), [consolidated("changes requested", "Summary: Confirmed.\n\nFindings:\n- fix.txt:1 - the real problem."), consolidated("pass")]));
+    reviewerBAnswers(review("pass", "Summary: B passes it."));
+
+    const run = await bugfix(p, { review: "duo" });
+
+    expect(developers()).toHaveLength(2);
+    const rework = developers()[1]!.prompt;
+    expect(rework).toContain("the real problem.");
+    expect(rework).not.toContain("A only.");
+    expect(run.checks.map((c) => c.attempt)).toEqual([1, 2]);
+    expect(consolidators()).toHaveLength(2);
+    expect(run.steps.find((s) => s.id === "review")).toMatchObject({ status: "done", attempts: 2 });
+    expect(run.gates).toMatchObject([{ kind: "final", decision: null }]);
+  });
+
+  it("asks the Consolidator again when its Review has no usable verdict, or a disagreement without a recommendation", async () => {
+    const { project: p } = await project();
+    claude.use(claudeScript(review("pass"), ["No verdict here.", consolidated("disagreement"), consolidated("pass")]));
+    reviewerBAnswers(review("pass"));
+
+    const run = await bugfix(p, { review: "duo" });
+
+    expect(consolidators()).toHaveLength(3);
+    expect(consolidators()[1]!.prompt).toContain("does not end with a verdict line");
+    expect(consolidators()[2]!.prompt).toContain("Recommendation:");
+    expect(run.reviews.filter((r) => r.final)).toHaveLength(1);
+    expect(run.gates).toMatchObject([{ kind: "final", decision: null }]);
+  });
+
+  describe("a disagreement the Consolidator cannot settle", () => {
+    async function disagreed(f: Forge = forge) {
+      const { project: p } = await project();
+      claude.use(claudeScript(review("pass", "Summary: A is fine with it."), [disagreement(), consolidated("pass")]));
+      reviewerBAnswers(review("changes requested", "Summary: B wants the flag.\n\nFindings:\n- fix.txt:1 - needs the flag."));
+      return bugfix(p, { review: "duo", f });
+    }
+
+    it("opens a review Gate with the recommendation and both Reviews, and waits for the human", async () => {
+      const run = await disagreed();
+
+      expect(run.state).toBe("waiting");
+      expect(open(run)).toMatchObject({ kind: "review", stepId: "review", actions: ["approve", "reject", "abandon"], redo: null });
+      expect(open(run)!.reason).toContain("Keep the double jump behind the flag");
+      const evidence = open(run)!.evidence!;
+      expect(evidence).toContain("Reviewer A (reviewer-a)");
+      expect(evidence).toContain("A is fine with it.");
+      expect(evidence).toContain("Reviewer B (reviewer-b)");
+      expect(evidence).toContain("B wants the flag.");
+      expect(evidence).toContain("The Reviewers disagree about the flag.");
+      expect(run.reviews.find((r) => r.final)).toMatchObject({ author: "consolidator", verdict: "disagreement" });
+      expect(stepsOf(run)).toEqual(["developer:done", "checks:done", "review:running", "publish:waiting", "final:waiting"]);
+      expect(codeHost.pullRequests).toHaveLength(0);
+    });
+
+    it("goes on as if the Review passed when the human approves, without reviewing again, and says so in the Review Brief", async () => {
+      const run = await disagreed();
+
+      await forge.decideGate({ gateId: open(run)!.id, action: "approve" });
+      await forge.whenIdle();
+
+      const after = await forge.getRun(run.id);
+      expect(reviewers()).toHaveLength(1);
+      expect(consolidators()).toHaveLength(1);
+      expect(codex.steps).toHaveLength(1);
+      expect(after.iteration).toBe(run.iteration);
+      expect(stepsOf(after)).toEqual(["developer:done", "checks:done", "review:done", "publish:done", "final:running"]);
+      expect(after.gates.map((g) => [g.kind, g.decision])).toEqual([["review", "approve"], ["final", null]]);
+      expect(codeHost.pullRequests[0]!.comments[0]).toContain("## Review (disagreement, approved by the human)");
+    });
+
+    it("sends the Developer back with the human's Feedback when they reject it, as changes requested would, and reviews the rework", async () => {
+      const run = await disagreed();
+
+      await expect(forge.decideGate({ gateId: open(run)!.id, action: "reject" })).rejects.toThrow(/Feedback/);
+      await forge.decideGate({ gateId: open(run)!.id, action: "reject", feedback: "Put the double jump behind the flag." });
+      await forge.whenIdle();
+
+      const after = await forge.getRun(run.id);
+      expect(developers()).toHaveLength(2);
+      expect(developers()[1]!.prompt).toContain("Put the double jump behind the flag.");
+      expect(developers()[1]!.prompt).toContain("The Reviewers disagree about the flag.");
+      // The Iteration is the same: a Review rejection is a loop-back, which counts against the Step's attempts.
+      expect(after.iteration).toBe(run.iteration);
+      expect(after.steps.find((s) => s.id === "review")).toMatchObject({ status: "done", attempts: 2 });
+      expect(reviewers()).toHaveLength(2);
+      expect(consolidators()).toHaveLength(2);
+      expect(after.gates.map((g) => [g.kind, g.decision])).toEqual([["review", "reject"], ["final", null]]);
+      expect(after.gates[0]!.feedback).toBe("Put the double jump behind the flag.");
+    });
+
+    it("stops the Run when the human abandons it", async () => {
+      const run = await disagreed();
+
+      await forge.decideGate({ gateId: open(run)!.id, action: "abandon" });
+      await forge.whenIdle();
+
+      expect(await forge.getRun(run.id)).toMatchObject({ state: "abandoned" });
+      expect(codeHost.pullRequests).toHaveLength(0);
+    });
+
+    it("does not offer the choices of other Gates", async () => {
+      const run = await disagreed();
+
+      await expect(forge.decideGate({ gateId: open(run)!.id, action: "retry" })).rejects.toThrow(/review Gate cannot be retried/);
+    });
+  });
+
+  describe("when a Reviewer fails", () => {
+    it("opens one Escalation for Reviewer A when both Reviewers fail, and the Consolidator does not run", async () => {
+      const { project: p } = await project();
+      claude.use(claudeScript(() => ({ status: "failed", error: "A is broken" }), [consolidated("pass")]));
+      codex.use(() => ({ status: "failed", error: "B is broken" }));
+
+      const run = await bugfix(p, { review: "duo" });
+
+      expect(run.gates).toHaveLength(1);
+      expect(run.gates[0]).toMatchObject({ kind: "escalation", stepId: "review", reason: "Reviewer A (reviewer-a) failed.", evidence: "A is broken" });
+      expect(run.state).toBe("waiting");
+      expect(consolidators()).toHaveLength(0);
+      expect(run.steps.find((s) => s.id === "review")).toMatchObject({ status: "failed" });
+    });
+
+    it("names Reviewer B when it alone fails, and a retry reviews again", async () => {
+      const { project: p } = await project();
+      claude.use(claudeScript(review("pass"), [consolidated("pass")]));
+      let tries = 0;
+      codex.use(() => (tries++ === 0 ? { status: "failed", error: "B is broken" } : { status: "succeeded", summary: review("pass") }));
+      const run = await bugfix(p, { review: "duo" });
+      expect(run.gates).toMatchObject([{ kind: "escalation", reason: "Reviewer B (reviewer-b) failed.", evidence: "B is broken" }]);
+
+      await forge.decideGate({ gateId: open(run)!.id, action: "retry" });
+      await forge.whenIdle();
+
+      const after = await forge.getRun(run.id);
+      expect(after.gates.map((g) => [g.kind, g.decision])).toEqual([["escalation", "retry"], ["final", null]]);
+      expect(consolidators()).toHaveLength(1);
+    });
+
+    it("pauses the Run, with no Gate, when Reviewer A runs out of Quota and Reviewer B fails", async () => {
+      const { project: p } = await project();
+      claude.use(claudeScript(() => ({ status: "quota_exhausted", resetsAt: new Date("2031-01-01T00:00:00Z") }), [consolidated("pass")]));
+      codex.use(() => ({ status: "failed", error: "B is broken" }));
+
+      const run = await bugfix(p, { review: "duo" });
+
+      expect(run.state).toBe("paused");
+      expect(run.gates).toEqual([]);
+      await forge.abandonRun(run.id);
+    });
+
+    it("opens just one Escalation, naming the seat, when both seats are unusable", async () => {
+      const { project: p } = await project();
+      const f = forgeWith({ seats: { "reviewer-a": { runner: "gemini" }, "reviewer-b": { runner: "gemini" } } });
+      claude.use(claudeScript(review("pass"), [consolidated("pass")]));
+
+      const run = await bugfix(p, { review: "duo", f });
+
+      expect(run.gates).toHaveLength(1);
+      expect(run.gates[0]!.reason).toContain('seat "reviewer-a"');
+      expect(consolidators()).toHaveLength(0);
+    });
+  });
+
+  it("holds the Reviewers to read-only: a Reviewer that changes the code is stopped with an Escalation", async () => {
+    const { project: p } = await project();
+    claude.use(claudeScript(review("pass"), [consolidated("pass")]));
+    codex.use((step) => {
+      writeFileSync(join(step.cwd, "fix.txt"), "edited by Reviewer B\n");
+      return { status: "succeeded", summary: review("pass") };
+    });
+
+    const run = await bugfix(p, { review: "duo" });
+
+    expect(escalation(run)).toMatchObject({ stepId: "review", reason: expect.stringContaining("changed files outside the Run Notes"), evidence: "fix.txt" });
+    expect(codeHost.pullRequests).toHaveLength(0);
+  });
+
+  it("starts the duo again after a restart of Forgequor, keeping one Review per author", async () => {
+    const { project: p } = await project();
+    let release!: () => void;
+    const hold = new Promise<void>((r) => (release = r));
+    let reached!: () => void;
+    const inB = new Promise<void>((r) => (reached = r));
+    claude.use(claudeScript(review("pass", "Summary: A, first time."), [consolidated("pass")]));
+    codex.use(async () => {
+      reached();
+      await hold;
+      return { status: "failed", error: "the old process is gone" };
+    });
+    const started = await forge.startRun({ projectId: p.id, workflow: "bugfix", task: "The player cannot jump twice.", review: "duo" });
+    await inB;
+    expect(consolidators()).toHaveLength(0);
+
+    reviewerBAnswers(review("pass", "Summary: B, second time."));
+    const restarted = forgeWith({});
+    await restarted.recoverAfterRestart();
+    await restarted.whenIdle();
+
+    const run = await restarted.getRun(started.id);
+    expect(run.steps.find((s) => s.id === "review")).toMatchObject({ status: "done", attempts: 1 });
+    expect(run.reviews.map((r) => r.author).sort()).toEqual(["consolidator", "reviewer-a", "reviewer-b"]);
+    expect(run.reviews.filter((r) => r.final)).toHaveLength(1);
+    expect(run.attempts.filter((a) => a.step === "reviewer-b").map((a) => a.status)).toEqual(["failed", "succeeded"]);
+    expect(developers()).toHaveLength(1);
+    expect(run.gates).toMatchObject([{ kind: "final", decision: null }]);
+    release();
+    await forge.whenIdle();
+  });
+
+  it("resumes at the review Gate after a restart without reviewing again", async () => {
+    const { project: p } = await project();
+    claude.use(claudeScript(review("pass"), [disagreement()]));
+    reviewerBAnswers(review("changes requested"));
+    const run = await bugfix(p, { review: "duo" });
+
+    const restarted = forgeWith({});
+    await restarted.recoverAfterRestart();
+    await restarted.whenIdle();
+    expect(open(await restarted.getRun(run.id))).toMatchObject({ kind: "review" });
+    await restarted.decideGate({ gateId: open(run)!.id, action: "approve" });
+    await restarted.whenIdle();
+
+    expect(consolidators()).toHaveLength(1);
+    expect((await restarted.getRun(run.id)).gates.map((g) => g.kind)).toEqual(["review", "final"]);
+  });
+
+  it("works through the Runner each seat is set to in the environment, the Consolidator's included", async () => {
+    const { project: p } = await project();
+    const f = forgeWith({
+      seats: seatSettingsFromEnv({ FORGEQUOR_REVIEWER_A_RUNNER: "codex", FORGEQUOR_REVIEWER_B_RUNNER: "claude", FORGEQUOR_CONSOLIDATOR_RUNNER: "codex", FORGEQUOR_CONSOLIDATOR_MODEL: "gpt-consolidate" }),
+    });
+    claude.use(claudeScript(review("pass"), [consolidated("pass")]));
+    codex.use((step) => ({ status: "succeeded", summary: isConsolidator(step) ? consolidated("pass") : review("pass") }));
+
+    const run = await bugfix(p, { review: "duo", f });
+
+    expect(run.attempts.filter((a) => a.stepId === "review").map((a) => [a.step, a.runner, a.model ?? null]).sort()).toEqual([
+      ["consolidator", "codex", "gpt-consolidate"],
+      ["reviewer-a", "codex", null],
+      ["reviewer-b", "claude", null],
+    ]);
+    expect(codex.steps.every((s) => s.readonly)).toBe(true);
+  });
+
+  it("uses Claude for Reviewer A and the Consolidator and Codex for Reviewer B by default", async () => {
+    const { project: p } = await project();
+    claude.use(claudeScript(review("pass"), [consolidated("pass")]));
+    reviewerBAnswers(review("pass"));
+
+    const run = await bugfix(p, { review: "duo" });
+
+    const runnerOf = (name: string) => run.attempts.find((a) => a.step === name)!.runner;
+    expect([runnerOf("reviewer-a"), runnerOf("reviewer-b"), runnerOf("consolidator")]).toEqual(["claude", "codex", "claude"]);
+  });
+});
+
+describe("parseConsolidation", () => {
+  it("accepts a disagreement only with a recommendation, and reads it", () => {
+    expect(parseConsolidation("Summary: x.\n\nVerdict: disagreement")).toHaveProperty("problem");
+    const ok = parseConsolidation("Summary: x.\n\nRecommendation: do y.\n\nVerdict: disagreement");
+    expect(ok).toMatchObject({ verdict: "disagreement" });
+    expect(recommendationOf((ok as { body: string }).body)).toBe("do y.");
+  });
+
+  it("still tells a Reviewer that disagreement is not its to give", () => {
+    expect(parseReview("Summary: x.\n\nRecommendation: y.\n\nVerdict: disagreement")).toMatchObject({ problem: expect.stringContaining('"pass" or "changes requested"') });
   });
 });
