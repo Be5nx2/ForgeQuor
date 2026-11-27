@@ -52,6 +52,14 @@ _Avoid_: Test, CI, validation
 A command a **Project** declares to prepare a **Run**'s new worktree (installing dependencies, linking skills) before the **Developer** starts; a failing one opens an **Escalation** and the **Developer** never starts.
 _Avoid_: Bootstrap, install step, init
 
+**Implementation Plan**:
+The Architect's note, in the **Run Notes**, of how the change will be built: the modules it touches, where it will be tested, and the order of small steps the Developer follows.
+_Avoid_: Design doc, technical spec, plan
+
+**Review**:
+A Reviewer's findings on a **Run**'s change, against the **Project**'s standards and the **Run**'s spec, ending in pass or changes requested.
+_Avoid_: Verdict (that is one **Asset**'s decision at an **Asset Gate**), code review report
+
 **Review Brief**:
 The comment a **Run** posts on its pull request for the final **Gate**: what the change does, where to look closely, and what to test.
 _Avoid_: PR summary, PR description, review comment

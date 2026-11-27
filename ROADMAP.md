@@ -28,6 +28,13 @@ The engine behind every Workflow, with no change visible to the human: a deeper 
 Griller with a **Conversation Gate** (it writes the Project's glossary and ADRs and produces Asset Requests), Spec Writer, Architect, solo or duo review (chosen at Run launch) with **Consolidator** (an unsettled reviewer disagreement opens a **Gate** with its recommendation), and the default `feature` and `bugfix` Workflows. `feature`: Griller ⇄ human → spec Gate → Spec Writer → Gate → Architect → Artist → Asset Gate (skipped without Asset Requests) → Developer → Checks → Reviewer(s) + Consolidator ⇄ Developer → pull request + Review Brief → final Gate.
 
 - Spec: after M3a.
+- Decided in the grilling (round 1):
+  - the Griller writes its transcript to the Run Notes, the Project's glossary and ADRs as Deliverables, and Asset Requests in a structured Run Note that Forgequor validates like launch input (fresh fetch), sending invalid ones back to the Griller;
+  - Conversation Gate: one round of questions at a time, the human answers in one message, the Griller resumes the same Claude session (the Claude Runner gains session persistence for this only), proposes a summary at the end and the human confirms or goes on; the transcript is saved at each exchange;
+  - that confirmation is the first decision point; then the Spec Writer (`to-spec`, no questions) writes `docs/specs/<slug>.md` as a Deliverable, no tickets, and a spec Gate shows it rendered: approve, or reject with Feedback to redo it;
+  - the Architect writes an Implementation Plan to the Run Notes (modules, test seams, order of small steps) and a Project ADR when warranted; no Gate after it;
+  - review: solo is one Reviewer on Claude; duo is two read-only Reviewers in parallel (Claude, and Codex in its read-only sandbox) plus the Consolidator, who checks each remark against the code and opens a Gate on an unsettled disagreement; each Reviewer uses `code-review` (standards and spec); changes requested go back to the Developer, capped by `max_attempts`, then an Escalation;
+  - `bugfix`: a bug description, the Developer with `diagnosing-bugs` writing a failing test first, Checks, solo review by default (duo at launch), pull request, final Gate.
 
 ## Next
 
