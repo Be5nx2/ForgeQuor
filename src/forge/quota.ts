@@ -48,6 +48,17 @@ export function createQuotaKeeper(deps: QuotaKeeperDeps): QuotaKeeper {
   /** Vendors a Step finished on while they were being read: that reading may predate it, so they are read once more. */
   const again = new Set<QuotaVendor>();
 
+  /**
+   * A Step's own reading is often partial (a reset time, no percent): what it leaves unknown keeps the value last read,
+   * so the bar does not blink to "?" until the full reading that follows.
+   */
+  async function recordStep(vendor: QuotaVendor, r: QuotaReading) {
+    const { rows } = await pool.query("SELECT * FROM quota_readings WHERE vendor = $1", [vendor]);
+    const before = rows[0] ? toReading(rows[0]) : null;
+    const window = (now: QuotaReading["fiveHour"], was?: QuotaReading["fiveHour"]) => ({ percentUsed: now.percentUsed ?? was?.percentUsed ?? null, resetsAt: now.resetsAt ?? was?.resetsAt ?? null });
+    await record(vendor, { ...r, fiveHour: window(r.fiveHour, before?.fiveHour), weekly: window(r.weekly, before?.weekly) });
+  }
+
   async function record(vendor: QuotaVendor, r: QuotaReading) {
     await pool.query(
       `INSERT INTO quota_readings (vendor, five_hour_percent, five_hour_resets_at, weekly_percent, weekly_resets_at, exhausted, read_at)
@@ -91,7 +102,7 @@ export function createQuotaKeeper(deps: QuotaKeeperDeps): QuotaKeeper {
         async run(step, onEvent) {
           const result = await runner.run(step, onEvent);
           try {
-            if (result.quota) await record(vendor, result.quota);
+            if (result.quota) await recordStep(vendor, result.quota);
           } catch (e) {
             console.error(`Could not record the ${vendor} Quota:`, e);
           }

@@ -144,7 +144,7 @@ describe("Quota readings", () => {
   it("reads Claude's Quota again after every Claude Step, keeping the Step's own partial reading until then", async () => {
     const claude = askable(reading(12), reading(40));
     const forge = forgeWith(claude);
-    claude.use(() => ({ status: "succeeded", summary: "done", quota: reading(null, { weekly: { percentUsed: null, resetsAt: null } }) }));
+    claude.use(() => ({ status: "succeeded", summary: "done", quota: reading(null, { weekly: { percentUsed: null, resetsAt: null } }) /* a reset time only */ }));
     const heard: RunUpdate[] = [];
     forge.subscribe((u) => u.type === "quota" && heard.push(u));
     await (await forge.startQuotaReading())();
@@ -152,7 +152,7 @@ describe("Quota readings", () => {
     await developerStep(forge);
 
     expect(claude.asked).toBe(2);
-    expect(heard.map((u) => u.type === "quota" && u.reading.fiveHour.percentUsed)).toEqual([12, null, 40]);
+    expect(heard.map((u) => u.type === "quota" && u.reading.fiveHour.percentUsed)).toEqual([12, 12, 40]);
     expect((await forge.quota())[0]!.reading).toMatchObject({ fiveHour: { percentUsed: 40 } });
   });
 
