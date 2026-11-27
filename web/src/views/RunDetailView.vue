@@ -167,7 +167,7 @@ onUnmounted(() => stopFollowing?.());
       <li v-for="a in run.attempts" :key="a.id">
         <strong>{{ a.step }}</strong><span v-if="a.assetId"> · {{ run.assets.find((x) => x.id === a.assetId)?.name }}</span> · iteration {{ a.iteration }} · attempt {{ a.attempt }} · <span class="badge">{{ a.status }}</span>
         <div class="muted">
-          {{ a.runner }}<span v-if="a.model"> ({{ a.model }})</span> · {{ new Date(a.startedAt).toLocaleString() }}
+          <span aria-label="Runner and model">{{ a.runner }} · {{ a.model ?? "—" }}</span> · {{ new Date(a.startedAt).toLocaleString() }}
           <span v-if="a.endedAt"> → {{ new Date(a.endedAt).toLocaleTimeString() }}</span>
         </div>
         <ul v-if="a.status === 'running'" class="live" aria-label="Live progress">

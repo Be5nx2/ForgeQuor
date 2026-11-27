@@ -15,3 +15,6 @@ export class AssetNotFoundError extends Error {}
 
 /** A Team setting the environment holds, so the Team page cannot change it. */
 export class SeatLockedError extends Error {}
+
+/** A per-Run seat override naming an unknown seat or Runner, or shaped wrong: refused as the Team page refuses it. */
+export class InvalidSeatError extends InvalidInputError {}

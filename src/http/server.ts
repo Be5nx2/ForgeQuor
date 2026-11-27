@@ -6,6 +6,7 @@ import {
   AssetNotFoundError,
   GateError,
   InvalidInputError,
+  InvalidSeatError,
   RegistrationError,
   RunNotFoundError,
   RunStateError,
@@ -14,6 +15,7 @@ import {
   type Forge,
   type GateAction,
   type ReviewMode,
+  type SeatSettings,
   type Verdict,
   type RunState,
 } from "../forge/forge.js";
@@ -143,15 +145,17 @@ export async function createServer(deps: {
       state: req.query.state || undefined,
     }),
   );
-  app.post<{ Body: { projectId?: number; task?: string; title?: string; trackerRef?: string; workflow?: string; assets?: AssetRequest[]; review?: ReviewMode } }>(
+  app.post<{ Body: { projectId?: number; task?: string; title?: string; trackerRef?: string; workflow?: string; assets?: AssetRequest[]; review?: ReviewMode; seats?: SeatSettings } }>(
     "/api/runs",
     async (req, reply) => {
-      const { projectId, task, title, trackerRef, workflow, assets, review } = req.body ?? {};
+      const { projectId, task, title, trackerRef, workflow, assets, review, seats } = req.body ?? {};
       // An `assets` Run takes Asset Requests instead of a task; the Forge core says what is wrong with them.
       if (!projectId || (!task?.trim() && !assets)) return reply.code(400).send({ error: "projectId and a task (or Asset Requests) are required." });
       try {
-        return reply.code(201).send(await deps.forge.startRun({ projectId, task, title, trackerRef, workflow, assets, review }));
+        return reply.code(201).send(await deps.forge.startRun({ projectId, task, title, trackerRef, workflow, assets, review, seats }));
       } catch (e: any) {
+        if (e instanceof InvalidSeatError) return reply.code(400).send({ error: e.message });
+        if (e instanceof SeatLockedError) return reply.code(409).send({ error: e.message });
         return reply.code(422).send({ error: e.message });
       }
     },
