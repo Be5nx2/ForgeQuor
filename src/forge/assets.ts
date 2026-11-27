@@ -7,6 +7,7 @@ import { parseReferences } from "./art-direction.js";
 import { AssetNotFoundError, InvalidInputError } from "./errors.js";
 import type { GateKindModule } from "./gates.js";
 import { runAgentStep } from "./step.js";
+import { loadBuiltInWorkflow } from "./workflow-definition.js";
 import type { RunInput, RunPlan, Workflow, WorkflowContext } from "./workflow.js";
 import type { Asset, AssetKind, AssetRequest } from "./types.js";
 import { commitPaths, existsAtHead, repositoryPath, RUN_NOTES_DIR, slugify } from "./workspace.js";
@@ -371,6 +372,8 @@ export function createAssetsWorkflow(store: AssetStore): Workflow {
   return {
   name: "assets",
   inputs: ["assets"],
+  // Frozen with each Run; the Workflow still runs as code until m3-05 moves it to the engine.
+  definition: loadBuiltInWorkflow("assets"),
 
   plan(input: RunInput): RunPlan {
     const { requests: assets, ...launch } = launchAssetRequests(store, input.assets);

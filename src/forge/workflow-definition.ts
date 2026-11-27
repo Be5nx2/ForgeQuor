@@ -1,9 +1,18 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { GateKind } from "./types.js";
 import { isMap, isScalar, isSeq, LineCounter, parseDocument, type Node } from "yaml";
 
 /** Where Forgequor's own Workflow files live, one `<name>.yaml` per built-in Workflow. */
 export const BUILT_IN_WORKFLOWS_DIR = fileURLToPath(new URL("./workflows/", import.meta.url));
+
+/** The definition of a built-in Workflow, from its YAML file; a built-in file that does not validate is a bug, so it throws. */
+export function loadBuiltInWorkflow(name: string): WorkflowDefinition {
+  const parsed = parseWorkflow(readFileSync(join(BUILT_IN_WORKFLOWS_DIR, `${name}.yaml`), "utf8"));
+  if (!parsed.ok) throw new Error(`The built-in Workflow ${name} is invalid:\n${parsed.errors.map((e) => `  ${e.path}: ${e.message}`).join("\n")}`);
+  return parsed.definition;
+}
 
 /** What a Run can be given: by the human at launch, or by a Step that produces it. */
 export type WorkflowInput = "task" | "assets";

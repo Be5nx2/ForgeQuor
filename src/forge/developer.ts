@@ -1,8 +1,9 @@
 import { rmSync } from "node:fs";
 import { join } from "node:path";
-import { commitLeftovers, readReviewBrief, REVIEW_BRIEF_FILE, RUN_NOTES_DIR, runNotesInBranch } from "./workspace.js";
+import { commitLeftovers, REVIEW_BRIEF_FILE, RUN_NOTES_DIR } from "./workspace.js";
 import { describeFailure, passed, runChecks } from "./checks.js";
-import { runAgentStep } from "./step.js";
+import type { AgentModule } from "./step-types.js";
+import { loadBuiltInWorkflow } from "./workflow-definition.js";
 import type { Workflow } from "./workflow.js";
 
 /** The Developer Agent's standing instructions. */
@@ -29,67 +30,45 @@ function deriveTitle(task: string): string {
   return first.length > 60 ? `${first.slice(0, 57).trimEnd()}...` : first;
 }
 
-/** After this many failed Checks the Developer's extra attempts are used up (1 try + 2 extra). */
-const MAX_DEVELOPER_ATTEMPTS = 3;
+/** The Developer Agent: the Project's setup commands once, then the task (with Feedback and the Check that failed). */
+export const developerAgent: AgentModule = {
+  name: "developer",
+  seat: "developer",
+  instructions: DEVELOPER_INSTRUCTIONS,
+  async before(ctx, attempt) {
+    const { run, project, worktreePath, stop, records } = ctx;
+    if (!(await records.setupDone())) {
+      const outcomes = await runChecks(project.setup, worktreePath, { timeoutMs: ctx.checkTimeoutMs, signal: stop });
+      if (!(await ctx.stillRunning())) return false;
+      const failed = outcomes.find((c) => !passed(c));
+      if (failed) {
+        await ctx.openGate("escalation", "A setup command failed, so the Developer did not start.", describeFailure(failed));
+        return false;
+      }
+      await records.markSetupDone();
+    }
+    // The previous Iteration's Review Brief must not be posted again as this one's.
+    if (run.iteration > 1 && attempt.number === 1) rmSync(join(worktreePath, REVIEW_BRIEF_FILE), { force: true });
+    return true;
+  },
+  async prompt(ctx, attempt) {
+    return developerPrompt(ctx.run.task, attempt.sentBack ?? undefined, await ctx.records.earlierFeedbacks());
+  },
+  async after(ctx) {
+    await commitLeftovers(ctx.worktreePath, "chore: commit work left by the Developer");
+  },
+};
 
-/** The `developer` Workflow: setup, Developer, Checks (retrying the Developer), pull request, then the final Gate. */
+/**
+ * The `developer` Workflow, from its YAML: the Developer, Checks (sending a failure back to the Developer), the pull
+ * request, then the final Gate.
+ */
 export const developerWorkflow: Workflow = {
   name: "developer",
   inputs: ["task"],
+  definition: loadBuiltInWorkflow("developer"),
   plan({ task, title }) {
     if (!task?.trim()) throw new Error("A Run needs a task.");
     return { task: task.trim(), title: title?.trim() || deriveTitle(task) };
-  },
-  async run(ctx) {
-    const { run, project, worktreePath, defaultBranch, stop, records } = ctx;
-    if (!(await records.setupDone())) {
-      const outcomes = await runChecks(project.setup, worktreePath, { timeoutMs: ctx.checkTimeoutMs, signal: stop });
-      if (!(await ctx.stillRunning())) return;
-      const failed = outcomes.find((c) => !passed(c));
-      if (failed) return ctx.openGate("escalation", "A setup command failed, so the Developer did not start.", describeFailure(failed));
-      await records.markSetupDone();
-    }
-
-    let { attempt, failedCheck, skipDeveloper, checksDone } = await records.resumePoint(project.checks.length);
-    while (!checksDone) {
-      if (attempt > MAX_DEVELOPER_ATTEMPTS) {
-        return ctx.openGate("escalation", `A Check still fails after ${MAX_DEVELOPER_ATTEMPTS} attempts.`, failedCheck);
-      }
-      if (!skipDeveloper) {
-        // The previous Iteration's Review Brief must not be posted again as this one's.
-        if (run.iteration > 1 && attempt === 1) rmSync(join(worktreePath, REVIEW_BRIEF_FILE), { force: true });
-        const done = await runAgentStep(ctx, ctx.agents.developer, {
-          name: "developer",
-          attempt,
-          instructions: DEVELOPER_INSTRUCTIONS,
-          prompt: developerPrompt(run.task, failedCheck, await records.earlierFeedbacks()),
-        });
-        if (!done) return;
-
-        await commitLeftovers(worktreePath, "chore: commit work left by the Developer");
-      }
-      skipDeveloper = false;
-
-      const outcomes = await runChecks(project.checks, worktreePath, { timeoutMs: ctx.checkTimeoutMs, signal: stop });
-      if (!(await ctx.stillRunning())) return;
-      await records.recordChecks(attempt, outcomes);
-      ctx.changed();
-      const failed = outcomes.find((c) => !passed(c));
-      if (!failed) break;
-      failedCheck = describeFailure(failed);
-      if (attempt === MAX_DEVELOPER_ATTEMPTS) {
-        return ctx.openGate("escalation", `A Check still fails after ${attempt} attempts.`, failedCheck);
-      }
-      attempt++;
-    }
-
-    if (!(await ctx.stillRunning())) return;
-    const notes = await runNotesInBranch(worktreePath, defaultBranch);
-    if (notes.length) {
-      return ctx.openGate("escalation", "A commit adds Run Notes, so the branch was not pushed.", notes.join("\n"));
-    }
-    const pr = await ctx.publishPullRequest(() => readReviewBrief(worktreePath) ?? "The Developer wrote no Review Brief for this pull request.");
-    if (!pr) return;
-    await ctx.openGate("final", "The Developer finished.");
   },
 };

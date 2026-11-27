@@ -48,7 +48,7 @@ The engine behind every Workflow, with no change visible to the human: a deeper 
     - errors, each with its location and all at once: duplicate id, unknown type, unknown id in `needs` or `on_reject`, a `needs` cycle, Steps that can run together without both being read-only, a `when` input neither given at launch nor produced by a Step it depends on;
     - the built-in `developer` and `assets` YAML files ship with Forgequor and validate;
     - tested directly at the module's interface; a pure-JavaScript YAML parser is the only new dependency.
-- [ ] `m3-04` **The engine runs `developer` from YAML**: Runs follow a frozen definition, starting with `developer`.
+- [x] `m3-04` **The engine runs `developer` from YAML**: Runs follow a frozen definition, starting with `developer`.
   - Spec: `docs/specs/m3a-workflow-engine.md`
   - Blocked by: `m3-02`, `m3-03`
   - Acceptance:

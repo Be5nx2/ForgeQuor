@@ -78,7 +78,7 @@ onUnmounted(() => stopFollowing?.());
       <p class="progress" aria-label="Progress">
         {{ drawnCount }} of {{ run.assets.length }} drawn<span v-if="drawing"> · the Artist is drawing <strong>{{ drawing.name }}</strong> (Asset {{ drawing.position + 1 }}, attempt {{ runningAttempt?.attempt }})</span>
       </p>
-      <p v-if="drawing" class="muted">The Artist's live events are listed under Steps.</p>
+      <p v-if="drawing" class="muted">The Artist's live events are listed under Step attempts.</p>
       <AssetGallery
         :run-id="run.id"
         :iteration="run.iteration"
@@ -86,6 +86,19 @@ onUnmounted(() => stopFollowing?.());
         :gate="run.gates.find((g) => g.kind === 'asset' && !g.decidedAt)"
         @decided="load"
       />
+    </template>
+
+    <template v-if="run.steps.length">
+      <h3>Steps</h3>
+      <ol class="steps" aria-label="Workflow steps">
+        <li v-for="s in run.steps" :key="s.id">
+          <strong>{{ s.id }}</strong>
+          <span class="muted"> · {{ s.type }}<template v-if="s.detail"> {{ s.detail }}</template></span>
+          <span class="badge">{{ s.status }}</span>
+          <span v-if="s.attempts" class="muted"> · {{ s.attempts }} {{ s.attempts === 1 ? "pass" : "passes" }}</span>
+          <span v-if="s.status === 'waiting' && s.needs.length" class="muted"> · after {{ s.needs.join(", ") }}</span>
+        </li>
+      </ol>
     </template>
 
     <h3>Iterations</h3>
@@ -122,7 +135,7 @@ onUnmounted(() => stopFollowing?.());
       </li>
     </ul>
 
-    <h3>Steps</h3>
+    <h3>Step attempts</h3>
     <p v-if="!run.attempts.length" class="muted">None yet.</p>
     <ul>
       <li v-for="a in run.attempts" :key="a.id">
