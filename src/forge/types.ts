@@ -1,7 +1,11 @@
 /**
  * The shapes the Forge interface takes and returns, and so the shapes of the HTTP API. This module imports nothing: the
  * web UI type-checks against it too, so the server and the UI can never disagree (over JSON, a Date arrives as a string).
+ * It imports only types, and only from the Runner port, which imports nothing.
  */
+import type { QuotaReading } from "../runner/runner.js";
+
+export type { QuotaReading, QuotaWindow } from "../runner/runner.js";
 
 export interface Project {
   id: number;
@@ -242,10 +246,21 @@ export interface OpenGate extends Gate {
   projectName: string;
 }
 
-/** What a subscriber hears about live: a Step's progress, or that a Run changed (state, Steps, Checks, Gates, pull request). */
+/** The tools whose Quota Forgequor follows. */
+export type QuotaVendor = "claude" | "codex";
+
+/** What Forgequor knows of one vendor's Quota: its latest reading (null while it has none) and how old that is. */
+export interface QuotaStatus {
+  vendor: QuotaVendor;
+  reading: QuotaReading | null;
+  ageSeconds: number | null;
+}
+
+/** What a subscriber hears about live: a Step's progress, that a Run changed (state, Steps, Checks, Gates, pull request), or a new Quota Reading. */
 export type RunUpdate =
   | { type: "progress"; runId: number; attemptId: number; kind: "text" | "tool" | "other"; summary: string }
-  | { type: "changed"; runId: number };
+  | { type: "changed"; runId: number }
+  | { type: "quota"; vendor: QuotaVendor; reading: QuotaReading };
 
 export type AssetKind = "sprite" | "tile" | "animation";
 /** Where an Asset is: not drawn yet, being drawn, drawn and waiting for the human's verdict, approved, or rejected (to be redone in the next Iteration). */

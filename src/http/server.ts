@@ -169,7 +169,9 @@ export async function createServer(deps: {
       unsubscribe();
     });
   });
-  app.get("/api/gates", async () => deps.forge.listOpenGates());
+  // Both vendors' latest Quota Reading with its age: the Quota bars.
+  app.get("/api/quota", async () => deps.forge.quota());
+  app.get("/api/gates",async () => deps.forge.listOpenGates());
   // The merge list: Approved Runs whose pull request waits for the human's merge.
   app.get("/api/approved-runs", async () => deps.forge.listApprovedRuns());
   app.post<{ Params: { id: string }; Body: { action?: GateAction; feedback?: string; verdicts?: Verdict[]; target?: string; message?: string } }>("/api/gates/:id/decision", async (req, reply) => {

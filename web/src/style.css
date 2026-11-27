@@ -53,3 +53,8 @@ form.filters select { flex: 1 1 12rem; min-width: 0; max-width: 100%; }
 .markdown blockquote { border-left: 3px solid #8886; padding-left: 0.75rem; color: inherit; opacity: 0.85; }
 .markdown table { border-collapse: collapse; }
 .markdown th, .markdown td { border: 1px solid #8884; padding: 0.2rem 0.5rem; text-align: left; }
+
+.quota-bar { display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; font-size: 0.85rem; background: #101d2d; border-radius: 6px; padding: 0.4rem 0.75rem; margin-bottom: 0.5rem; }
+.quota { display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; align-items: baseline; }
+.quota.unknown { opacity: 0.6; }
+.quota.exhausted strong { color: #ff8c24; }
