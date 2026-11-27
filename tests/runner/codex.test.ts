@@ -282,4 +282,12 @@ describe("Codex Runner", () => {
       expect(result).toMatchObject({ status: "failed", error: expect.stringContaining("cancelled") });
     });
   });
+
+  it("refuses a Step that asks for a session, which it cannot keep", async () => {
+    const fake = createFakeCli({ stdout: [] }, "codex");
+
+    const result = await createCodexRunner({ env: fake.env }).run({ ...step(), session: { start: true } }, () => {});
+
+    expect(result).toMatchObject({ status: "failed", error: expect.stringContaining("cannot keep a session") });
+  });
 });

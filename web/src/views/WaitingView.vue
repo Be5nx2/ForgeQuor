@@ -41,7 +41,7 @@ onUnmounted(() => stopFollowing?.());
   <ul>
     <li v-for="g in gates" :key="g.id" class="clickable" @click="emit('open', g.runId)">
       <strong>{{ g.runTitle }}</strong>
-      <span class="badge">{{ g.kind === "final" ? "final Gate" : g.kind === "asset" ? "Asset Gate" : g.kind === "review" ? "review Gate" : "Escalation" }}</span>
+      <span class="badge">{{ g.kind === "final" ? "final Gate" : g.kind === "asset" ? "Asset Gate" : g.kind === "review" ? "review Gate" : g.kind === "conversation" ? "Conversation Gate" : "Escalation" }}</span>
       <div class="muted">{{ g.projectName }} · {{ g.reason }}</div>
       <pre v-if="g.evidence">{{ g.evidence }}</pre>
       <div v-if="g.kind === 'asset' && runs[g.runId]" @click.stop>

@@ -78,6 +78,7 @@ describe("listing a Project's Workflows", () => {
     expect(workflows).toMatchObject([
       { name: "developer", origin: "built-in", inputs: ["task"], errors: [], file: null },
       { name: "bugfix", origin: "built-in", inputs: ["task", "review"], reviewDefault: "solo", errors: [], file: null },
+      { name: "feature", origin: "built-in", inputs: ["task", "review"], reviewDefault: "duo", errors: [], file: null },
       { name: "assets", origin: "built-in", inputs: ["assets"], errors: [], file: null },
     ]);
   });
@@ -89,8 +90,8 @@ describe("listing a Project's Workflows", () => {
 
     const { workflows } = await forge.listWorkflows(project.id);
 
-    expect(workflows.map((w) => `${w.name}:${w.origin}`)).toEqual(["developer:built-in", "bugfix:built-in", "assets:built-in", "hotfix:project"]);
-    expect(workflows[3]).toMatchObject({ description: "A quick fix, reviewed at once.", inputs: ["task"], errors: [], file: workflowFile("hotfix") });
+    expect(workflows.map((w) => `${w.name}:${w.origin}`)).toEqual(["developer:built-in", "bugfix:built-in", "feature:built-in", "assets:built-in", "hotfix:project"]);
+    expect(workflows[4]).toMatchObject({ description: "A quick fix, reviewed at once.", inputs: ["task"], errors: [], file: workflowFile("hotfix") });
   });
 
   it("lets a Project Workflow named like a built-in one replace it for that Project only", async () => {
@@ -129,7 +130,7 @@ describe("listing a Project's Workflows", () => {
 
     const { workflows, problem } = await forge.listWorkflows(project.id);
 
-    expect(workflows.map((w) => w.name)).toEqual(["developer", "bugfix", "assets"]);
+    expect(workflows.map((w) => w.name)).toEqual(["developer", "bugfix", "feature", "assets"]);
     expect(problem).toContain("could not be read");
   });
 });

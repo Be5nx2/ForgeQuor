@@ -1,5 +1,5 @@
 import { describeDuration } from "../duration.js";
-import type { StepResult } from "../runner/runner.js";
+import type { SessionRequest, StepResult } from "../runner/runner.js";
 import type { AgentSeat, WorkflowContext } from "./workflow.js";
 
 export interface AgentStep {
@@ -18,6 +18,8 @@ export interface AgentStep {
   readonly?: boolean;
   /** Images shown to the Agent with the prompt (absolute paths). */
   images?: string[];
+  /** The Step keeps or resumes a Runner session (a Conversation Gate's Agent); the result then carries its id. */
+  session?: SessionRequest;
 }
 
 type Succeeded = Extract<StepResult, { status: "succeeded" }>;
@@ -53,7 +55,7 @@ export async function runAgentStep(ctx: WorkflowContext, seat: AgentSeat, step: 
   let result: StepResult;
   try {
     result = await seat.runner.run(
-      { instructions: step.instructions, prompt: step.prompt, images: step.images, readonly: step.readonly, cwd: worktreePath, model: seat.model, signal: abort.signal },
+      { instructions: step.instructions, prompt: step.prompt, images: step.images, readonly: step.readonly, session: step.session, cwd: worktreePath, model: seat.model, signal: abort.signal },
       (e) => {
         if (e.raw) log.push(e.raw);
         ctx.emit({ type: "progress", runId: run.id, attemptId, kind: e.kind, summary: e.summary });

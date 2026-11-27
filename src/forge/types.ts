@@ -61,11 +61,12 @@ export interface WorkflowList {
 }
 
 export type RunState = "queued" | "running" | "waiting" | "paused" | "approved" | "merged" | "closed" | "abandoned";
-export type GateKind = "final" | "escalation" | "asset" | "review";
+export type GateKind = "final" | "escalation" | "asset" | "review" | "conversation";
 /** What a Gate records as decided. */
-export type GateDecision = "approve" | "reject" | "abandon" | "retry" | "go_back";
+export type GateDecision = "approve" | "reject" | "abandon" | "retry" | "go_back" | "answer" | "confirm";
 /** `judge` is the verdicts of an Asset Gate: its decision is recorded as approve when every Asset was approved, reject when any was not. */
-export type GateAction = "approve" | "reject" | "abandon" | "judge" | "retry" | "go_back";
+/** `answer` replies to the questions at a Conversation Gate (the message is its Feedback); `confirm` accepts the summary the Agent proposed there. */
+export type GateAction = "approve" | "reject" | "abandon" | "judge" | "retry" | "go_back" | "answer" | "confirm";
 
 export interface Run {
   id: number;
@@ -171,7 +172,7 @@ export type StepStatus = "waiting" | "running" | "done" | "skipped" | "failed";
 export interface StepState {
   /** The Step's id in the Workflow. */
   id: string;
-  type: "agent" | "checks" | "gate" | "publish" | "artist" | "review";
+  type: "agent" | "conversation" | "checks" | "gate" | "publish" | "artist" | "review";
   /** The Agent's name for an Agent Step, the Gate kind for a Gate; null for the others. */
   detail: string | null;
   /** The ids of the Steps that must be done or skipped before this one starts. */
@@ -203,6 +204,18 @@ export interface Review {
   createdAt: Date;
 }
 
+/** One message of a Conversation Gate's chat: the Agent's questions or proposed summary, or the human's reply. */
+export interface ConversationTurn {
+  id: number;
+  /** The conversation Step it belongs to. */
+  stepId: string;
+  author: "agent" | "human";
+  /** What the Agent said (a round of questions, or a proposed summary), or what the human did (answered, confirmed, or reopened it with Feedback). */
+  kind: "questions" | "summary" | "answer" | "confirm" | "feedback";
+  body: string;
+  createdAt: Date;
+}
+
 export interface RunDetail extends Run {
   /** The Run's Steps in Workflow order, as they stand in its current Iteration. */
   steps: StepState[];
@@ -211,6 +224,8 @@ export interface RunDetail extends Run {
   iterations: Iteration[];
   /** Every Review of the Run, oldest first. */
   reviews: Review[];
+  /** What was said at the Run's Conversation Gates, oldest first. */
+  conversation: ConversationTurn[];
   attempts: StepAttempt[];
   checks: CheckResult[];
   gates: Gate[];

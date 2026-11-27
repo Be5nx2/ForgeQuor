@@ -88,6 +88,18 @@ onUnmounted(() => stopFollowing?.());
       />
     </template>
 
+    <template v-if="run.conversation.length">
+      <h3>Conversation</h3>
+      <ol class="chat" aria-label="Conversation">
+        <li v-for="t in run.conversation" :key="t.id" :class="t.author">
+          <strong>{{ t.author === "agent" ? (run.steps.find((s) => s.id === t.stepId)?.detail ?? "Agent").replace(/^./, (c) => c.toUpperCase()) : "You" }}</strong>
+          <span class="badge">{{ { questions: "questions", summary: "proposed summary", answer: "answer", confirm: "confirmed", feedback: "feedback" }[t.kind] }}</span>
+          <pre>{{ t.body }}</pre>
+        </li>
+      </ol>
+      <p v-if="run.gates.some((g) => g.kind === 'conversation' && !g.decidedAt)" class="muted">Reply under the open Conversation Gate below.</p>
+    </template>
+
     <template v-if="run.steps.length">
       <h3>Steps</h3>
       <ol class="steps" aria-label="Workflow steps">
@@ -114,11 +126,11 @@ onUnmounted(() => stopFollowing?.());
     <p v-if="!run.gates.length" class="muted">None yet.</p>
     <ul>
       <li v-for="g in run.gates" :key="g.id">
-        <strong>{{ g.kind === "final" ? "Final Gate" : g.kind === "asset" ? "Asset Gate" : g.kind === "review" ? "Review Gate" : "Escalation" }}</strong> · iteration {{ g.iteration }}:
+        <strong>{{ g.kind === "final" ? "Final Gate" : g.kind === "asset" ? "Asset Gate" : g.kind === "review" ? "Review Gate" : g.kind === "conversation" ? "Conversation Gate" : "Escalation" }}</strong> · iteration {{ g.iteration }}:
         {{ g.kind === "asset" && g.decidedAt ? `${g.verdicts.length} ${g.verdicts.length === 1 ? "Asset" : "Assets"} judged.` : g.reason }}
         <pre v-if="g.evidence">{{ g.evidence }}</pre>
         <div v-if="g.decidedAt" class="muted">
-          {{ { approve: "Approved", reject: "Rejected", retry: "Retried", go_back: "Went back", abandon: "Abandoned" }[g.decision ?? "abandon"] }} · {{ new Date(g.decidedAt).toLocaleString() }}
+          {{ { approve: "Approved", reject: "Rejected", retry: "Retried", go_back: "Went back", abandon: "Abandoned", answer: "Answered", confirm: "Confirmed" }[g.decision ?? "abandon"] }} · {{ new Date(g.decidedAt).toLocaleString() }}
           <pre v-if="g.feedback">{{ g.feedback }}</pre>
         </div>
         <GateActions v-else :gate="g" @decided="load" />

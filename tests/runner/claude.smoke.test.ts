@@ -23,4 +23,21 @@ describe.skipIf(!process.env.FORGEQUOR_SMOKE_CLAUDE)("real claude (smoke)", () =
     expect(events.length).toBeGreaterThan(0);
     expect(readFileSync(join(cwd, "hello.txt"), "utf8")).toContain("hello");
   }, 120_000);
+
+  it("keeps a conversation across two turns in one session", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "forgequor-smoke-"));
+    const runner = createClaudeRunner();
+    const base = { instructions: "You are a test Agent. Be brief.", cwd, model: "haiku" };
+    const first = await runner.run({ ...base, prompt: "Remember the word 'pelican'. Reply with OK.", session: { start: true } }, () => {});
+    expect(first.status).toBe("succeeded");
+    const sessionId = first.status === "succeeded" ? first.sessionId : undefined;
+    expect(sessionId).toBeTruthy();
+
+    const second = await runner.run({ ...base, prompt: "What was the word? Reply with only the word.", session: { resume: sessionId! } }, () => {});
+    expect(second.status).toBe("succeeded");
+    expect(second.status === "succeeded" ? second.summary.toLowerCase() : "").toContain("pelican");
+
+    const lost = await runner.run({ ...base, prompt: "hi", session: { resume: "00000000-0000-4000-8000-000000000000" } }, () => {});
+    expect(lost).toMatchObject({ status: "failed", sessionLost: true });
+  }, 240_000);
 });

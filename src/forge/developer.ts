@@ -28,8 +28,9 @@ This Run fixes a bug, and the task is the bug description. Follow the \`diagnosi
  * The Developer's prompt; on a retry it carries what sent the work back: the Check that failed, or the Review that asked
  * for changes. The Feedback of the human's rejections is listed as well.
  */
-export function developerPrompt(task: string, sentBack?: string, feedbacks: string[] = []): string {
+export function developerPrompt(task: string, sentBack?: string, feedbacks: string[] = [], summary?: string | null): string {
   let prompt = `Task:\n\n${task}`;
+  if (summary) prompt += `\n\nThe human talked this task through with the Griller and confirmed this summary of what to build; build exactly that:\n\n${summary}`;
   if (feedbacks.length) {
     const history = feedbacks.map((f, i) => `${i + 1}. ${f}`).join("\n");
     prompt += `\n\nThe reviewer rejected your earlier work. Your work is already on this branch: build on it, address the latest Feedback (the last one), keep the earlier ones satisfied, commit, and rewrite the Review Brief.\n\nFeedback so far, oldest first:\n${history}`;
@@ -41,7 +42,7 @@ export function developerPrompt(task: string, sentBack?: string, feedbacks: stri
   return `${prompt}\n\nYour previous attempt failed this Check. Fix the cause, keep your earlier work, and commit.\n\n${sentBack}`;
 }
 
-function deriveTitle(task: string): string {
+export function deriveTitle(task: string): string {
   const first = task.trim().split("\n")[0]!.trim();
   return first.length > 60 ? `${first.slice(0, 57).trimEnd()}...` : first;
 }
@@ -68,7 +69,7 @@ export const developerAgent: AgentModule = {
     return true;
   },
   async prompt(ctx, attempt) {
-    return developerPrompt(ctx.run.task, attempt.sentBack ?? undefined, await ctx.records.earlierFeedbacks());
+    return developerPrompt(ctx.run.task, attempt.sentBack ?? undefined, await ctx.records.earlierFeedbacks(), await ctx.records.conversation.confirmedSummary());
   },
   async after(ctx) {
     await commitLeftovers(ctx.worktreePath, "chore: commit work left by the Developer");

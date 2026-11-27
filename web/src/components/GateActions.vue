@@ -11,11 +11,31 @@ const error = ref("");
 const form = ref<"reject" | "retry" | "go_back" | null>(null);
 const feedback = ref("");
 const target = ref("");
+/** The reply typed at a Conversation Gate. */
+const message = ref("");
 
 function open(which: "reject" | "retry" | "go_back") {
   form.value = which;
   target.value = props.gate.redo?.goBack[0]?.stepId ?? "";
   feedback.value = "";
+}
+
+async function reply() {
+  await send("answer", message.value);
+  message.value = "";
+}
+
+async function send(action: GateAction, text?: string) {
+  busy.value = true;
+  error.value = "";
+  try {
+    await decideGate(props.gate.id, action, undefined, undefined, undefined, text);
+    emit("decided");
+  } catch (e: any) {
+    error.value = e.message;
+  } finally {
+    busy.value = false;
+  }
 }
 
 async function decide(action: GateAction) {
@@ -38,6 +58,13 @@ const stepLabel = (s: { stepId: string; type: string; detail: string | null }) =
 
 <template>
   <div class="gate-actions" @click.stop>
+    <form v-if="gate.actions.includes('answer')" class="stack" @submit.prevent="reply">
+      <textarea v-model="message" rows="5" placeholder="Your answers, all in one message" aria-label="Your answer" required />
+      <div>
+        <button type="submit" :disabled="busy || !message.trim()">Send answer</button>
+        <button v-if="gate.actions.includes('confirm')" type="button" :disabled="busy" @click="send('confirm')">Confirm the summary</button>
+      </div>
+    </form>
     <button v-if="gate.actions.includes('approve')" type="button" :disabled="busy" @click="decide('approve')">
       Approve
     </button>

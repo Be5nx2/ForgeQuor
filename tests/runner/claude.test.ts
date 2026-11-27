@@ -217,4 +217,60 @@ describe("Claude Runner", () => {
       expect(fake.grandchildPid()).toBeNull();
     });
   });
+  describe("sessions", () => {
+    const resultIn = (session: string) => line({ type: "result", subtype: "success", is_error: false, result: "Round.", session_id: session });
+    const sessionOf = (args: string[]) => args[args.indexOf("--session-id") + 1];
+
+    it("keeps nothing for a Step that asks for no session", async () => {
+      const { fake } = await runStep({ stdout: [init, resultOk] });
+
+      expect(fake.lastInvocation().args).toContain("--no-session-persistence");
+      expect(fake.lastInvocation().args).not.toContain("--session-id");
+    });
+
+    it("starts a session with an id of its own and returns the one the CLI reports", async () => {
+      const fake = createFakeCli({ stdout: [init, resultIn("s-from-cli")] });
+
+      const result = await createClaudeRunner({ env: fake.env }).run({ ...step(), session: { start: true } }, () => {});
+
+      const args = fake.lastInvocation().args;
+      expect(args).not.toContain("--no-session-persistence");
+      expect(sessionOf(args)).toMatch(/^[0-9a-f-]{36}$/);
+      expect(args).not.toContain("--resume");
+      expect(result).toEqual({ status: "succeeded", summary: "Round.", sessionId: "s-from-cli" });
+    });
+
+    it("resumes a session with the new message as the prompt", async () => {
+      const fake = createFakeCli({ stdout: [init, resultIn("s1")] });
+
+      const result = await createClaudeRunner({ env: fake.env }).run({ ...step(), prompt: "My answers.", session: { resume: "s1" } }, () => {});
+
+      const call = fake.lastInvocation();
+      expect(call.args.slice(call.args.indexOf("--resume"), call.args.indexOf("--resume") + 2)).toEqual(["--resume", "s1"]);
+      expect(call.args).not.toContain("--session-id");
+      expect(call.args).not.toContain("--no-session-persistence");
+      expect(call.stdin).toBe("My answers.");
+      expect(result).toMatchObject({ status: "succeeded", sessionId: "s1" });
+    });
+
+    it("reports a session the CLI no longer has as lost", async () => {
+      const fake = createFakeCli({
+        stdout: [line({ type: "result", subtype: "error_during_execution", is_error: true, errors: ["No conversation found with session ID: gone"], session_id: "gone" })],
+        stderr: "No conversation found with session ID: gone",
+        exitCode: 1,
+      });
+
+      const result = await createClaudeRunner({ env: fake.env }).run({ ...step(), session: { resume: "gone" } }, () => {});
+
+      expect(result).toMatchObject({ status: "failed", sessionLost: true, error: expect.stringContaining("No conversation found") });
+    });
+
+    it("does not call another failure a lost session", async () => {
+      const fake = createFakeCli({ stdout: [line({ type: "result", subtype: "error_during_execution", is_error: true, result: "Tool exploded" })], exitCode: 1 });
+
+      const result = await createClaudeRunner({ env: fake.env }).run({ ...step(), session: { resume: "s1" } }, () => {});
+
+      expect(result).toEqual({ status: "failed", error: "Tool exploded" });
+    });
+  });
 });

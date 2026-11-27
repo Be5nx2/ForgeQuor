@@ -26,14 +26,15 @@ export type GateKind = Server.GateKind;
 export type GateAction = Server.GateAction;
 export type Gate = Json<Server.Gate>;
 export type Iteration = Json<Server.Iteration>;
+export type ConversationTurn = Json<Server.ConversationTurn>;
 export type RunDetail = Json<Server.RunDetail>;
 export type OpenGate = Json<Server.OpenGate>;
 export type ApprovedRun = Json<Server.ApprovedRun>;
 export type RunUpdate = Json<Server.RunUpdate>;
 
 /** Records the human's decision at a Gate and returns the updated Run. */
-export function decideGate(gateId: number, action: GateAction, feedback?: string, verdicts?: Verdict[], target?: string): Promise<RunDetail> {
-  return postJson(`/api/gates/${gateId}/decision`, { action, feedback, verdicts, target });
+export function decideGate(gateId: number, action: GateAction, feedback?: string, verdicts?: Verdict[], target?: string, message?: string): Promise<RunDetail> {
+  return postJson(`/api/gates/${gateId}/decision`, { action, feedback, verdicts, target, message });
 }
 
 /**

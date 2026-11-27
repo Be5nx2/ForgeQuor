@@ -329,3 +329,4 @@ Art inside `feature` stays behind the existing `BA_ASSETS` switch.
 - The review composite and the conversation composite follow the `artist` precedent (ADR 0007): a loop the YAML cannot express lives in a coded Step type, not in the YAML.
 - Duo review doubles review Quota. If dogfooding shows the Consolidator rarely changes anything, `feature` may default to solo later; that is a one-line YAML change.
 - The BA suite is the place where the whole team is seen working for real. Run it after m3-13 and after m3-16.
+- The Claude CLI keeps a Griller's session on disk under the user's own Claude data folder, outside Forgequor's control. If it is purged, the conversation starts a new session from the transcript. Whether and when to clean old sessions up is left for later.

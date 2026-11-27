@@ -141,7 +141,7 @@ steps:
 `);
 
     expect(errors.map((e) => [e.path, e.message])).toEqual([
-      ["steps[0].type", 'Step "a" has an unknown type "script"; it must be one of agent, checks, gate, publish, artist, review.'],
+      ["steps[0].type", 'Step "a" has an unknown type "script"; it must be one of agent, conversation, checks, gate, publish, artist, review.'],
       ["steps[1].agent", 'Step "b" names an unknown Agent "wizard"; it must be one of developer.'],
       ["steps[2].gate", 'Step "c" has an unknown Gate kind "vote"; it must be one of final, asset.'],
     ]);

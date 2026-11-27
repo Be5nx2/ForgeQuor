@@ -37,3 +37,8 @@ form.stack label.fill { flex-direction: row; align-items: center; }
 .compare { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; }
 form.filters { flex-wrap: wrap; }
 form.filters select { flex: 1 1 12rem; min-width: 0; max-width: 100%; }
+
+.chat { list-style: none; padding: 0; }
+.chat li { margin: 0.5rem 0; padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px solid #8884; }
+.chat li.human { margin-left: 2rem; }
+.chat pre { white-space: pre-wrap; margin: 0.25rem 0 0; }
