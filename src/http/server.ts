@@ -167,6 +167,13 @@ export async function createServer(deps: {
       return reply.code(404).send({ error: e.message });
     }
   });
+  app.get<{ Params: { id: string }; Querystring: { path?: string } }>("/api/runs/:id/notes", async (req, reply) => {
+    try {
+      return await deps.forge.getRunNote(Number(req.params.id), req.query.path ?? "");
+    } catch (e: any) {
+      return reply.code(404).send({ error: e.message });
+    }
+  });
   app.post<{ Params: { id: string } }>("/api/runs/:id/abandon", async (req, reply) => {
     try {
       return await deps.forge.abandonRun(Number(req.params.id));

@@ -247,12 +247,24 @@ export interface ConversationTurn {
   createdAt: Date;
 }
 
+/** A Run Note kept in the database when its Run was Archived; `path` is relative to the Run Notes folder, with `/` separators. */
+export interface RunNoteInfo {
+  path: string;
+  size: number;
+}
+
+export interface RunNote extends RunNoteInfo {
+  content: string;
+}
+
 export interface RunDetail extends Run {
   /** The Run's Steps in Workflow order, as they stand in its current Iteration. */
   steps: StepState[];
   /** The Asset Requests of an `assets` Run and where each stands; empty for other Workflows. */
   assets: Asset[];
   iterations: Iteration[];
+  /** The text Run Notes kept when the Run was Archived (its worktree is gone); empty before. */
+  runNotes: RunNoteInfo[];
   /** Every Review of the Run, oldest first. */
   reviews: Review[];
   /** What was said at the Run's Conversation Gates, oldest first. */

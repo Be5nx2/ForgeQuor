@@ -189,6 +189,15 @@ Griller with a **Conversation Gate** (it writes the Project's glossary and ADRs 
     - Runs archived more than `FORGEQUOR_ARCHIVE_DAYS` (default 60) days ago are deleted with everything that belongs to them; a Run that is not Archived is never purged;
     - the purge runs at startup and every 24 hours, and logs how many Runs it deleted;
     - Forge core takes an injectable clock; tests drive the delay with it.
+- [x] `m4-12` **Keep an Archived Run's Run Notes**: archiving removes the worktree, but the Run Notes that lived only there stay readable.
+  - Spec: `docs/specs/m4-comfort.md`
+  - Blocked by: `m4-01`
+  - Acceptance:
+    - just before `archive()` removes the worktree, every text file under its `.forgequor/` is copied into a `run_notes` table (run id, path relative to `.forgequor/`, content, size), deleted with the Run by the purge; binary files (the replaced Asset images) and files over 1 MB are skipped and logged; a failed copy is logged and does not stop archiving;
+    - the startup catch-up archives the same way, so old Runs get their notes copied too;
+    - the Run detail (`GET /api/runs/:id`, `GET /api/runs/:id/notes?path=`) lists an Archived Run's Run Notes and the Run page shows a note (Markdown rendered, anything else as preformatted text);
+    - the glossary's Archive entry says Run Notes are kept in the database;
+    - Forge core test on temp repos: a Run with Markdown, JSON and binary notes is abandoned, the worktree is gone, text notes are readable through the Run detail, the binary is skipped, and the purge removes them.
 - [x] `m4-03` **macOS notifications**: the human hears about a Run that needs them without watching the tab.
   - Spec: `docs/specs/m4-comfort.md`
   - Blocked by: none
