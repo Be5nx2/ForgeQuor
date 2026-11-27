@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
@@ -171,6 +171,41 @@ export async function runNotesInBranch(worktreePath: string, defaultBranch: stri
     worktreePath, "log", "--name-only", "--diff-filter=A", "--format=", `origin/${defaultBranch}..HEAD`, "--", RUN_NOTES_DIR,
   );
   return [...new Set(out.split("\n").filter(Boolean))];
+}
+
+/** Whether the remote `origin` holds `branch`; null when it cannot be told (no network, no remote). */
+export async function remoteHasBranch(repoRoot: string, branch: string): Promise<boolean | null> {
+  const out = await git(repoRoot, "ls-remote", "--heads", "origin", `refs/heads/${branch}`);
+  return out === null ? null : out.length > 0;
+}
+
+/**
+ * Removes a Run's worktree folder and its local branch, and prunes the repository's worktree list. A target already
+ * gone counts as done; a step that fails does not stop the others. Returns what could not be removed, in words.
+ */
+export async function removeRunWorktree(opts: { repoRoot: string; worktreePath: string | null; branch: string | null }): Promise<string[]> {
+  const { repoRoot, worktreePath, branch } = opts;
+  const problems: string[] = [];
+  if (worktreePath) {
+    const viaGit = await gitOrThrow(repoRoot, "worktree", "remove", "--force", worktreePath).then(() => null, (e: Error) => e.message);
+    // Git refuses a folder it does not know (or cannot clean): the folder goes anyway.
+    let rmError: string | null = null;
+    try {
+      rmSync(worktreePath, { recursive: true, force: true });
+    } catch (e: any) {
+      rmError = e.message;
+    }
+    if (existsSync(worktreePath)) problems.push(`worktree ${worktreePath}: ${rmError ?? viaGit ?? "still there"}`);
+  }
+  await git(repoRoot, "worktree", "prune");
+  if (branch && (await git(repoRoot, "rev-parse", "--verify", "--quiet", `refs/heads/${branch}`)) !== null) {
+    try {
+      await gitOrThrow(repoRoot, "branch", "-D", branch);
+    } catch (e: any) {
+      problems.push(`branch ${branch}: ${e.message}`);
+    }
+  }
+  return problems;
 }
 
 /** Pushes the Run's branch to `origin`. */

@@ -170,7 +170,7 @@ Griller with a **Conversation Gate** (it writes the Project's glossary and ADRs 
 
 #### M4a Running it day to day
 
-- [ ] `m4-01` **Archive a Run when it ends**: a merged, closed or abandoned Run leaves no worktree or local branch behind and stays readable.
+- [x] `m4-01` **Archive a Run when it ends**: a merged, closed or abandoned Run leaves no worktree or local branch behind and stays readable.
   - Spec: `docs/specs/m4-comfort.md`
   - Blocked by: none
   - Acceptance:

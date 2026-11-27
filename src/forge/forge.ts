@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import type pg from "pg";
 import type { Runner } from "../runner/runner.js";
@@ -49,7 +49,7 @@ import type {
   WorkflowList,
 } from "./types.js";
 import { placeSkillPack, SHARED_SKILL_PACK } from "./skill-pack.js";
-import { createRunWorktree, existsInBranch, inspectRepository, listInBranch, readInBranch, RegistrationError, refreshDefaultBranch, repositoryPath, slugify } from "./workspace.js";
+import { createRunWorktree, existsInBranch, inspectRepository, listInBranch, readInBranch, RegistrationError, refreshDefaultBranch, remoteHasBranch, removeRunWorktree, repositoryPath, slugify } from "./workspace.js";
 
 export { RegistrationError, AssetNotFoundError, GateError, InvalidInputError, RunNotFoundError, RunStateError };
 export type * from "./types.js";
@@ -92,8 +92,8 @@ export interface Forge {
   /** The merge list: every Approved Run of every Project, oldest first, until its pull request is merged or closed or the Run is abandoned. */
   listApprovedRuns(): Promise<ApprovedRun[]>;
   /**
-   * The human's decision at an open Gate: approve (final Gate) moves the Run to Approved, abandon to Abandoned (its branch
-   * and worktree are kept), reject (final Gate only, with a non-empty `feedback`) starts the Run's next Iteration. An Asset
+   * The human's decision at an open Gate: approve (final Gate) moves the Run to Approved, abandon to Abandoned (the Run is then
+   * Archived), reject (final Gate only, with a non-empty `feedback`) starts the Run's next Iteration. An Asset
    * Gate takes `judge` with a verdict for every Asset waiting for one, all at once: when all are approved the Run goes on
    * to its commit and pull request, otherwise the next Iteration redoes the rejected Assets only. Throws a GateError for an
    * unknown or already decided Gate or a choice it does not offer, and an InvalidInputError for a rejection without
@@ -101,8 +101,8 @@ export interface Forge {
    */
   decideGate(input: { gateId: number; action: GateAction; feedback?: string; verdicts?: Verdict[]; target?: string; message?: string }): Promise<RunDetail>;
   /**
-   * Abandons a Run in any state before Merged: closes its pull request if it has one, settles its open Gate, and keeps
-   * its branch and worktree. Throws a RunStateError when the Run is already over. A pull request merged on GitHub in
+   * Abandons a Run in any state before Merged: closes its pull request if it has one, settles its open Gate, and archives it
+   * (worktree and local branch removed, remote branch deleted). Throws a RunStateError when the Run is already over. A pull request merged on GitHub in
    * the meantime makes the Run Merged instead. If the pull request cannot be read or closed, the Run is left as it was.
    */
   abandonRun(runId: number): Promise<RunDetail>;
@@ -202,6 +202,7 @@ function toRun(r: Record<string, any>): Run {
     prUrl: r.pr_url,
     resumeAt: r.resume_at,
     createdAt: r.created_at,
+    archivedAt: r.archived_at,
   };
 }
 
@@ -241,6 +242,8 @@ function toCheck(r: Record<string, any>): CheckResult {
 const QUOTA_RETRY_MS = 15 * 60 * 1000;
 const DEFAULT_STEP_TIMEOUT_MS = 60 * 60 * 1000;
 
+/** How long abandoning waits for a Run's work to stop before removing its worktree anyway. */
+const ARCHIVE_WAIT_MS = 2000;
 /** States a Run cannot leave. A Run in one of them no longer holds its Project's slot. */
 const OVER: RunState[] = ["merged", "closed", "abandoned"];
 const ACTIVE: RunState[] = ["queued", "running", "waiting", "paused", "approved"];
@@ -269,7 +272,7 @@ function toGate(r: Record<string, any>, actions: GateAction[]): Gate {
   };
 }
 
-const RUN_COLUMNS = "id, project_id, workflow, iteration, title, task, tracker_ref, review_mode, state, branch, worktree_path, pr_number, pr_url, resume_at, created_at";
+const RUN_COLUMNS = "id, project_id, workflow, iteration, title, task, tracker_ref, review_mode, state, branch, worktree_path, pr_number, pr_url, resume_at, created_at, archived_at";
 /** The same columns, read through the alias `r` in a query that joins another table. */
 const RUN_COLUMNS_OF_R = RUN_COLUMNS.split(", ").map((c) => `r.${c}`).join(", ");
 
@@ -333,6 +336,8 @@ export function createForge(deps: ForgeDeps): Forge {
   const { agents, problems: seatProblems } = buildSeats(runners, settings);
   const stepTimeoutMs = deps.stepTimeoutMs ?? DEFAULT_STEP_TIMEOUT_MS;
   const inFlight = new Set<Promise<void>>();
+  /** What each Run is being worked on by right now, so that archiving waits for it to let go. */
+  const working = new Map<number, Promise<void>>();
   const listeners = new Set<(update: RunUpdate) => void>();
   function emit(update: RunUpdate) {
     for (const l of [...listeners]) {
@@ -386,8 +391,12 @@ export function createForge(deps: ForgeDeps): Forge {
 
   /** Starts `run` in the background. */
   function launch(run: Run, project: Project) {
-    const work = execute(run, project).finally(() => inFlight.delete(work));
+    const work = execute(run, project).finally(() => {
+      inFlight.delete(work);
+      if (working.get(run.id) === work) working.delete(run.id);
+    });
     inFlight.add(work);
+    working.set(run.id, work);
   }
 
   /** Starts an already Running Run's work again, from what is recorded, with its Project as it is now. */
@@ -467,6 +476,47 @@ export function createForge(deps: ForgeDeps): Forge {
     // The Run is over, so its slot is free for the next Queued Run.
     await promote(projectId);
     return true;
+  }
+
+  /**
+   * Archives a Run that is over: removes its worktree and local branch, deletes its remote branch when it was abandoned or
+   * its pull request closed unmerged, and records when. Every target already gone counts as done; a step that fails is
+   * logged and the others still run, and the Run is archived anyway (what is left is a stray folder or branch).
+   * Does nothing for a Run that is not over or already archived. Never throws.
+   */
+  async function archive(runId: number): Promise<void> {
+    try {
+      const { rows } = await pool.query(
+        `SELECT r.state, r.branch, r.worktree_path, r.pr_number, r.archived_at, p.local_path, p.remote_owner, p.remote_name
+         FROM runs r JOIN projects p ON p.id = r.project_id WHERE r.id = $1`,
+        [runId],
+      );
+      const row = rows[0];
+      if (!row || !OVER.includes(row.state) || row.archived_at) return;
+      const log = (what: string, e: unknown) => console.error(`Run ${runId}: could not archive (${what}):`, (e as Error)?.message ?? e);
+      // Only a folder Forgequor made for this Run is ever deleted.
+      const worktreePath: string | null = row.worktree_path && basename(row.worktree_path) === `run-${runId}` ? row.worktree_path : null;
+      if (row.worktree_path && !worktreePath) log("worktree", new Error(`${row.worktree_path} is not a Run folder, left alone`));
+      try {
+        for (const problem of await removeRunWorktree({ repoRoot: row.local_path, worktreePath, branch: row.branch })) log("local files", new Error(problem));
+      } catch (e) {
+        log("local files", e);
+      }
+      if (row.branch && row.state !== "merged") {
+        try {
+          // Forgequor pushed the branch when it opened a pull request; before that, only the remote can say.
+          if (row.pr_number || (await remoteHasBranch(row.local_path, row.branch))) {
+            await deps.codeHost.deleteBranch({ owner: row.remote_owner, repo: row.remote_name, branch: row.branch });
+          }
+        } catch (e) {
+          log("remote branch", e);
+        }
+      }
+      await pool.query("UPDATE runs SET archived_at = $2 WHERE id = $1 AND archived_at IS NULL", [runId, now()]);
+      changed(runId);
+    } catch (e) {
+      console.error(`Run ${runId}: could not archive:`, (e as Error)?.message ?? e);
+    }
   }
 
   /**
@@ -580,6 +630,9 @@ export function createForge(deps: ForgeDeps): Forge {
     if (!(await settle(runId, state, ACTIVE))) throw new RunStateError(`Run ${runId} changed state while it was being abandoned.`);
     // Nothing the Run is still doing matters any more: kill it, process group and all.
     stoppers.get(runId)?.abort();
+    // Its worktree goes once the Run's own work has let go of it (bounded: an Agent that ignores the stop must not hold the human up).
+    await Promise.race([working.get(runId)?.catch(() => {}), new Promise((r) => setTimeout(r, ARCHIVE_WAIT_MS).unref())]);
+    await archive(runId);
     return forge.getRun(runId);
   }
 
@@ -992,7 +1045,7 @@ export function createForge(deps: ForgeDeps): Forge {
       for (const r of rows) {
         try {
           const state = await deps.codeHost.pullRequestState({ owner: r.remote_owner, repo: r.remote_name, number: r.pr_number });
-          if (state !== "open") await settle(Number(r.id), state, ["approved"]);
+          if (state !== "open" && (await settle(Number(r.id), state, ["approved"]))) await archive(Number(r.id));
         } catch (e: any) {
           console.error(`Run ${r.id}: could not read its pull request:`, e?.message ?? e);
         }

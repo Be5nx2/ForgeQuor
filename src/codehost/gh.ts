@@ -36,6 +36,15 @@ export function createGhCodeHost(): CodeHost {
     async closePullRequest({ owner, repo, number }) {
       await gh(["pr", "close", String(number), "--repo", `${owner}/${repo}`]);
     },
+    async deleteBranch({ owner, repo, branch }) {
+      const ref = branch.split("/").map(encodeURIComponent).join("/");
+      try {
+        await gh(["api", "--method", "DELETE", `repos/${owner}/${repo}/git/refs/heads/${ref}`]);
+      } catch (e: any) {
+        // Already gone (GitHub answers 422 "Reference does not exist", or 404): nothing left to do.
+        if (!/Reference does not exist|HTTP 404|Not Found/i.test(String(e?.message))) throw e;
+      }
+    },
     async pullRequestState({ owner, repo, number }) {
       const out = await gh(["pr", "view", String(number), "--repo", `${owner}/${repo}`, "--json", "state", "--jq", ".state"]);
       const state = out.trim().toUpperCase();

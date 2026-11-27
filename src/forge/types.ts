@@ -92,6 +92,8 @@ export interface Run {
   /** When a Paused Run restarts its current Step (the Runner's Quota reset time); null otherwise. */
   resumeAt: Date | null;
   createdAt: Date;
+  /** When the Run was archived (its worktree and local branch removed); null until then. A Run keeps the state it ended in. */
+  archivedAt: Date | null;
 }
 
 export interface StepAttempt {

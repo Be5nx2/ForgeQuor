@@ -24,6 +24,8 @@ export interface CodeHost {
   comment(input: { owner: string; repo: string; number: number; body: string }): Promise<void>;
   /** Closes a pull request without merging it. The branch is left alone. */
   closePullRequest(input: { owner: string; repo: string; number: number }): Promise<void>;
+  /** Deletes a branch from the remote repository. A branch that is already gone counts as deleted. */
+  deleteBranch(input: { owner: string; repo: string; branch: string }): Promise<void>;
   /** Reads whether a pull request is still open, was merged, or was closed without merging. */
   pullRequestState(input: { owner: string; repo: string; number: number }): Promise<PullRequestState>;
 }

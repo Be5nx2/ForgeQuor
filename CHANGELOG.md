@@ -5,6 +5,7 @@ All notable changes to Forgequor. Format: [Keep a Changelog](https://keepachange
 ## [Unreleased]
 
 ### Added
+- Archive a Run when it ends: a merged, closed or abandoned Run loses its worktree and local branch (and, unmerged, its remote branch) and is marked archived, readable as before; the Runs tab hides archived Runs unless asked (m4-01).
 - Skills (shared / forgequor / godot), CLAUDE.md, brand identity doc, ROADMAP and CHANGELOG.
 - Glossary, ADRs 0001–0003 and the v1 milestones (M1–M4) in the roadmap.
 - Scaffold (Node/TypeScript, Fastify, Vue 3, PostgreSQL via Docker Compose, `npm start`), startup checks for `git`, `gh` and `claude`, and Project registration with a Projects list in the UI (m1-01).

@@ -8,12 +8,18 @@ export interface RecordedPullRequest extends PullRequestInput {
 }
 
 /** An in-memory GitHub: records the pull requests opened and the comments posted on them. */
-export function createFakeCodeHost(): CodeHost & { pullRequests: RecordedPullRequest[]; failWith: (message: string | null) => void; setState: (number: number, state: PullRequestState) => void; failStateReads: (message: string | null) => void } {
+export function createFakeCodeHost(): CodeHost & { pullRequests: RecordedPullRequest[]; failWith: (message: string | null) => void; setState: (number: number, state: PullRequestState) => void; failStateReads: (message: string | null) => void; deletedBranches: { owner: string; repo: string; branch: string }[]; failBranchDeletion: (message: string | null) => void } {
   const pullRequests: RecordedPullRequest[] = [];
   let failure: string | null = null;
   let readFailure: string | null = null;
+  let deletionFailure: string | null = null;
+  const deletedBranches: { owner: string; repo: string; branch: string }[] = [];
   return {
     pullRequests,
+    deletedBranches,
+    failBranchDeletion: (message) => {
+      deletionFailure = message;
+    },
     failWith: (message) => {
       failure = message;
     },
@@ -35,6 +41,10 @@ export function createFakeCodeHost(): CodeHost & { pullRequests: RecordedPullReq
     },
     async closePullRequest({ number }) {
       pullRequests.find((p) => p.number === number)!.state = "closed";
+    },
+    async deleteBranch(input) {
+      if (deletionFailure) throw new Error(deletionFailure);
+      deletedBranches.push(input);
     },
     async pullRequestState({ number }) {
       if (readFailure) throw new Error(readFailure);

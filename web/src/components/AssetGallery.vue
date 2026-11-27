@@ -2,7 +2,7 @@
 import { computed, ref, watch } from "vue";
 import { decideGate, type Asset, type Gate, type Verdict } from "../api";
 
-const props = defineProps<{ runId: number; iteration: number; assets: Asset[]; gate?: Gate }>();
+const props = defineProps<{ runId: number; iteration: number; assets: Asset[]; gate?: Gate; filesRemoved?: boolean }>();
 const emit = defineEmits<{ decided: [] }>();
 
 /** The preview's backdrop: the UI's own grey, so transparency is visible; not saved anywhere. */
@@ -75,13 +75,14 @@ function approveAll() {
         <ul v-if="a.warnings.length" class="warnings" aria-label="Palette warnings">
           <li v-for="w in a.warnings" :key="w" class="error">⚠ {{ w }}</li>
         </ul>
-        <div v-if="showReplaced(a)" class="muted">replaced art on the left · new version on the right</div>
+        <p v-if="filesRemoved" class="muted">files removed, see the pull request</p>
+        <div v-if="!filesRemoved && showReplaced(a)" class="muted">replaced art on the left · new version on the right</div>
         <div class="compare">
-        <div v-if="showReplaced(a)" class="previews" :style="{ background: backdrop }">
+        <div v-if="!filesRemoved && showReplaced(a)" class="previews" :style="{ background: backdrop }">
           <img :src="replacedArt(a)" :width="imageWidth(a)" :height="a.height" :alt="`${a.name}, the art being replaced, at real size`" class="pixels" @error="replacedMissing[a.id] = true" />
           <img :src="replacedArt(a)" :width="imageWidth(a) * zoom(a)" :height="a.height * zoom(a)" :alt="`${a.name}, the art being replaced, magnified ${zoom(a)} times`" class="pixels" />
         </div>
-        <div v-if="HAS_IMAGE.includes(a.status)" class="previews" :style="{ background: backdrop }">
+        <div v-if="!filesRemoved && HAS_IMAGE.includes(a.status)" class="previews" :style="{ background: backdrop }">
           <img :src="current(a, iteration)" :width="imageWidth(a)" :height="a.height" :alt="`${a.name} at real size`" class="pixels" />
           <img :src="current(a, iteration)" :width="imageWidth(a) * zoom(a)" :height="a.height * zoom(a)" :alt="`${a.name} magnified ${zoom(a)} times`" class="pixels" />
         </div>
@@ -89,7 +90,7 @@ function approveAll() {
         <details v-if="past(a).length" class="past">
           <summary>{{ past(a).length }} earlier {{ past(a).length === 1 ? "version" : "versions" }}</summary>
           <div v-for="v in past(a)" :key="v.id" class="earlier">
-            <div class="previews" :style="{ background: backdrop }">
+            <div v-if="!filesRemoved" class="previews" :style="{ background: backdrop }">
               <img :src="version(a, v.id)" :width="imageWidth(a)" :height="a.height" :alt="`${a.name}, iteration ${v.iteration}`" class="pixels" />
               <img :src="version(a, v.id)" :width="imageWidth(a) * zoom(a)" :height="a.height * zoom(a)" :alt="`${a.name}, iteration ${v.iteration}, magnified ${zoom(a)} times`" class="pixels" />
             </div>

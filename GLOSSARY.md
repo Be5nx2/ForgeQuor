@@ -69,7 +69,7 @@ The comment a **Run** posts on its pull request for the final **Gate**: what the
 _Avoid_: PR summary, PR description, review comment
 
 **Archive**:
-What remains of a **Run** once its pull request is merged or closed, or the **Run** is abandoned: its **Run Notes** and metadata, kept for a limited time.
+What remains of a **Run** once it is **Archived**: its **Run Notes**, reviews, **Gates**, transcripts, attempts and metadata, kept for a limited time. Its worktree and local branch are gone.
 _Avoid_: Backup, snapshot
 
 **Iteration**:
@@ -78,7 +78,7 @@ _Avoid_: Retry, attempt, cycle
 
 ## Run lifecycle
 
-A **Run** moves Queued → Running ⇄ Waiting / Paused → Approved → Merged, Closed or Abandoned → Archived. An Approved **Run** goes back to Running when asked to rebase.
+A **Run** moves Queued → Running ⇄ Waiting / Paused → Approved → Merged, Closed or Abandoned, then marked Archived. An Approved **Run** goes back to Running when asked to rebase.
 
 **Queued**: created, waiting for a free slot on its **Project**.
 
@@ -96,7 +96,7 @@ A **Run** moves Queued → Running ⇄ Waiting / Paused → Approved → Merged,
 
 **Abandoned**: stopped for good by the human before its pull request was merged.
 
-**Archived**: reduced to its **Archive**; its worktree is gone.
+**Archived**: a mark on a finished **Run**, not a state. Right after a **Run** is Merged, Closed or Abandoned, its worktree and local branch are removed and it gets an archived-at time; it keeps the state it ended in. An Abandoned **Run**, or one whose pull request was closed unmerged, also loses its remote branch. An Approved **Run** is never Archived.
 
 ## Team
 
