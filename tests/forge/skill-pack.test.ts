@@ -118,3 +118,85 @@ describe("the shared Skill Pack in a Run", () => {
     expect(existsSync(join(SHARED_SKILL_PACK, "code-review", "SKILL.md"))).toBe(true);
   });
 });
+
+describe("Skill Packs per Project", () => {
+  let root: string;
+  let packed: Forge;
+  beforeAll(() => {
+    root = mkdtempSync(join(tmpdir(), "forgequor-skills-"));
+    const skill = (pack: string, name: string, text: string) => {
+      mkdirSync(join(root, pack, name), { recursive: true });
+      writeFileSync(join(root, pack, name, "SKILL.md"), text);
+    };
+    skill("alpha", "scene", "alpha scene\n");
+    skill("alpha", "only-alpha", "alpha only\n");
+    skill("beta", "scene", "beta scene\n");
+    skill("beta", "only-beta", "beta only\n");
+    skill("forgequor", "internal", "internal\n");
+    skill("shared", "tdd", "root shared\n");
+    mkdirSync(join(root, "empty"));
+    writeFileSync(join(root, "empty", "notes.md"), "no Skill\n");
+    packed = createForge({ pool, runner, codeHost: createFakeCodeHost(), worktreesRoot: worktrees, skillPack: join(root, "shared"), skillsRoot: root });
+  });
+  afterAll(async () => {
+    await packed.whenIdle();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  async function runOf(project: Project): Promise<string> {
+    const started = await packed.startRun({ projectId: project.id, title: "Packs", task: "Do it." });
+    await packed.whenIdle();
+    return (await packed.getRun(started.id)).worktreePath!;
+  }
+
+  it("offers the folders that hold Skills, but shared and forgequor", () => {
+    expect(packed.offeredSkillPacks()).toEqual(["alpha", "beta"]);
+  });
+
+  it("never offers shared or forgequor from Forgequor's own skills", () => {
+    expect(forge.offeredSkillPacks()).not.toContain("shared");
+    expect(forge.offeredSkillPacks()).not.toContain("forgequor");
+  });
+
+  it("refuses an unknown pack and keeps the choice", async () => {
+    const { project } = await projectWithRemote();
+    await packed.setSkillPacks(project.id, ["alpha"]);
+    await expect(packed.setSkillPacks(project.id, ["alpha", "forgequor"])).rejects.toThrow(/Unknown Skill Pack: forgequor/);
+    expect((await packed.listProjects()).find((p) => p.id === project.id)!.skillPacks).toEqual(["alpha"]);
+  });
+
+  it("places shared then each chosen pack, the first placed winning, a Project's own Skill winning over all, none committed", async () => {
+    const { project } = await projectWithRemote({ ".claude/skills/only-beta/SKILL.md": "project beta\n" });
+    await packed.setSkillPacks(project.id, ["alpha", "beta"]);
+    const wt = await runOf(project);
+    for (const folder of FOLDERS) {
+      expect(readFileSync(join(wt, folder, "tdd/SKILL.md"), "utf8")).toBe("root shared\n");
+      expect(readFileSync(join(wt, folder, "scene/SKILL.md"), "utf8")).toBe("alpha scene\n");
+      expect(readFileSync(join(wt, folder, "only-alpha/SKILL.md"), "utf8")).toBe("alpha only\n");
+      expect(existsSync(join(wt, folder, "internal"))).toBe(false);
+    }
+    expect(readFileSync(join(wt, ".claude/skills/only-beta/SKILL.md"), "utf8")).toBe("project beta\n");
+    expect(readFileSync(join(wt, ".agents/skills/only-beta/SKILL.md"), "utf8")).toBe("beta only\n");
+    expect(git(wt, "status", "--porcelain")).toBe("");
+  });
+
+  it("gives a Run the packs picked when it started, not a later change, even after a restart", async () => {
+    const { project } = await projectWithRemote();
+    await packed.setSkillPacks(project.id, ["alpha"]);
+    const first = await runOf(project);
+    await packed.setSkillPacks(project.id, ["beta"]);
+    const second = await runOf(project);
+    expect(existsSync(join(first, ".claude/skills/only-alpha"))).toBe(true);
+    expect(existsSync(join(first, ".claude/skills/only-beta"))).toBe(false);
+    expect(existsSync(join(second, ".claude/skills/only-alpha"))).toBe(false);
+    expect(existsSync(join(second, ".claude/skills/only-beta"))).toBe(true);
+
+    rmSync(join(first, ".agents/skills/only-alpha"), { recursive: true });
+    await pool.query("UPDATE runs SET state = 'running' WHERE worktree_path = $1", [first]);
+    const restarted = createForge({ pool, runner, codeHost: createFakeCodeHost(), worktreesRoot: worktrees, skillPack: join(root, "shared"), skillsRoot: root });
+    await restarted.recoverAfterRestart();
+    await restarted.whenIdle();
+    expect(readFileSync(join(first, ".agents/skills/only-alpha/SKILL.md"), "utf8")).toBe("alpha only\n");
+    expect(existsSync(join(first, ".agents/skills/only-beta"))).toBe(false);
+  });
+});

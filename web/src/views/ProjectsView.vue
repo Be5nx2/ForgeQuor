@@ -12,6 +12,9 @@ const setupDrafts = ref<Record<number, string>>({});
 /** Max concurrent Runs being edited, by Project id. */
 const limits = ref<Record<number, number>>({});
 /** Art Direction path and art folder being edited, by Project id. */
+const offeredPacks = ref<string[]>([]);
+/** Skill Packs being edited, by Project id. */
+const packChoices = ref<Record<number, string[]>>({});
 const arts = ref<Record<number, { artDirectionPath: string; artFolder: string }>>({});
 
 async function load() {
@@ -19,7 +22,19 @@ async function load() {
   drafts.value = Object.fromEntries(projects.value.map((p) => [p.id, p.checks.join("\n")]));
   setupDrafts.value = Object.fromEntries(projects.value.map((p) => [p.id, p.setup.join("\n")]));
   limits.value = Object.fromEntries(projects.value.map((p) => [p.id, p.maxConcurrentRuns]));
+  offeredPacks.value = (await getJson<{ offered: string[] }>("/api/skill-packs")).offered;
+  packChoices.value = Object.fromEntries(projects.value.map((p) => [p.id, [...p.skillPacks]]));
   arts.value = Object.fromEntries(projects.value.map((p) => [p.id, { artDirectionPath: p.artDirectionPath, artFolder: p.artFolder }]));
+}
+
+async function savePacks(p: Project) {
+  error.value = "";
+  try {
+    const saved = await putJson<Project>(`/api/projects/${p.id}/skill-packs`, { packs: packChoices.value[p.id] });
+    p.skillPacks = saved.skillPacks;
+  } catch (e) {
+    error.value = (e as Error).message;
+  }
 }
 
 async function saveArt(p: Project) {
@@ -123,6 +138,14 @@ onMounted(load);
           <input v-model="arts[p.id]!.artFolder" placeholder="assets/art" :aria-label="`Art folder of ${p.name}`" />
         </label>
         <button type="submit">Save art settings</button>
+      </form>
+      <form v-if="offeredPacks.length" class="stack" @submit.prevent="savePacks(p)">
+        <span>Skill Packs (on top of shared)</span>
+        <label v-for="pack in offeredPacks" :key="pack">
+          <input v-model="packChoices[p.id]" type="checkbox" :value="pack" :aria-label="`${pack} Skill Pack of ${p.name}`" />
+          {{ pack }}
+        </label>
+        <button type="submit">Save Skill Packs</button>
       </form>
       <form @submit.prevent="saveLimit(p)">
         <label>

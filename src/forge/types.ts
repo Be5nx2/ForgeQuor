@@ -22,6 +22,8 @@ export interface Project {
   artDirectionPath: string;
   /** Where an `assets` Run commits its Assets, relative to the repository. */
   artFolder: string;
+  /** The Skill Packs picked on top of `shared`, in the order they are placed. */
+  skillPacks: string[];
 }
 
 /** The Art Direction facts of a Project and the images a Run form can offer as references. */

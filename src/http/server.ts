@@ -64,6 +64,20 @@ export async function createServer(deps: {
     }
   });
 
+  app.get("/api/skill-packs", async () => ({ offered: deps.forge.offeredSkillPacks() }));
+
+  app.put<{ Params: { id: string }; Body: { packs?: unknown } }>("/api/projects/:id/skill-packs", async (req, reply) => {
+    const packs = req.body?.packs;
+    if (!Array.isArray(packs) || packs.some((p) => typeof p !== "string")) {
+      return reply.code(400).send({ error: "packs must be a list of Skill Pack names." });
+    }
+    try {
+      return await deps.forge.setSkillPacks(Number(req.params.id), packs);
+    } catch (e: any) {
+      return reply.code(e instanceof InvalidInputError ? 400 : 404).send({ error: e.message });
+    }
+  });
+
   app.put<{ Params: { id: string }; Body: { max?: unknown } }>("/api/projects/:id/concurrency", async (req, reply) => {
     const max = req.body?.max;
     if (typeof max !== "number" || !Number.isInteger(max) || max < 1) {

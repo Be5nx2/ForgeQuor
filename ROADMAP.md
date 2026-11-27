@@ -236,7 +236,7 @@ Griller with a **Conversation Gate** (it writes the Project's glossary and ADRs 
     - a Run freezes its effective seats at start; its Agent Steps use them, also after a restart; Runs from before M4 resolve seats as before;
     - the Run detail shows the Runner and model each Agent Step used;
     - New Run warns, without blocking, next to a seat whose Runner's Quota is exhausted, with the reset time.
-- [ ] `m4-08` **Skill Packs per Project**: a Project's Agents get the packs it picked on top of `shared`.
+- [x] `m4-08` **Skill Packs per Project**: a Project's Agents get the packs it picked on top of `shared`.
   - Spec: `docs/specs/m4-comfort.md`
   - Blocked by: none
   - Acceptance:
