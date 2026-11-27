@@ -41,8 +41,8 @@ afterAll(async () => {
   rmSync(worktrees, { recursive: true, force: true });
 });
 afterEach(async () => {
-  // Paused Runs of one test must not be resumed by another test's clock.
-  await pool.query("UPDATE runs SET state = 'abandoned' WHERE state = 'paused'");
+  // Paused Runs of one test must not be resumed by another test's clock: abandon them, as the human would.
+  for (const run of await forge.listRuns({ state: "paused" })) await forge.abandonRun(run.id);
   fakeNow = null;
   runner.use(() => {});
   runner.steps.length = 0;

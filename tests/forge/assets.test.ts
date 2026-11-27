@@ -58,8 +58,8 @@ afterAll(async () => {
   rmSync(scratch, { recursive: true, force: true });
 });
 afterEach(async () => {
-  // Paused Runs of one test must not be resumed by another test's clock.
-  await pool.query("UPDATE runs SET state = 'abandoned' WHERE state = 'paused'");
+  // Paused Runs of one test must not be resumed by another test's clock: abandon them, as the human would.
+  for (const run of await forge.listRuns({ state: "paused" })) await forge.abandonRun(run.id);
   fakeNow = null;
   developer.use(() => {});
   developer.steps.length = 0;
@@ -347,7 +347,7 @@ describe("when the assets Run cannot go on", () => {
 
     expect(run.state).toBe("paused");
     expect(run.resumeAt).toEqual(resetsAt);
-    await pool.query("UPDATE runs SET state = 'abandoned' WHERE id = $1", [run.id]);
+    await forge.abandonRun(run.id);
   });
 });
 
