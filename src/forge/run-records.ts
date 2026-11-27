@@ -39,7 +39,7 @@ export interface RunRecords {
   clearChecks(attempt: number): Promise<void>;
   /** Records the outcome of every Check of a Developer attempt. */
   recordChecks(attempt: number, outcomes: CheckOutcome[]): Promise<void>;
-  /** The Feedback of every rejection of this Run, oldest first. */
+  /** The Feedback of every rejection of this Run, and of every retry or go back from an Escalation that was given one, oldest first. */
   earlierFeedbacks(): Promise<string[]>;
   /** Remembers the pull request opened for the Run. */
   recordPullRequest(number: number, url: string): Promise<void>;
@@ -113,7 +113,7 @@ export function createRunRecords(pool: pg.Pool, runId: number, iteration: number
       }
     },
     async earlierFeedbacks() {
-      const { rows } = await pool.query("SELECT feedback FROM gates WHERE run_id = $1 AND decision = 'reject' ORDER BY id", [runId]);
+      const { rows } = await pool.query("SELECT feedback FROM gates WHERE run_id = $1 AND (decision = 'reject' OR (decision IN ('retry', 'go_back') AND feedback IS NOT NULL)) ORDER BY id", [runId]);
       return rows.map((r) => r.feedback);
     },
     async recordPullRequest(number, url) {

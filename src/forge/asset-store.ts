@@ -32,6 +32,8 @@ function toAsset(r: Record<string, any>): Asset {
 
 /** One recorded Artist attempt at an Asset, as the Artist step reads it back to know where to go on. */
 export interface RecordedAttempt {
+  /** When it was recorded. */
+  at: Date;
   written: boolean;
   failures: string[];
   summary: string;
@@ -147,7 +149,7 @@ export function createAssetStore(pool: pg.Pool): AssetStore {
     },
 
     async attemptsIn(assetId, iteration) {
-      const { rows } = await pool.query("SELECT written, failures, summary FROM asset_versions WHERE asset_id = $1 AND iteration = $2 ORDER BY id", [
+      const { rows } = await pool.query("SELECT written, failures, summary, created_at AS at FROM asset_versions WHERE asset_id = $1 AND iteration = $2 ORDER BY id", [
         assetId,
         iteration,
       ]);

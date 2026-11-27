@@ -118,7 +118,7 @@ onUnmounted(() => stopFollowing?.());
         {{ g.kind === "asset" && g.decidedAt ? `${g.verdicts.length} ${g.verdicts.length === 1 ? "Asset" : "Assets"} judged.` : g.reason }}
         <pre v-if="g.evidence">{{ g.evidence }}</pre>
         <div v-if="g.decidedAt" class="muted">
-          {{ g.decision === "approve" ? "Approved" : g.decision === "reject" ? "Rejected" : "Abandoned" }} · {{ new Date(g.decidedAt).toLocaleString() }}
+          {{ { approve: "Approved", reject: "Rejected", retry: "Retried", go_back: "Went back", abandon: "Abandoned" }[g.decision ?? "abandon"] }} · {{ new Date(g.decidedAt).toLocaleString() }}
           <pre v-if="g.feedback">{{ g.feedback }}</pre>
         </div>
         <GateActions v-else :gate="g" @decided="load" />

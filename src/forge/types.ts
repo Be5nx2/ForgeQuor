@@ -58,9 +58,9 @@ export interface WorkflowList {
 export type RunState = "queued" | "running" | "waiting" | "paused" | "approved" | "merged" | "closed" | "abandoned";
 export type GateKind = "final" | "escalation" | "asset";
 /** What a Gate records as decided. */
-export type GateDecision = "approve" | "reject" | "abandon";
+export type GateDecision = "approve" | "reject" | "abandon" | "retry" | "go_back";
 /** `judge` is the verdicts of an Asset Gate: its decision is recorded as approve when every Asset was approved, reject when any was not. */
-export type GateAction = "approve" | "reject" | "abandon" | "judge";
+export type GateAction = "approve" | "reject" | "abandon" | "judge" | "retry" | "go_back";
 
 export interface Run {
   id: number;
@@ -124,9 +124,15 @@ export interface Gate {
   kind: GateKind;
   reason: string;
   evidence: string | null;
-  /** What the human can do here. A final Gate may be approved or rejected with Feedback; an Asset Gate judged; an Escalation can only be abandoned. */
+  /** What the human can do here. A final Gate may be approved or rejected with Feedback; an Asset Gate judged; an Escalation abandoned (and retried or gone back from, see `redo`). */
   actions: GateAction[];
-  /** The human's written reason, when the Gate was rejected. */
+  /**
+   * What an open Escalation also offers besides what `actions` lists: `retry` (the Step that failed runs again, or the Run
+   * goes on from where it stands when no Step is named) and, when `goBack` lists a Step, `go_back` to it. Null for
+   * every other Gate, and once decided.
+   */
+  redo: { goBack: GoBackChoice[] } | null;
+  /** The human's written reason, when the Gate was rejected, or the Feedback given to a retry or a go back. */
   feedback: string | null;
   /** The verdict on each Asset, once an Asset Gate was judged. */
   verdicts: GateVerdict[];
@@ -134,6 +140,14 @@ export interface Gate {
   decidedAt: Date | null;
   /** What was decided: approve or reject (an Asset Gate judged by verdicts is approve when all were approved), or abandon. */
   decision: GateDecision | null;
+}
+
+/** A done Step an Escalation can go back to. */
+export interface GoBackChoice {
+  stepId: string;
+  type: StepState["type"];
+  /** The Agent's name for an Agent Step, the Gate kind for a Gate; null for the others. */
+  detail: string | null;
 }
 
 /** One pass through the produce → review loop; the Feedback is what started it (null for the first). */

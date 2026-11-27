@@ -13,7 +13,8 @@ import { createRunRecords } from "./run-records.js";
 import { builtInExtensions } from "./builtin.js";
 import { AssetNotFoundError, GateError, InvalidInputError, RunNotFoundError, RunStateError } from "./errors.js";
 import type { Extension } from "./extension.js";
-import { escalationGate, finalGate, refusal, type GateKindModule, type GateOutcome } from "./gates.js";
+import { allows, escalationGate, finalGate, refusal, type GateKindModule, type GateOutcome } from "./gates.js";
+import { goBackChoices, redoFailedSteps, redoSteps, redoSet, type StepRow } from "./step-states.js";
 import type { AgentSeat, Publication, RunInput, Workflow, WorkflowContext } from "./workflow.js";
 import type { CodeHost } from "../codehost/codehost.js";
 import { parseDefaultSize, parseReferences } from "./art-direction.js";
@@ -86,7 +87,7 @@ export interface Forge {
    * unknown or already decided Gate or a choice it does not offer, and an InvalidInputError for a rejection without
    * Feedback or verdicts that do not fit the Assets waiting.
    */
-  decideGate(input: { gateId: number; action: GateAction; feedback?: string; verdicts?: Verdict[] }): Promise<RunDetail>;
+  decideGate(input: { gateId: number; action: GateAction; feedback?: string; verdicts?: Verdict[]; target?: string }): Promise<RunDetail>;
   /**
    * Abandons a Run in any state before Merged: closes its pull request if it has one, settles its open Gate, and keeps
    * its branch and worktree. Throws a RunStateError when the Run is already over. A pull request merged on GitHub in
@@ -230,6 +231,7 @@ function toGate(r: Record<string, any>, actions: GateAction[]): Gate {
     actions,
     feedback: r.feedback,
     verdicts: [],
+    redo: null,
     openedAt: r.opened_at,
     decidedAt: r.decided_at,
     decision: r.decision,
@@ -453,6 +455,55 @@ export function createForge(deps: ForgeDeps): Forge {
     return forge.getRun(run.id);
   }
 
+  /**
+   * An Escalation's retry or go back: the Steps it puts back to waiting start again with a fresh attempt budget, in the
+   * same Iteration and worktree (files are not reverted). The Feedback is kept on the Gate, where the Agents read it.
+   */
+  async function redoEscalation(gate: Gate, outcome: Extract<GateOutcome, { next: "redo" }>): Promise<RunDetail> {
+    const open = await withRedo(gate);
+    let steps: string[] | null = null;
+    if (outcome.goBackTo) {
+      if (!open.redo?.goBack.length) throw new GateError("This Escalation has no earlier Step to go back to.");
+      if (!open.redo.goBack.some((s) => s.stepId === outcome.goBackTo)) {
+        throw new InvalidInputError(`Cannot go back to "${outcome.goBackTo}"; the Steps to go back to are: ${open.redo.goBack.map((s) => s.stepId).join(", ")}.`);
+      }
+      steps = redoSet((await definitionOf(gate.runId))!, gate.stepId!, outcome.goBackTo);
+    } else if (gate.stepId) {
+      steps = redoSet((await definitionOf(gate.runId))!, gate.stepId);
+    }
+    const client = await pool.connect();
+    let run: Run;
+    try {
+      await client.query("BEGIN");
+      // As in `decideAndContinue`: the Run row first, guarded on the Run still waiting and the Gate undecided.
+      const moved = await client.query(`UPDATE runs SET state = 'running', updated_at = now() WHERE id = $1 AND state = 'waiting' RETURNING ${RUN_COLUMNS}`, [gate.runId]);
+      const decided = moved.rowCount
+        ? await client.query("UPDATE gates SET decided_at = now(), decision = $2, feedback = $3 WHERE id = $1 AND decided_at IS NULL RETURNING run_id", [
+            gate.id,
+            outcome.decision,
+            outcome.feedback ?? null,
+          ])
+        : null;
+      if (!decided?.rowCount) {
+        await client.query("ROLLBACK");
+        throw new GateError(`Gate ${gate.id} is already decided.`);
+      }
+      // Steps that failed beside it (in a batch of parallel Steps) start again too; an Escalation that names no Step is retried as a whole.
+      if (steps) await redoSteps(client, gate.runId, gate.iteration, steps);
+      await redoFailedSteps(client, gate.runId, gate.iteration);
+      await client.query("COMMIT");
+      run = toRun(moved.rows[0]);
+    } catch (e) {
+      if (!(e instanceof GateError)) await client.query("ROLLBACK").catch(() => {});
+      throw e;
+    } finally {
+      client.release();
+    }
+    changed(run.id);
+    await restart(run);
+    return forge.getRun(run.id);
+  }
+
   async function abandon(runId: number): Promise<RunDetail> {
     const { rows } = await pool.query(
       `SELECT r.id, r.state, r.pr_number, p.remote_owner, p.remote_name FROM runs r JOIN projects p ON p.id = r.project_id WHERE r.id = $1`,
@@ -497,6 +548,26 @@ export function createForge(deps: ForgeDeps): Forge {
   }
 
   /** The Run's Steps in Workflow order with where each stands in the Run's current Iteration. */
+  /** The Steps of a Run's Workflow: the definition it froze (or its Workflow's current one, for a Run that froze none). */
+  async function definitionOf(runId: number): Promise<WorkflowDefinition | undefined> {
+    const { rows } = await pool.query("SELECT definition, workflow FROM runs WHERE id = $1", [runId]);
+    return rows[0]?.definition ?? workflows.get(rows[0]?.workflow)?.definition;
+  }
+
+  async function statesOf(runId: number, iteration: number): Promise<Map<string, StepRow>> {
+    const { rows } = await pool.query("SELECT * FROM step_states WHERE run_id = $1 AND iteration = $2", [runId, iteration]);
+    return new Map(rows.map((r) => [r.step as string, { stepId: r.step, status: r.status, attempts: r.attempts, sentBack: r.sent_back, budgetFrom: r.budget_from, retriedAt: r.retried_at }]));
+  }
+
+  /** What an open Escalation offers besides abandoning: the done Steps before the Step that failed it can go back to (none when it names no Step). */
+  async function withRedo(gate: Gate): Promise<Gate> {
+    if (gate.decidedAt || !gateKinds.get(gate.kind)?.redo) return gate;
+    const definition = gate.stepId ? await definitionOf(gate.runId) : undefined;
+    const choices = definition && gate.stepId ? goBackChoices(definition, await statesOf(gate.runId, gate.iteration), gate.stepId) : [];
+    const goBack = choices.map((s) => ({ stepId: s.id, type: s.type, detail: s.type === "agent" ? s.agent : s.type === "gate" ? s.gate : null }));
+    return { ...gate, redo: { goBack } };
+  }
+
   async function stepsOf(run: Run): Promise<StepState[]> {
     const { rows: frozen } = await pool.query("SELECT definition FROM runs WHERE id = $1", [run.id]);
     const definition: WorkflowDefinition | undefined = frozen[0]?.definition ?? workflows.get(run.workflow)?.definition;
@@ -758,7 +829,7 @@ export function createForge(deps: ForgeDeps): Forge {
         iterations,
         attempts: attempts.rows.map(toAttempt),
         checks: checks.rows.map(toCheck),
-        gates: gates.rows.map((g) => ({ ...gateOf(g), verdicts: verdictsOf(Number(g.id)) })),
+        gates: await Promise.all(gates.rows.map((g) => withRedo({ ...gateOf(g), verdicts: verdictsOf(Number(g.id)) }))),
       };
     },
 
@@ -778,7 +849,7 @@ export function createForge(deps: ForgeDeps): Forge {
          FROM gates g JOIN runs r ON r.id = g.run_id JOIN projects p ON p.id = r.project_id
          WHERE g.decided_at IS NULL ORDER BY g.id`,
       );
-      return rows.map((r) => ({ ...gateOf(r), runTitle: r.run_title, projectName: r.project_name }));
+      return Promise.all(rows.map(async (r) => ({ ...(await withRedo(gateOf(r))), runTitle: r.run_title, projectName: r.project_name })));
     },
 
     async listApprovedRuns() {
@@ -790,15 +861,16 @@ export function createForge(deps: ForgeDeps): Forge {
       return rows.map((r) => ({ ...toRun(r), projectName: r.project_name }));
     },
 
-    async decideGate({ gateId, action, feedback, verdicts }) {
+    async decideGate({ gateId, action, feedback, verdicts, target }) {
       const { rows } = await pool.query("SELECT * FROM gates WHERE id = $1", [gateId]);
       if (!rows[0]) throw new GateError(`No Gate ${gateId}.`);
       const gate = gateOf(rows[0]);
       if (gate.decidedAt) throw new GateError(`Gate ${gateId} is already decided.`);
       const kind = gateKinds.get(gate.kind)!;
-      if (!kind.actions.includes(action)) throw new GateError(refusal(kind, action));
+      if (!allows(kind, action)) throw new GateError(refusal(kind, action));
       // The kind validates the decision and says where the Run goes; the core carries it out.
-      const outcome = await kind.decide(gate, { action, feedback, verdicts });
+      const outcome = await kind.decide(gate, { action, feedback, verdicts, target });
+      if (outcome.next === "redo") return redoEscalation(gate, outcome);
       if (outcome.next === "continue") return decideAndContinue(gate, outcome);
       if (outcome.next === "abandon") {
         try {

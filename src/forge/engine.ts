@@ -177,9 +177,10 @@ async function applyBatch(ctx: WorkflowContext, definition: WorkflowDefinition, 
 
     const attempts = state.attempts + 1;
     const to = outcome.to ?? step.onReject;
-    if (!to || attempts >= step.maxAttempts) {
+    const tried = attempts - state.budgetFrom;
+    if (!to || tried >= step.maxAttempts) {
       await steps.set(step.id, { status: "failed", attempts });
-      const reason = to ? (types.get(step.type)?.exhausted?.(step, attempts) ?? `Step "${step.id}" still rejects after ${attempts} attempts.`) : `Step "${step.id}" rejected, but it names no Step to go back to.`;
+      const reason = to ? (types.get(step.type)?.exhausted?.(step, tried) ?? `Step "${step.id}" still rejects after ${tried} attempts.`) : `Step "${step.id}" rejected, but it names no Step to go back to.`;
       await stopRun(() => ctx.openGate("escalation", reason, outcome.reason, step.id));
       continue;
     }

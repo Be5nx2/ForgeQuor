@@ -8,6 +8,8 @@ export interface GateDecisionInput {
   action: GateAction;
   feedback?: string;
   verdicts?: Verdict[];
+  /** The Step an Escalation is asked to go back to. */
+  target?: string;
 }
 
 /** Where the Run goes once a Gate is decided. */
@@ -16,6 +18,12 @@ export type GateOutcome =
   | { next: "abandon" }
   /** The Run is Approved: its pull request waits for the human's merge. */
   | { next: "approve" }
+  /**
+   * The Run goes on in the same Iteration, its worktree as it is: the failed Step runs again (`goBackTo` absent) or the
+   * Run goes back to that earlier done Step and replays it and what follows. Either way with a fresh attempt budget.
+   * The core checks the Step against what the Run's Steps allow.
+   */
+  | { next: "redo"; decision: "retry" | "go_back"; goBackTo?: string; feedback?: string }
   /**
    * The Run goes on working in the same worktree. `nextIteration` starts the next Iteration (a rejection), otherwise it
    * carries on from where it was. `record` writes what else the decision stores, in the decision's transaction.
@@ -32,6 +40,8 @@ export interface GateKindModule {
   label: string;
   /** What the human can do at it. */
   actions: GateAction[];
+  /** Whether the human can also retry the Step that failed or go back to an earlier one (an Escalation). */
+  redo?: boolean;
   /** Why a Gate Step of this kind opens it, as the human reads it. */
   reason?: string | ((ctx: WorkflowContext) => Promise<string>);
   /**
@@ -43,7 +53,7 @@ export interface GateKindModule {
 
 /** Why a Gate does not offer `action`. */
 export function refusal(gate: GateKindModule, action: GateAction): string {
-  const past: Record<GateAction, string> = { approve: "approved", reject: "rejected", abandon: "abandoned", judge: "judged" };
+  const past: Record<GateAction, string> = { approve: "approved", reject: "rejected", abandon: "abandoned", judge: "judged", retry: "retried", go_back: "gone back from" };
   return `${gate.label} cannot be ${past[action]}; it can only be ${gate.actions.map((a) => past[a]).join(" or ")}.`;
 }
 
@@ -62,12 +72,29 @@ export const finalGate: GateKindModule = {
   },
 };
 
-/** Something went wrong and needs a human: the only choice is to abandon the Run. */
+/** Whether the human can decide a Gate of this kind with `action`: what it lists, and for an Escalation retrying and going back. */
+export function allows(gate: GateKindModule, action: GateAction): boolean {
+  return gate.actions.includes(action) || (!!gate.redo && (action === "retry" || action === "go_back"));
+}
+
+/**
+ * Something went wrong and needs a human: retry the Step that failed (the Feedback is optional), go back to an earlier
+ * done Step (the Feedback is required), or abandon the Run. `actions` lists what every Escalation offers; retrying and
+ * going back depend on the Steps the Run has, so the Gate carries them as `redo`.
+ */
 export const escalationGate: GateKindModule = {
   kind: "escalation",
   label: "An Escalation",
   actions: ["abandon"],
-  async decide() {
+  redo: true,
+  async decide(_gate, { action, feedback, target }) {
+    if (action === "retry") return { next: "redo", decision: "retry", feedback: feedback?.trim() || undefined };
+    if (action === "go_back") {
+      const reason = feedback?.trim();
+      if (!target) throw new InvalidInputError("Going back needs the Step to go back to.");
+      if (!reason) throw new InvalidInputError("Going back needs a Feedback saying what to change.");
+      return { next: "redo", decision: "go_back", goBackTo: target, feedback: reason };
+    }
     return { next: "abandon" };
   },
 };

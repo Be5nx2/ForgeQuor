@@ -294,7 +294,7 @@ const MAX_UNWRITTEN_ATTEMPTS = 2;
  * was tried is read from the recorded versions, so a restarted Run goes on from there. False when the Run cannot go on
  * (it paused, opened an Escalation, or was abandoned).
  */
-async function drawAsset(store: AssetStore, ctx: WorkflowContext, asset: Asset, artDirection: string, artReferences: string[], palette: string[] | null): Promise<boolean> {
+async function drawAsset(store: AssetStore, ctx: WorkflowContext, asset: Asset, artDirection: string, artReferences: string[], palette: string[] | null, retriedAt: Date | null): Promise<boolean> {
   const { run, project, worktreePath } = ctx;
   const seat = ctx.agents.artist;
   if (!seat) throw new Error("Forgequor has no Runner for the Artist.");
@@ -312,9 +312,11 @@ async function drawAsset(store: AssetStore, ctx: WorkflowContext, asset: Asset, 
     let redo: Redo | undefined;
     if (last?.written && !last.failures.length) break;
     if (last) {
-      const unwritten = versions.filter((v) => !v.written).length;
-      if (versions.length >= MAX_ARTIST_ATTEMPTS || unwritten >= MAX_UNWRITTEN_ATTEMPTS) {
-        const afterAttempts = `after ${versions.length} attempts`;
+      // A retry the human asked for gives the Asset a fresh budget: only the attempts since then count.
+      const counted = retriedAt ? versions.filter((v) => v.at >= retriedAt) : versions;
+      const unwritten = counted.filter((v) => !v.written).length;
+      if (counted.length >= MAX_ARTIST_ATTEMPTS || unwritten >= MAX_UNWRITTEN_ATTEMPTS) {
+        const afterAttempts = `after ${counted.length} attempts`;
         await (last.written
           ? ctx.openGate("escalation", `"${asset.name}" still fails the Asset Checks ${afterAttempts}.`, last.failures.join("\n"))
           : ctx.openGate("escalation", `The Artist wrote nothing at the target path of "${asset.name}" (${asset.targetPath}) ${afterAttempts}.`, last.summary));
@@ -366,7 +368,7 @@ function assetsPublication(store: AssetStore): Publication {
 function artistStepType(store: AssetStore): StepTypeModule {
   return {
     type: "artist",
-    async execute({ ctx }) {
+    async execute({ ctx, state }) {
       const { project, worktreePath } = ctx;
       const assets = await store.load(ctx.run.id);
       const todo = assets.filter((a) => a.status === "pending" || a.status === "generating" || a.status === "rejected");
@@ -394,7 +396,7 @@ function artistStepType(store: AssetStore): StepTypeModule {
       const palette = parsePalette(artDirection);
       const artReferences = parseReferences(artDirection);
       for (const asset of todo) {
-        if (!(await drawAsset(store, ctx, asset, artDirection, artReferences, palette))) return { next: "stop" };
+        if (!(await drawAsset(store, ctx, asset, artDirection, artReferences, palette, state.retriedAt))) return { next: "stop" };
       }
       return { next: "done" };
     },
