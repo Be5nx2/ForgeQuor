@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { followRuns, getJson, type Project, type Run } from "../api";
 
 const emit = defineEmits<{ open: [id: number] }>();
@@ -10,6 +10,9 @@ const projects = ref<Project[]>([]);
 const runs = ref<Run[]>([]);
 const filterProject = ref("");
 const filterState = ref("");
+/** Archived Runs (finished, their worktree removed) are hidden unless asked for. */
+const showArchived = ref(false);
+const visible = computed(() => (showArchived.value ? runs.value : runs.value.filter((r) => !r.archivedAt)));
 /** False until the first list arrives, so an empty page never reads as "No Run" while it is loading. */
 const loaded = ref(false);
 const loadError = ref("");
@@ -63,13 +66,14 @@ watch([filterProject, filterState], load);
       <option value="">All states</option>
       <option v-for="s in STATES" :key="s" :value="s">{{ s }}</option>
     </select>
+    <label><input v-model="showArchived" type="checkbox" /> Show archived</label>
   </form>
   <p v-if="loadError" class="error">{{ loadError }}</p>
   <p v-if="!loaded" class="muted">Loading the Runs…</p>
-  <p v-else-if="!runs.length" class="muted">No Run{{ filterProject || filterState ? " matches these filters" : "" }}.</p>
+  <p v-else-if="!visible.length" class="muted">No Run{{ filterProject || filterState || (!showArchived && runs.length) ? " matches these filters" : "" }}.</p>
   <ul>
-    <li v-for="r in runs" :key="r.id" class="clickable" @click="emit('open', r.id)">
-      <strong>{{ r.title }}</strong> <span class="badge">{{ r.state }}</span>
+    <li v-for="r in visible" :key="r.id" class="clickable" @click="emit('open', r.id)">
+      <strong>{{ r.title }}</strong> <span class="badge">{{ r.state }}</span> <span v-if="r.archivedAt" class="badge">archived</span>
       <div class="muted">{{ r.workflow }} · {{ projectName(r.projectId) }}<span v-if="r.trackerRef"> · {{ r.trackerRef }}</span></div>
     </li>
   </ul>

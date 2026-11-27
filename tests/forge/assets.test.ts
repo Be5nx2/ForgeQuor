@@ -745,7 +745,9 @@ describe("the Asset Gate", () => {
 
     expect(abandoned.state).toBe("abandoned");
     expect(codeHost.pullRequests).toEqual([]);
-    expect(git(run.worktreePath!, "log", "--format=%s", "origin/main..HEAD")).toBe("");
+    // Archived, its worktree and branch are gone: nothing of it is left in the Project but what was never committed to the default branch.
+    expect(abandoned.archivedAt).not.toBeNull();
+    expect(git(project.localPath, "branch", "--list", run.branch!)).toBe("");
   });
 
   it("holds a Project slot like any other Run", async () => {

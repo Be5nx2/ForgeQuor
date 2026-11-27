@@ -1,6 +1,6 @@
-import { existsSync, readFileSync, realpathSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, realpathSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type pg from "pg";
 import { createForge, type Forge, type ForgeDeps, type Project, type RunDetail, type RunUpdate } from "../../src/forge/forge.js";
@@ -42,13 +42,19 @@ afterAll(async () => {
 });
 afterEach(async () => {
   // Paused Runs of one test must not be resumed by another test's clock: abandon them, as the human would.
-  for (const run of await forge.listRuns({ state: "paused" })) await forge.abandonRun(run.id);
+  // Abandoning frees a slot: the Queued Run it promotes must settle (and may pause too) before the repository is deleted under it.
+  for (let paused = await forge.listRuns({ state: "paused" }); paused.length; paused = await forge.listRuns({ state: "paused" })) {
+    for (const run of paused) await forge.abandonRun(run.id);
+    await forge.whenIdle();
+  }
   fakeNow = null;
   runner.use(() => {});
   runner.steps.length = 0;
   codeHost.pullRequests.length = 0;
   codeHost.failWith(null);
   codeHost.failStateReads(null);
+  codeHost.failBranchDeletion(null);
+  codeHost.deletedBranches.length = 0;
   cleanups.splice(0).forEach((c) => c());
 });
 
@@ -407,7 +413,7 @@ describe("deciding a Gate", () => {
     expect((await forge.listOpenGates()).map((g) => g.runId)).not.toContain(run.id);
   });
 
-  it("abandoning a Gate makes the Run Abandoned and keeps its branch and worktree", async () => {
+  it("abandoning a Gate makes the Run Abandoned and archives it", async () => {
     const { project } = await projectWithRemote();
     runner.use(() => ({ status: "failed", error: "claude crashed" }));
     const waiting = await runToEnd(project);
@@ -416,7 +422,8 @@ describe("deciding a Gate", () => {
 
     expect(run.state).toBe("abandoned");
     expect(run.gates).toMatchObject([{ kind: "escalation", decision: "abandon" }]);
-    expect(git(run.worktreePath!, "rev-parse", "--abbrev-ref", "HEAD")).toBe(run.branch);
+    expect(run.archivedAt).not.toBeNull();
+    expect(existsSync(run.worktreePath!)).toBe(false);
   });
 
   it("refuses a choice the Gate does not offer, and a Gate already decided", async () => {
@@ -582,8 +589,8 @@ async function approvedRun(project: Project) {
 }
 
 describe("abandoning a Run", () => {
-  it("closes the pull request, keeps the branch and the worktree, and settles the open Gate", async () => {
-    const { project, remote } = await projectWithRemote();
+  it("closes the pull request, archives the Run, and settles the open Gate", async () => {
+    const { project } = await projectWithRemote();
     runner.use((step) => developerCommits(step));
     const waiting = await runToEnd(project);
 
@@ -591,8 +598,7 @@ describe("abandoning a Run", () => {
 
     expect(run.state).toBe("abandoned");
     expect(codeHost.pullRequests.map((p) => p.state)).toEqual(["closed"]);
-    expect(git(remote.bare, "branch", "--list", run.branch!)).toContain(run.branch);
-    expect(existsSync(run.worktreePath!)).toBe(true);
+    expect(existsSync(run.worktreePath!)).toBe(false);
     expect(run.gates).toMatchObject([{ decision: "abandon" }]);
     expect((await forge.listOpenGates()).map((g) => g.runId)).not.toContain(run.id);
   });
@@ -758,6 +764,136 @@ describe("waiting for the human's merge", () => {
     await forge.abandonRun(abandoned.id);
 
     expect(await mine(ids)).toEqual([]);
+  });
+});
+
+describe("archiving a Run", () => {
+  const localBranches = (repo: TempRepo) => git(repo.path, "branch", "--list");
+  const archivedApproved = async () => {
+    const { project, repo } = await projectWithRemote();
+    return { project, repo, approved: await approvedRun(project) };
+  };
+
+  it("removes the worktree and local branch of a merged Run, keeps its state, and leaves the remote branch", async () => {
+    const { repo, approved } = await archivedApproved();
+    expect(approved.archivedAt).toBeNull();
+    expect(existsSync(approved.worktreePath!)).toBe(true);
+    codeHost.setState(approved.prNumber!, "merged");
+
+    await forge.checkPullRequests();
+
+    const run = await forge.getRun(approved.id);
+    expect(run.state).toBe("merged");
+    expect(run.archivedAt).not.toBeNull();
+    expect(existsSync(run.worktreePath!)).toBe(false);
+    expect(localBranches(repo)).not.toContain(run.branch);
+    expect(git(repo.path, "worktree", "list")).not.toContain(`run-${run.id}`);
+    expect(codeHost.deletedBranches).toEqual([]);
+    expect(run.gates).toMatchObject([{ kind: "final", decision: "approve" }]);
+  });
+
+  it("also deletes the remote branch of a pull request closed unmerged", async () => {
+    const { project, approved } = await archivedApproved();
+    codeHost.setState(approved.prNumber!, "closed");
+
+    await forge.checkPullRequests();
+
+    const run = await forge.getRun(approved.id);
+    expect(run.state).toBe("closed");
+    expect(run.archivedAt).not.toBeNull();
+    expect(existsSync(run.worktreePath!)).toBe(false);
+    expect(codeHost.deletedBranches).toEqual([{ owner: project.remoteOwner, repo: project.remoteName, branch: run.branch }]);
+  });
+
+  it("archives an abandoned Run and deletes its remote branch", async () => {
+    const { project, repo } = await projectWithRemote();
+    runner.use((step) => developerCommits(step));
+    const waiting = await runToEnd(project);
+
+    const run = await forge.abandonRun(waiting.id);
+
+    expect(run.archivedAt).not.toBeNull();
+    expect(localBranches(repo)).not.toContain(run.branch);
+    expect(codeHost.deletedBranches.map((b) => b.branch)).toEqual([run.branch]);
+  });
+
+  it("deletes the remote branch of an abandoned Run with no pull request only when one was pushed", async () => {
+    const { project, remote } = await projectWithRemote();
+    runner.use(() => ({ status: "failed", error: "claude crashed" }));
+    const never = await runToEnd(project);
+    await forge.abandonRun(never.id);
+    expect(codeHost.deletedBranches).toEqual([]);
+
+    const pushed = await runToEnd(project);
+    git(pushed.worktreePath!, "push", "-q", remote.bare, `HEAD:refs/heads/${pushed.branch}`);
+    await forge.abandonRun(pushed.id);
+    expect(codeHost.deletedBranches.map((b) => b.branch)).toEqual([pushed.branch]);
+  });
+
+  it("keeps the worktree of an Approved Run", async () => {
+    const { repo, approved } = await archivedApproved();
+
+    const run = await forge.getRun(approved.id);
+
+    expect(run.state).toBe("approved");
+    expect(run.archivedAt).toBeNull();
+    expect(existsSync(run.worktreePath!)).toBe(true);
+    expect(localBranches(repo)).toContain(run.branch);
+  });
+
+  it("counts a worktree that is already gone as done", async () => {
+    const { repo, approved } = await archivedApproved();
+    git(repo.path, "worktree", "remove", "--force", approved.worktreePath!);
+    git(repo.path, "branch", "-D", approved.branch!);
+
+    const run = await forge.abandonRun(approved.id);
+
+    expect(run.state).toBe("abandoned");
+    expect(run.archivedAt).not.toBeNull();
+    expect(codeHost.deletedBranches.map((b) => b.branch)).toEqual([run.branch]);
+  });
+
+  it("archives anyway, and still removes the local files, when the remote branch cannot be deleted", async () => {
+    const { approved } = await archivedApproved();
+    codeHost.failBranchDeletion("gh is down");
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const run = await forge.abandonRun(approved.id);
+
+    expect(run.archivedAt).not.toBeNull();
+    expect(existsSync(run.worktreePath!)).toBe(false);
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining("remote branch"), "gh is down");
+    logged.mockRestore();
+  });
+
+  it("archives anyway, and logs it, when the local files cannot be removed", async () => {
+    const { repo, approved } = await archivedApproved();
+    // The worktree folder cannot be deleted from a read-only parent.
+    chmodSync(dirname(approved.worktreePath!), 0o555);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const run = await forge.abandonRun(approved.id);
+      expect(run.archivedAt).not.toBeNull();
+      expect(logged).toHaveBeenCalledWith(expect.stringContaining("local files"), expect.anything());
+      expect(codeHost.deletedBranches.map((b) => b.branch)).toEqual([run.branch]);
+    } finally {
+      chmodSync(dirname(approved.worktreePath!), 0o755);
+      logged.mockRestore();
+    }
+    expect(repo.path).toBeTruthy();
+  });
+
+  it("never touches a folder that is not one of its Run folders", async () => {
+    const { approved } = await archivedApproved();
+    const stray = mkdtempSync(join(tmpdir(), "forgequor-stray-"));
+    cleanups.push(() => rmSync(stray, { recursive: true, force: true }));
+    await pool.query("UPDATE runs SET worktree_path = $2 WHERE id = $1", [approved.id, stray]);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await forge.abandonRun(approved.id);
+
+    expect(existsSync(stray)).toBe(true);
+    logged.mockRestore();
   });
 });
 

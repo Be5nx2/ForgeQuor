@@ -22,7 +22,7 @@ async function load() {
 const abandoning = ref(false);
 const OVER = ["merged", "closed", "abandoned"];
 async function abandon() {
-  if (!window.confirm("Abandon this Run? Its pull request is closed; its branch and worktree are kept.")) return;
+  if (!window.confirm("Abandon this Run? Its pull request is closed, and its worktree and branches are removed.")) return;
   abandoning.value = true;
   error.value = "";
   try {
@@ -70,7 +70,7 @@ onUnmounted(() => stopFollowing?.());
     <p class="muted">Workflow: {{ run.workflow }}</p>
     <p class="muted" v-if="run.trackerRef">Tracker: {{ run.trackerRef }}</p>
     <pre class="task">{{ run.task }}</pre>
-    <p class="muted" v-if="run.branch">Branch <code>{{ run.branch }}</code><br />Worktree <code>{{ run.worktreePath }}</code></p>
+    <p class="muted" v-if="run.branch">Branch <code>{{ run.branch }}</code><br /><template v-if="!run.archivedAt">Worktree <code>{{ run.worktreePath }}</code></template><template v-else>Archived {{ new Date(run.archivedAt).toLocaleString() }}: the worktree is removed, see the pull request for the files.</template></p>
 
     <p v-if="run.prUrl">Pull request <a :href="run.prUrl" target="_blank" rel="noopener">#{{ run.prNumber }}</a></p>
 
@@ -84,6 +84,7 @@ onUnmounted(() => stopFollowing?.());
         :run-id="run.id"
         :iteration="run.iteration"
         :assets="run.assets"
+        :files-removed="!!run.archivedAt"
         :gate="run.gates.find((g) => g.kind === 'asset' && !g.decidedAt)"
         @decided="load"
       />
