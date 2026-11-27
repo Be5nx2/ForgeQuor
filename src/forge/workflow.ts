@@ -92,6 +92,14 @@ export interface Workflow {
   /** The Steps of the Workflow, as a Run starts with them. */
   definition: WorkflowDefinition;
   plan(input: RunInput): RunPlan;
-  /** A Workflow that runs as code instead of from its definition (`assets`, until m3-05 moves it to the engine). */
-  run?(ctx: WorkflowContext): Promise<void>;
+  /** What its Publish Step does around opening the pull request; by default the Developer's Review Brief file is posted. */
+  publication?: Publication;
+}
+
+/** How a Workflow's pull request is made. */
+export interface Publication {
+  /** Runs before the branch is pushed, such as committing what the Workflow produced. */
+  prepare?(ctx: WorkflowContext): Promise<void>;
+  /** The Review Brief to post on the pull request. */
+  brief(ctx: WorkflowContext): Promise<string>;
 }

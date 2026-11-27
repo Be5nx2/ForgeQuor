@@ -58,7 +58,7 @@ The engine behind every Workflow, with no change visible to the human: a deeper 
     - each Step's state (waiting, running, done, skipped, failed, attempts) is persisted per Iteration and shown in order in the Run detail;
     - a restart or a resume after a Pause restarts only the Steps that were running;
     - `developer` runs from its YAML (`max_attempts: 3` on Checks) and every existing test passes unchanged.
-- [ ] `m3-05` **`assets` runs from YAML**: the art Workflow follows its definition too.
+- [x] `m3-05` **`assets` runs from YAML**: the art Workflow follows its definition too.
   - Spec: `docs/specs/m3a-workflow-engine.md`
   - Blocked by: `m3-04`
   - Acceptance:

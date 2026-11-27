@@ -135,7 +135,7 @@ export interface StepState {
 }
 
 export interface RunDetail extends Run {
-  /** The Run's Steps in Workflow order, as they stand in its current Iteration; empty for a Workflow that runs as code. */
+  /** The Run's Steps in Workflow order, as they stand in its current Iteration. */
   steps: StepState[];
   /** The Asset Requests of an `assets` Run and where each stands; empty for other Workflows. */
   assets: Asset[];
