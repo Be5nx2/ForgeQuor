@@ -9,6 +9,7 @@ import {
   RegistrationError,
   RunNotFoundError,
   RunStateError,
+  SeatLockedError,
   type AssetRequest,
   type Forge,
   type GateAction,
@@ -189,6 +190,18 @@ export async function createServer(deps: {
   });
   // Both vendors' latest Quota Reading with its age: the Quota bars.
   app.get("/api/quota", async () => deps.forge.quota());
+  // The Team page: each seat's effective Runner and model, and where each comes from.
+  app.get("/api/team", async () => deps.forge.team());
+  app.put<{ Params: { seat: string }; Body: { runner?: string | null; model?: string | null } }>("/api/team/:seat", async (req, reply) => {
+    try {
+      const { runner, model } = req.body ?? {};
+      return await deps.forge.changeSeat(req.params.seat, { runner, model });
+    } catch (e) {
+      if (e instanceof InvalidInputError) return reply.code(400).send({ error: e.message });
+      if (e instanceof SeatLockedError) return reply.code(409).send({ error: e.message });
+      throw e;
+    }
+  });
   app.get("/api/gates",async () => deps.forge.listOpenGates());
   // The merge list: Approved Runs whose pull request waits for the human's merge.
   app.get("/api/approved-runs", async () => deps.forge.listApprovedRuns());

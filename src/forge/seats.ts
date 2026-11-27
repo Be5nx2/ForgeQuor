@@ -81,7 +81,7 @@ export async function requireSeat(ctx: WorkflowContext, seat: SeatName, agent: s
   await ctx.openGate(
     "escalation",
     `The ${agent} has no usable Runner on seat "${seat}"${why ? ` (${why})` : ""}, so nothing was generated.`,
-    `Set ${variable} to claude or codex, and make sure that tool is installed, then retry.`,
+    `Set the seat's Runner on the Team page (or ${variable}) to claude or codex, and make sure that tool is installed, then retry.`,
   );
   return null;
 }

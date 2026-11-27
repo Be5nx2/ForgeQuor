@@ -12,3 +12,6 @@ export class RunNotFoundError extends Error {}
 
 /** No such Asset in that Run, or nothing servable recorded for it. Part of the Forge interface (`assetImage`). */
 export class AssetNotFoundError extends Error {}
+
+/** A Team setting the environment holds, so the Team page cannot change it. */
+export class SeatLockedError extends Error {}

@@ -6,6 +6,7 @@ import NewRunView from "./views/NewRunView.vue";
 import ProjectsView from "./views/ProjectsView.vue";
 import RunDetailView from "./views/RunDetailView.vue";
 import RunsView from "./views/RunsView.vue";
+import TeamView from "./views/TeamView.vue";
 import WaitingView from "./views/WaitingView.vue";
 import WorkflowsView from "./views/WorkflowsView.vue";
 
@@ -21,6 +22,7 @@ const tabs = [
   { id: "runs", label: "Runs" },
   { id: "projects", label: "Projects" },
   { id: "workflows", label: "Workflows" },
+  { id: "team", label: "Team" },
 ] as const;
 
 const tab = ref<(typeof tabs)[number]["id"]>("waiting");
@@ -56,6 +58,7 @@ onMounted(async () => {
     <NewRunView v-else-if="tab === 'new'" @open="openRun" />
     <ProjectsView v-else-if="tab === 'projects'" />
     <WorkflowsView v-else-if="tab === 'workflows'" />
+    <TeamView v-else-if="tab === 'team'" />
     <RunDetailView v-else-if="runId !== null" :id="runId" @back="runId = null" />
     <RunsView v-else @open="openRun" />
   </main>
