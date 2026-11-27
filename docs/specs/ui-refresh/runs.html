@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Runs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Orbitron:wght@700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="shell.css">
+</head>
+<body>
+<div class="app">
+  <aside>
+    <span class="logo"><span class="logo-mark" aria-hidden="true"></span><span><span class="forge">FORGE</span><span class="quor">QUOR</span></span></span>
+    <a class="btn btn-primary" href="new-run.html" style="text-align:center;text-decoration:none">+ New Run</a>
+    <button class="project" type="button" aria-label="Project: Skyforge"><span>Skyforge</span><span class="muted">⌄</span></button>
+    <nav class="nav" aria-label="Main">
+      <a href="runs.html" aria-current="page">Runs <span class="count" aria-label="2 waiting for you">2</span></a>
+      <a href="projects.html">Projects</a>
+      <span class="soon">Team <small>M3b</small></span>
+      <span class="soon">Workflows</span>
+      <span class="soon">Quotas <small>M4</small></span>
+      <span class="soon">Skill Packs <small>M4</small></span>
+      <span class="soon">Dogfood Inbox</span>
+    </nav>
+    <div class="spacer"></div>
+    <button class="btn" type="button">+ Note</button>
+  </aside>
+  <main>
+
+    <div class="head"><div><h1>Runs</h1><p class="lede">Skyforge · 5 active, 1 slot free of 2</p></div></div>
+
+    <section aria-label="Waiting for you">
+      <h2>Waiting for you<span class="n">2</span></h2>
+      <div class="cards">
+        <article class="wcard">
+          <span class="kind">Gate · review disagreement</span>
+          <h3>#42 Add a dash ability to the player</h3>
+          <p>The Consolidator could not settle one remark. It recommends sending back for R1 only.</p>
+          <div class="row"><span class="muted" style="font-size:var(--fs-xs)">waiting 4 min</span><a class="btn btn-primary" href="run-detail.html" style="text-decoration:none">Open</a></div>
+        </article>
+        <article class="wcard">
+          <span class="kind">Conversation Gate · Griller</span>
+          <h3>#44 Add an inventory screen</h3>
+          <p>The Griller asked 3 questions (round 2) and is waiting for your answers.</p>
+          <div class="row"><span class="muted" style="font-size:var(--fs-xs)">waiting 11 min</span><a class="btn btn-primary" href="run-gate-conversation.html" style="text-decoration:none">Answer</a></div>
+        </article>
+      </div>
+    </section>
+
+    <section aria-label="Waiting for your merge">
+      <h2>Waiting for your merge<span class="n">1</span></h2>
+      <div class="cards">
+        <article class="wcard merge">
+          <span class="kind">Approved · pull request #57</span>
+          <h3>#39 Add a coin magnet pickup</h3>
+          <p>Approved yesterday 18:20. Holds no slot; stays here until merged, closed or abandoned.</p>
+          <div class="row"><span><span class="chip" data-s="ok" data-g="✓">Approved</span></span><a class="btn" href="#" style="text-decoration:none">Open pull request ↗</a></div>
+        </article>
+      </div>
+    </section>
+
+    <section aria-label="All Runs">
+      <h2>All Runs</h2>
+      <div class="panel tight">
+        <div class="filters" role="group" aria-label="Filter by state">
+          <button aria-pressed="true">All</button><button aria-pressed="false">Running</button><button aria-pressed="false">Waiting</button><button aria-pressed="false">Queued</button><button aria-pressed="false">Paused</button><button aria-pressed="false">Done</button>
+        </div>
+        <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th>State</th><th>Run</th><th>Workflow</th><th>Now</th><th>Iteration</th><th>Started</th></tr></thead>
+          <tbody>
+            <tr><td><span class="chip" data-s="waiting" data-g="●">Waiting</span></td><td><a href="run-gate-conversation.html">#44 Add an inventory screen</a></td><td>feature</td><td>Griller <span class="sub">Conversation Gate</span></td><td>1</td><td>15:02</td></tr>
+            <tr><td><span class="chip" data-s="running" data-g="●">Running</span></td><td><a href="#">#43 Fix: enemy stuck in doorway</a></td><td>bugfix</td><td>Developer <span class="sub">attempt 1 of 3</span></td><td>1</td><td>14:40</td></tr>
+            <tr><td><span class="chip" data-s="waiting" data-g="●">Waiting</span></td><td><a href="run-detail.html">#42 Add a dash ability to the player</a></td><td>feature</td><td>Review <span class="sub">disagreement Gate</span></td><td>2</td><td>14:02</td></tr>
+            <tr><td><span class="chip" data-s="idle" data-g="‖">Paused</span></td><td><a href="#">#41 Pixel art: forest tileset</a></td><td>assets</td><td>Artist <span class="sub">Codex Quota, resumes 18:40</span></td><td>1</td><td>13:10</td></tr>
+            <tr><td><span class="chip" data-s="idle" data-g="○">Queued</span></td><td><a href="#">#45 Add a pause menu</a></td><td>feature</td><td>waiting for a free slot</td><td>–</td><td>15:20</td></tr>
+            <tr><td><span class="chip" data-s="ok" data-g="✓">Merged</span></td><td><a href="#">#40 Add coin counter to the HUD</a></td><td>feature</td><td>pull request #56</td><td>2</td><td>yesterday</td></tr>
+            <tr><td><span class="chip" data-s="idle" data-g="–">Abandoned</span></td><td><a href="#">#38 Water shader experiment</a></td><td>feature</td><td>abandoned at spec Gate</td><td>1</td><td>2 days ago</td></tr>
+          </tbody>
+        </table>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+</body>
+</html>

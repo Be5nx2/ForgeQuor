@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>New Run</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Orbitron:wght@700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="shell.css">
+</head>
+<body>
+<div class="app">
+  <aside>
+    <span class="logo"><span class="logo-mark" aria-hidden="true"></span><span><span class="forge">FORGE</span><span class="quor">QUOR</span></span></span>
+    <a class="btn btn-primary" href="new-run.html" style="text-align:center;text-decoration:none">+ New Run</a>
+    <button class="project" type="button" aria-label="Project: Skyforge"><span>Skyforge</span><span class="muted">⌄</span></button>
+    <nav class="nav" aria-label="Main">
+      <a href="runs.html" aria-current="page">Runs <span class="count" aria-label="2 waiting for you">2</span></a>
+      <a href="projects.html">Projects</a>
+      <span class="soon">Team <small>M3b</small></span>
+      <span class="soon">Workflows</span>
+      <span class="soon">Quotas <small>M4</small></span>
+      <span class="soon">Skill Packs <small>M4</small></span>
+      <span class="soon">Dogfood Inbox</span>
+    </nav>
+    <div class="spacer"></div>
+    <button class="btn" type="button">+ Note</button>
+  </aside>
+  <main>
+
+    <div class="head"><div><div class="crumbs"><a href="runs.html">Runs</a> / New</div><h1>New Run</h1><p class="lede">Skyforge · one Run, one branch, one pull request</p></div></div>
+
+    <div class="formgrid">
+      <form class="panel" onsubmit="return false">
+        <div class="field">
+          <span class="label" id="wf">Workflow</span>
+          <div class="choices" role="radiogroup" aria-labelledby="wf">
+            <div class="choice" role="radio" aria-checked="true" tabindex="0"><strong>feature</strong><small>Grill, spec, plan, art, code, review. Duo review by default.</small></div>
+            <div class="choice" role="radio" aria-checked="false" tabindex="0"><strong>bugfix</strong><small>Failing test first, then the fix. Solo review.</small></div>
+            <div class="choice" role="radio" aria-checked="false" tabindex="0"><strong>assets</strong><small>Pixel art only: Artist and Asset Gate.</small></div>
+          </div>
+        </div>
+        <div class="field">
+          <label for="subject">Subject</label>
+          <textarea id="subject" class="input">An inventory screen the player opens with Tab: a grid of items with stack counts.</textarea>
+          <span class="hint">A few words are enough: the Griller will ask the rest.</span>
+        </div>
+        <div class="field">
+          <span class="label" id="rv">Review</span>
+          <div class="seg" role="group" aria-labelledby="rv"><button type="button" aria-pressed="false">Solo · Claude</button><button type="button" aria-pressed="true">Duo · Claude + Codex</button></div>
+          <span class="hint">Workflow default preselected. Duo spends Quota on both Runners.</span>
+        </div>
+        <div style="display:flex;gap:var(--sp-3);justify-content:flex-end">
+          <a class="btn btn-ghost" href="runs.html" style="text-decoration:none">Cancel</a>
+          <button class="btn btn-primary" type="submit">Start Run</button>
+        </div>
+      </form>
+
+      <aside style="position:static;height:auto;background:none;border:0;padding:0;backdrop-filter:none" aria-label="What will happen">
+        <div class="panel tight">
+          <h2>What will happen</h2>
+          <ul class="steps-preview">
+            <li>Griller <span class="runner">claude</span></li><li>Spec Writer <span class="runner">claude</span></li><li>Spec Gate <span class="muted">you</span></li>
+            <li>Architect <span class="runner">claude</span></li><li>Artist <span class="runner">codex</span></li><li>Asset Gate <span class="muted">you</span></li>
+            <li>Developer <span class="runner">claude</span></li><li>Checks <span class="muted">4</span></li><li>Review <span class="runner">duo</span></li><li>Final Gate <span class="muted">you</span></li>
+          </ul>
+          <p class="lede">3 Gates will need you. Both Quotas have room: Claude 72%, Codex 55%.</p>
+        </div>
+      </aside>
+    </div>
+  </main>
+</div>
+</body>
+</html>

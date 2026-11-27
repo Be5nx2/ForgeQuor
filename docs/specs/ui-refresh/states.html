@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shared states</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Orbitron:wght@700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="shell.css">
+</head>
+<body>
+<div class="app">
+  <aside>
+    <span class="logo"><span class="logo-mark" aria-hidden="true"></span><span><span class="forge">FORGE</span><span class="quor">QUOR</span></span></span>
+    <a class="btn btn-primary" href="new-run.html" style="text-align:center;text-decoration:none">+ New Run</a>
+    <button class="project" type="button" aria-label="Project: Skyforge"><span>Skyforge</span><span class="muted">⌄</span></button>
+    <nav class="nav" aria-label="Main">
+      <a href="runs.html" aria-current="page">Runs <span class="count" aria-label="2 waiting for you">2</span></a>
+      <a href="projects.html">Projects</a>
+      <span class="soon">Team <small>M3b</small></span>
+      <span class="soon">Workflows</span>
+      <span class="soon">Quotas <small>M4</small></span>
+      <span class="soon">Skill Packs <small>M4</small></span>
+      <span class="soon">Dogfood Inbox</span>
+    </nav>
+    <div class="spacer"></div>
+    <button class="btn" type="button">+ Note</button>
+  </aside>
+  <main>
+
+    <div class="head"><div><h1>Shared states</h1><p class="lede">Three components used by every screen: loading, empty, error. Shown here side by side; in the app each replaces the content of its own panel.</p></div></div>
+    <div class="states">
+      <div class="state" role="status" aria-busy="true"><span class="tag">Loading</span><div class="skeleton" aria-hidden="true"><i></i><i></i><i></i></div><p class="sr-only">Loading Runs</p></div>
+      <div class="state"><span class="tag">Empty · no Project</span><h3>No Project yet</h3><p>Forgequor works on a git repository. Register your first Project to start a Run.</p><a class="btn btn-primary" href="projects.html" style="text-decoration:none">Register a Project</a></div>
+      <div class="state"><span class="tag">Empty · nothing waiting</span><h3>Nothing needs you</h3><p>Every Run is moving on its own. Gates and Approved Runs will show up here.</p><a class="btn" href="new-run.html" style="text-decoration:none">+ New Run</a></div>
+      <div class="state err" role="alert"><span class="tag">Error</span><h3>Could not load Runs</h3><p>The Forgequor server did not answer. Check that it is running, then retry.</p><button class="btn btn-outline-action" type="button">Retry</button><details><summary>Details</summary><span class="mono">GET /api/runs → 502 Bad Gateway</span></details></div>
+    </div>
+  </main>
+</div>
+</body>
+</html>
