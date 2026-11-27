@@ -35,12 +35,17 @@ Griller with a **Conversation Gate** (it writes the Project's glossary and ADRs 
   - the Architect writes an Implementation Plan to the Run Notes (modules, test seams, order of small steps) and a Project ADR when warranted; no Gate after it;
   - review: solo is one Reviewer on Claude; duo is two read-only Reviewers in parallel (Claude, and Codex in its read-only sandbox) plus the Consolidator, who checks each remark against the code and opens a Gate on an unsettled disagreement; each Reviewer uses `code-review` (standards and spec); changes requested go back to the Developer, capped by `max_attempts`, then an Escalation;
   - `bugfix`: a bug description, the Developer with `diagnosing-bugs` writing a failing test first, Checks, solo review by default (duo at launch), pull request, final Gate.
+- Decided in the grilling (round 2):
+  - default Runners: Claude for the Griller, Spec Writer, Architect, Developer, Reviewer A and Consolidator; Codex for Reviewer B and the Artist; set through environment variables until M4;
+  - minimal Skill Packs move into M3b: at each Run's start Forgequor places its own `shared` pack in the worktree (`.claude/skills` and `.agents/skills`), never committed, and a skill the Project has itself wins; choosing packs per Project stays in M4;
+  - the `feature` Developer gets the task, the spec, the Implementation Plan and the approved Assets' paths; a final Gate rejection sends it back with the Feedback; an Escalation can go back to any earlier Step, the Griller included, which reopens the conversation;
+  - a `feature` Run starts from a free-text subject and a solo or duo review choice (duo by default; solo by default for `bugfix`).
 
 ## Next
 
 ### M4 Comfort
 
-**Quota** gauges refreshed after every Step (unknown shown greyed), **Archive** and purge after 60 days, macOS notifications, **Skill Packs** per Project plus the Project's own Skills, one-click Runner assignment (default and per Run), read-only Workflow preview, `/to-workflow` skill (checks for a close existing Workflow before writing a new one).
+**Quota** gauges refreshed after every Step (unknown shown greyed), **Archive** and purge after 60 days, macOS notifications, choosing **Skill Packs** per Project (M3b already provides the `shared` pack to every Run), one-click Runner assignment (default and per Run), read-only Workflow preview, `/to-workflow` skill (checks for a close existing Workflow before writing a new one).
 
 ### Dogfood Notes
 

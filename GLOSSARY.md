@@ -115,7 +115,7 @@ A packaged set of instructions an **Agent** follows for one kind of work.
 _Avoid_: Prompt, command, recipe
 
 **Skill Pack**:
-A named group of **Skills** for one audience (shared, godot, forgequor); a **Project** picks the packs its **Agents** use, plus any **Skills** of its own.
+A named group of **Skills** for one audience (shared, godot, forgequor); every **Run** gets the shared pack, a **Project** picks any others its **Agents** use, and its own **Skills** win over a pack's.
 _Avoid_: Skill set, bundle, plugin
 
 **Artist**:
