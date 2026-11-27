@@ -91,6 +91,16 @@ export async function refreshDefaultBranch(repoRoot: string): Promise<string> {
   return (await gitOrThrow(repoRoot, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")).replace(/^origin\//, "");
 }
 
+/** Adds `patterns` to the repository's local exclude file (those not there yet), so they are never committed and the Project's own files stay as they are. */
+export async function excludeFromGit(worktreePath: string, ...patterns: string[]): Promise<void> {
+  const exclude = resolve(worktreePath, await gitOrThrow(worktreePath, "rev-parse", "--git-path", "info/exclude"));
+  mkdirSync(dirname(exclude), { recursive: true });
+  const current = existsSync(exclude) ? readFileSync(exclude, "utf8") : "";
+  const lines = new Set(current.split("\n"));
+  const missing = patterns.filter((p) => !lines.has(p));
+  if (missing.length) appendFileSync(exclude, `${current && !current.endsWith("\n") ? "\n" : ""}${missing.join("\n")}\n`);
+}
+
 /**
  * Creates `branch` in a new worktree at `worktreePath`, from the remote's `defaultBranch`, with the Run Notes
  * folder in place and excluded through the repository's local exclude file (no change to the Project's files).
@@ -105,12 +115,7 @@ export async function createRunWorktree(opts: {
   mkdirSync(dirname(worktreePath), { recursive: true });
   await gitOrThrow(repoRoot, "worktree", "add", "-b", branch, worktreePath, `origin/${defaultBranch}`);
 
-  const exclude = resolve(worktreePath, await gitOrThrow(worktreePath, "rev-parse", "--git-path", "info/exclude"));
-  mkdirSync(dirname(exclude), { recursive: true });
-  const current = existsSync(exclude) ? readFileSync(exclude, "utf8") : "";
-  if (!current.split("\n").includes(`${RUN_NOTES_DIR}/`)) {
-    appendFileSync(exclude, `${current && !current.endsWith("\n") ? "\n" : ""}${RUN_NOTES_DIR}/\n`);
-  }
+  await excludeFromGit(worktreePath, `${RUN_NOTES_DIR}/`);
   mkdirSync(join(worktreePath, RUN_NOTES_DIR), { recursive: true });
 }
 

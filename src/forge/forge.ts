@@ -37,6 +37,7 @@ import type {
   Verdict,
   WorkflowList,
 } from "./types.js";
+import { placeSkillPack, SHARED_SKILL_PACK } from "./skill-pack.js";
 import { createRunWorktree, existsInBranch, inspectRepository, listInBranch, readInBranch, RegistrationError, refreshDefaultBranch, repositoryPath, slugify } from "./workspace.js";
 
 export { RegistrationError, AssetNotFoundError, GateError, InvalidInputError, RunNotFoundError, RunStateError };
@@ -132,6 +133,8 @@ export interface ForgeDeps {
   checkTimeoutMs?: number;
   /** The Step types, Gate kinds and Workflows built on the core besides the Developer's. Default: the built-in ones (Assets). */
   extensions?: Extension[];
+  /** Folder of the Skill Pack placed in every Run's worktree. Default: Forgequor's own `skills/shared`. */
+  skillPack?: string;
   /** The clock, so tests can move time. */
   now?: () => Date;
 }
@@ -632,6 +635,8 @@ export function createForge(deps: ForgeDeps): Forge {
           return fresh;
         });
       }
+      // Every start and restart: a Skill that went missing is put back.
+      await placeSkillPack(deps.skillPack ?? SHARED_SKILL_PACK, worktreePath);
       await pool.query("UPDATE runs SET branch = $2, worktree_path = $3 WHERE id = $1", [run.id, branch, worktreePath]);
       changed(run.id);
 
