@@ -1,0 +1,22 @@
+name: developer
+description: The Developer works on the task, the Checks run (sending a failure back to the Developer), the pull request opens, then the human approves or rejects at the final Gate.
+inputs: [task]
+steps:
+  - id: developer
+    type: agent
+    agent: developer
+  - id: checks
+    type: checks
+    needs: [developer]
+    # A failing Check sends the work back to the Developer: 1 try + 2 more, then an Escalation.
+    on_reject: developer
+    max_attempts: 3
+  - id: publish
+    type: publish
+    needs: [checks]
+  - id: review
+    type: gate
+    gate: final
+    needs: [publish]
+    # A rejection with Feedback starts a new Iteration; the human decides when to stop.
+    on_reject: developer

@@ -1,0 +1,15 @@
+name: assets
+description: The Artist draws each Asset Request with its Asset Checks, the human gives a verdict per Asset at the Asset Gate, then the pull request opens and the Run is Approved.
+inputs: [assets]
+steps:
+  - id: artist
+    type: artist
+  - id: review
+    type: gate
+    gate: asset
+    needs: [artist]
+    # Rejected Assets go back to the Artist with their Feedback in a new Iteration.
+    on_reject: artist
+  - id: publish
+    type: publish
+    needs: [review]
