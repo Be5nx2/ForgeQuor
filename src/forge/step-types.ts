@@ -98,12 +98,12 @@ export const checksStepType: StepTypeModule = {
 };
 
 /** The Publish Step type: pushes the branch, opens the pull request and posts the Review Brief. */
-export function publishStepType(publications: ReadonlyMap<string, Publication>): StepTypeModule {
+export function publishStepType(publicationOf: (run: WorkflowContext["run"]) => Promise<Publication | undefined>): StepTypeModule {
   return {
   type: "publish",
   async execute({ ctx }) {
     if (!(await ctx.stillRunning())) return stop;
-    const publication = publications.get(ctx.run.workflow);
+    const publication = await publicationOf(ctx.run);
     await publication?.prepare?.(ctx);
     const notes = await runNotesInBranch(ctx.worktreePath, ctx.defaultBranch);
     if (notes.length) {

@@ -7,6 +7,8 @@ type Json<T> = T extends Date ? string : T extends (infer U)[] ? Json<U>[] : T e
 
 export type Project = Json<Server.Project>;
 export type ArtInfo = Json<Server.ArtInfo>;
+export type WorkflowOption = Json<Server.WorkflowOption>;
+export type WorkflowList = Json<Server.WorkflowList>;
 export type AssetKind = Server.AssetKind;
 export type AssetStatus = Server.AssetStatus;
 export type AssetRequest = Json<Server.AssetRequest>;

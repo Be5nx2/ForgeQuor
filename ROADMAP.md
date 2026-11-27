@@ -72,7 +72,7 @@ The engine behind every Workflow, with no change visible to the human: a deeper 
     - read-only Steps whose needs are met start together and really overlap (tested with a test Workflow);
     - after a read-only Step, any change outside the Run Notes fails it and opens an Escalation naming the files;
     - a Run counts once against its Project's limit however many of its Steps run.
-- [ ] `m3-07` **Project Workflows and the Run form**: a game can bring its own Workflows.
+- [x] `m3-07` **Project Workflows and the Run form**: a game can bring its own Workflows.
   - Spec: `docs/specs/m3a-workflow-engine.md`
   - Blocked by: `m3-04`
   - Acceptance:
