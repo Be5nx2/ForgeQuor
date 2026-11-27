@@ -251,7 +251,7 @@ Griller with a **Conversation Gate** (it writes the Project's glossary and ADRs 
     - `GET /api/projects/:id/workflows` returns every Workflow with its source, whether it overrides a built-in one, its Steps (id, type, Agent, `needs`, `when`), its YAML and its validation errors; launch keeps offering only valid ones;
     - `POST /api/workflows/validate` takes YAML text (optionally a Project) and returns the full error list, empty when valid, storing nothing;
     - a read-only, minimal Workflows tab: list, Steps table, YAML, errors.
-- [ ] `m4-10` **`/to-workflow` skill**: a need becomes a valid Project Workflow without learning the engine.
+- [x] `m4-10` **`/to-workflow` skill**: a need becomes a valid Project Workflow without learning the engine.
   - Spec: `docs/specs/m4-comfort.md`
   - Blocked by: `m4-09`
   - Acceptance:

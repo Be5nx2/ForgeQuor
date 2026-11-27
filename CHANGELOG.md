@@ -5,6 +5,7 @@ All notable changes to Forgequor. Format: [Keep a Changelog](https://keepachange
 ## [Unreleased]
 
 ### Added
+- `/to-workflow` shared Skill: turns a need into a Project Workflow, reusing a close one when it exists and validating the file through `POST /api/workflows/validate`; its reference of Step types and built-in Workflows is checked against the code (m4-10).
 - Archive a Run when it ends: a merged, closed or abandoned Run loses its worktree and local branch (and, unmerged, its remote branch) and is marked archived, readable as before; the Runs tab hides archived Runs unless asked (m4-01).
 - Skills (shared / forgequor / godot), CLAUDE.md, brand identity doc, ROADMAP and CHANGELOG.
 - Glossary, ADRs 0001–0003 and the v1 milestones (M1–M4) in the roadmap.
