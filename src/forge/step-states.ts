@@ -1,7 +1,7 @@
 import type pg from "pg";
 import { describeFailure } from "./checks.js";
 import type { StepStatus } from "./types.js";
-import type { WorkflowDefinition } from "./workflow-definition.js";
+import type { StepDefinition, WorkflowDefinition } from "./workflow-definition.js";
 
 /** Where one Step of a Run stands in an Iteration. */
 export interface StepRow {
@@ -11,6 +11,10 @@ export interface StepRow {
   attempts: number;
   /** Why the Step was sent back to (the Check that failed, an invalid input), until it finishes again. */
   sentBack: string | null;
+  /** The `attempts` the Step had when the human last gave it a fresh attempt budget (retry, go back): its automatic loops count from there. */
+  budgetFrom: number;
+  /** When the human last gave it a fresh attempt budget, for the Step types that count attempts their own way (the Artist). */
+  retriedAt: Date | null;
 }
 
 /** The persisted state of a Run's Steps in its current Iteration: the only place the engine keeps what it has done. */
@@ -45,26 +49,72 @@ export function replaySet(definition: WorkflowDefinition, target: string): strin
   return definition.steps.filter((s) => replay.has(s.id)).map((s) => s.id);
 }
 
-const fresh = (stepId: string): StepRow => ({ stepId, status: "waiting", attempts: 0, sentBack: null });
+/**
+ * The done Steps an Escalation at `failedStep` can go back to: those before it in the Workflow, in order. Going back to
+ * one replays it and every Step after it, the failed Step included.
+ */
+export function goBackChoices(definition: WorkflowDefinition, states: Map<string, StepRow>, failedStep: string): StepDefinition[] {
+  const at = definition.steps.findIndex((s) => s.id === failedStep);
+  return definition.steps.filter((s, i) => i < at && states.get(s.id)?.status === "done");
+}
+
+/** The Steps to put back to waiting for a retry (the failed Step alone) or a go back (the chosen Step and what follows, the failed Step included). */
+export function redoSet(definition: WorkflowDefinition, failedStep: string, goBackTo?: string): string[] {
+  return goBackTo ? [...new Set([failedStep, ...replaySet(definition, goBackTo)])] : [failedStep];
+}
+
+/** The pool, or the client of a transaction. */
+type Db = Pick<pg.Pool, "query">;
+
+/** Takes the inputs produced by the Steps being replayed out of the Run's inputs, unless a Step that is not replayed produced them too. */
+async function dropProduced(db: Db, runId: number, iteration: number, replayed: string[]) {
+  const { rows } = await db.query("SELECT step, produced FROM step_states WHERE run_id = $1 AND iteration = $2", [runId, iteration]);
+  const kept = new Set(rows.filter((r) => !replayed.includes(r.step)).flatMap((r) => r.produced as string[]));
+  const gone = new Set(rows.filter((r) => replayed.includes(r.step)).flatMap((r) => r.produced as string[]));
+  for (const input of gone) if (!kept.has(input)) await db.query("UPDATE runs SET inputs = inputs - $2::text WHERE id = $1", [runId, input]);
+}
+
+/**
+ * Puts Steps back to waiting at the human's word (an Escalation's retry or go back): they replay with a fresh attempt
+ * budget, forgetting the inputs they produced, the Gates they opened and why they were sent back. Their attempts keep
+ * counting up, so the record of what ran stays in order. Run it in the decision's transaction.
+ */
+export async function redoSteps(db: Db, runId: number, iteration: number, stepIds: string[]): Promise<void> {
+  await dropProduced(db, runId, iteration, stepIds);
+  await db.query(
+    `UPDATE step_states SET status = 'waiting', sent_back = NULL, produced = '[]', budget_from = attempts, retried_at = now(),
+       since_gate = (SELECT COALESCE(max(id), 0) FROM gates WHERE run_id = $1)
+     WHERE run_id = $1 AND iteration = $2 AND step = ANY($3)`,
+    [runId, iteration, stepIds],
+  );
+}
+
+/** Every failed Step of the Iteration back to waiting with a fresh attempt budget: an Escalation that names no Step is retried as a whole. */
+export async function redoFailedSteps(db: Db, runId: number, iteration: number): Promise<void> {
+  const { rows } = await db.query("SELECT step FROM step_states WHERE run_id = $1 AND iteration = $2 AND status = 'failed'", [runId, iteration]);
+  if (rows.length) await redoSteps(db, runId, iteration, rows.map((r) => r.step as string));
+}
+
+const fresh = (stepId: string): StepRow => ({ stepId, status: "waiting", attempts: 0, sentBack: null, budgetFrom: 0, retriedAt: null });
 
 export function createStepStates(pool: pg.Pool, runId: number, iteration: number): StepStates {
-  const toRow = (r: Record<string, any>): StepRow => ({ stepId: r.step, status: r.status, attempts: r.attempts, sentBack: r.sent_back });
+  const toRow = (r: Record<string, any>): StepRow => ({
+    stepId: r.step,
+    status: r.status,
+    attempts: r.attempts,
+    sentBack: r.sent_back,
+    budgetFrom: r.budget_from,
+    retriedAt: r.retried_at,
+  });
 
   async function insert(rows: (StepRow & { produced?: string[] })[], at: number) {
     for (const r of rows) {
       await pool.query(
-        "INSERT INTO step_states (run_id, iteration, step, status, attempts, sent_back, produced) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT DO NOTHING",
-        [runId, at, r.stepId, r.status, r.attempts, r.sentBack, JSON.stringify(r.produced ?? [])],
+        `INSERT INTO step_states (run_id, iteration, step, status, attempts, sent_back, produced, budget_from, retried_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT DO NOTHING`,
+        [runId, at, r.stepId, r.status, r.attempts, r.sentBack, JSON.stringify(r.produced ?? []), r.budgetFrom, r.retriedAt],
       );
     }
-  }
-
-  /** Takes the inputs produced by the Steps being replayed out of the Run's inputs, unless a Step that is not replayed produced them too. */
-  async function dropProduced(before: number, replayed: string[]) {
-    const { rows } = await pool.query("SELECT step, produced FROM step_states WHERE run_id = $1 AND iteration = $2", [runId, before]);
-    const kept = new Set(rows.filter((r) => !replayed.includes(r.step)).flatMap((r) => r.produced as string[]));
-    const gone = new Set(rows.filter((r) => replayed.includes(r.step)).flatMap((r) => r.produced as string[]));
-    for (const input of gone) if (!kept.has(input)) await pool.query("UPDATE runs SET inputs = inputs - $2::text WHERE id = $1", [runId, input]);
   }
 
   /** The Steps of the Iteration after a rejection: what the rejected Gate sent back starts over, the rest stays as it was. */
@@ -78,7 +128,7 @@ export function createStepStates(pool: pg.Pool, runId: number, iteration: number
     const gateStep = gates[0]?.step as string | undefined;
     const target = definition.steps.find((s) => s.id === gateStep)?.onReject;
     const replay = new Set(target ? replaySet(definition, target) : definition.steps.map((s) => s.id));
-    await dropProduced(previous, [...replay]);
+    await dropProduced(pool, runId, previous, [...replay]);
     // The rejected Gate has done its part in the Iteration it ended.
     if (gateStep) await pool.query("UPDATE step_states SET status = 'done', attempts = attempts + 1 WHERE run_id = $1 AND iteration = $2 AND step = $3 AND status = 'running'", [runId, previous, gateStep]);
     return definition.steps.map((s) => {
@@ -115,7 +165,7 @@ export function createStepStates(pool: pg.Pool, runId: number, iteration: number
       const failed = checks.find((c) => c.exit_status !== 0);
       if (failed) {
         const sentBack = describeFailure({ command: failed.command, exitStatus: failed.exit_status, output: failed.output });
-        rows.set(target.stepId, { stepId: target.stepId, status: "waiting", attempts: attempt, sentBack });
+        rows.set(target.stepId, { ...fresh(target.stepId), attempts: attempt, sentBack });
         rows.set(s.id, { ...fresh(s.id), attempts: attempt });
       } else if (checks.length === checkCount) {
         rows.set(s.id, { ...fresh(s.id), status: "done", attempts: attempt });
@@ -153,7 +203,7 @@ export function createStepStates(pool: pg.Pool, runId: number, iteration: number
     },
 
     async sendBack(stepIds, target, reason) {
-      await dropProduced(iteration, stepIds);
+      await dropProduced(pool, runId, iteration, stepIds);
       await pool.query(
         `UPDATE step_states SET status = 'waiting', sent_back = CASE WHEN step = $4 THEN $5 ELSE NULL END, produced = '[]',
            since_gate = (SELECT COALESCE(max(id), 0) FROM gates WHERE run_id = $1)

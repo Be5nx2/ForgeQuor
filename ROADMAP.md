@@ -81,7 +81,7 @@ The engine behind every Workflow, with no change visible to the human: a deeper 
     - an invalid Workflow is listed with its errors and refused at launch;
     - the Run form builds itself from the chosen Workflow's launch inputs;
     - a Run keeps its frozen Workflow after the YAML changes.
-- [ ] `m3-08` **Escalations with choices**: the human can retry, go back or abandon.
+- [x] `m3-08` **Escalations with choices**: the human can retry, go back or abandon.
   - Spec: `docs/specs/m3a-workflow-engine.md`
   - Blocked by: `m3-04`
   - Acceptance:

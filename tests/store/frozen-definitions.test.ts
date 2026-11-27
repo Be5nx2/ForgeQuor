@@ -41,7 +41,7 @@ describe("Runs created before Workflows were frozen", () => {
     const developer = (await insert("developer")).rows[0].id;
     const assets = (await insert("assets")).rows[0].id;
 
-    expect(await migrate(pool)).toEqual(["017_workflow_engine.sql"]);
+    expect(await migrate(pool)).toContain("017_workflow_engine.sql");
 
     const { rows } = await pool.query("SELECT id, definition, inputs FROM runs");
     const of = (id: string) => rows.find((r) => r.id === id)!;

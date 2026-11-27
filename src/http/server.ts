@@ -171,13 +171,13 @@ export async function createServer(deps: {
   app.get("/api/gates", async () => deps.forge.listOpenGates());
   // The merge list: Approved Runs whose pull request waits for the human's merge.
   app.get("/api/approved-runs", async () => deps.forge.listApprovedRuns());
-  app.post<{ Params: { id: string }; Body: { action?: GateAction; feedback?: string; verdicts?: Verdict[] } }>("/api/gates/:id/decision", async (req, reply) => {
-    const { action, feedback, verdicts } = req.body ?? {};
-    if (action !== "approve" && action !== "reject" && action !== "abandon" && action !== "judge") {
-      return reply.code(400).send({ error: "action must be approve, reject, judge or abandon." });
+  app.post<{ Params: { id: string }; Body: { action?: GateAction; feedback?: string; verdicts?: Verdict[]; target?: string } }>("/api/gates/:id/decision", async (req, reply) => {
+    const { action, feedback, verdicts, target } = req.body ?? {};
+    if (action !== "approve" && action !== "reject" && action !== "abandon" && action !== "judge" && action !== "retry" && action !== "go_back") {
+      return reply.code(400).send({ error: "action must be approve, reject, judge, retry, go_back or abandon." });
     }
     try {
-      return await deps.forge.decideGate({ gateId: Number(req.params.id), action, feedback, verdicts });
+      return await deps.forge.decideGate({ gateId: Number(req.params.id), action, feedback, verdicts, target });
     } catch (e) {
       if (e instanceof InvalidInputError) return reply.code(400).send({ error: e.message });
       if (e instanceof GateError) return reply.code(409).send({ error: e.message });
