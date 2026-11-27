@@ -6,7 +6,46 @@ Milestones are specified one at a time with `/to-spec`, then split into items wi
 
 ## Now
 
-### M2 Assets
+### M3 Full loop
+
+YAML **Workflows** with parallel **Steps**, Griller with chat, Spec Writer, Architect, solo or duo review (chosen at Run launch) with **Consolidator** (an unsettled reviewer disagreement opens a **Gate** with its recommendation), **Escalation**, configurable iteration limit (default 3), default `feature` and `bugfix` Workflows.
+
+- Spec: to write after the M3 grilling.
+
+## Next
+
+### M4 Comfort
+
+**Quota** gauges refreshed after every Step (unknown shown greyed), **Archive** and purge after 60 days, macOS notifications, **Skill Packs** per Project plus the Project's own Skills, one-click Runner assignment (default and per Run), read-only Workflow preview, `/to-workflow` skill (checks for a close existing Workflow before writing a new one).
+
+## Icebox
+
+- Child Runs: a feature Run splitting its spec into one Run per ticket (ADR 0001).
+- Verifier Agent: a Step that runs the real app and the opt-in smoke tests and checks each acceptance criterion before the final Gate (green unit tests missed m1-03's undecidable Gates). To grill.
+- Conductor Agent (the sprint manager): reads the roadmap, computes the frontier, spots hidden dependencies and parallel-safe items, proposes the next Runs; advisory first, then driving Child Runs. Touches ADR 0001. To grill.
+- Runner fallback when a Quota is exhausted.
+- Competing Runs: the same Step on two Runners, then pick.
+- Codecks sync: import cards, update status.
+- Reading the human's GitHub PR comments as Feedback.
+- Automatic solo/duo review choice from diff size.
+- Visual Workflow editor.
+- Containerised or API-key Runners, multi-user studio instance.
+- Project registration accepts a GitHub remote not named `origin` (today refused as "no GitHub remote").
+- Lock migrations so two Forgequor starts at once cannot apply them twice.
+- Test the startup tool checks and the `ls-remote` default-branch fallback.
+- After a hard crash of Forgequor (kill -9, power loss), detached Runner and Check process groups survive; on restart, kill or wait for them before restarting the Step, so two Developers never share a worktree.
+- Keep the partial Check results of an interrupted attempt (marked interrupted) instead of deleting them before the Checks run again.
+- Live progress survives a page reload or reconnection mid-Step (events kept as they come, not only at the end of the Step).
+- Stream Check output live, like the Developer's events.
+- Coalesce live "changed" updates so a chatty Agent does not make the UI reload the Run on every event.
+- Tileset atlas: an Asset Request for N tiles delivered as one atlas image (Godot TileSet), instead of one file per tile (M2 grilling).
+- Produce a Run's Asset Requests in parallel instead of one after the other (image generation burns Quota 3-5x faster, so sequential first).
+- Animated preview of an Animation Strip in the gallery (frames played in a loop, larger than the 4x a 64 px strip gets today), to judge the motion (real strip test, m2-07).
+- Should an Approved Run keep its Project slot until its pull request is merged? It uses no Quota any more, but holds the queue while the human has not merged (real strip test, m2-07). To grill.
+
+## Done
+
+### M2 Assets (done 2026-11-27)
 
 Codex **Runner**, **Artist**, an `assets` **Workflow** (Artist → asset **Gate** → PR), generic Gate + **Feedback** + **Iteration** mechanism, **Art Direction** read from the Project, asset gallery in the UI. Unblocks the first game.
 
@@ -121,43 +160,6 @@ Codex **Runner**, **Artist**, an `assets` **Workflow** (Artist → asset **Gate*
     - when an `assets` Run starts (or restarts), after its worktree is made from the freshly fetched default branch, an Asset not marked as replacing whose target path already holds a file opens an Escalation naming that file, before anything is generated;
     - tested: start a Run that has to wait Queued, merge a file at one of its target paths on the remote meanwhile, free a slot; the Run escalates instead of overwriting;
     - an Asset marked as replacing still proceeds, and the Asset the Artist itself wrote in an earlier attempt of the same Run is never taken for existing art.
-
-## Next
-
-### M3 Full loop
-
-YAML **Workflows** with parallel **Steps**, Griller with chat, Spec Writer, Architect, solo or duo review (chosen at Run launch) with **Consolidator** (an unsettled reviewer disagreement opens a **Gate** with its recommendation), **Escalation**, configurable iteration limit (default 3), default `feature` and `bugfix` Workflows.
-
-### M4 Comfort
-
-**Quota** gauges refreshed after every Step (unknown shown greyed), **Archive** and purge after 60 days, macOS notifications, **Skill Packs** per Project plus the Project's own Skills, one-click Runner assignment (default and per Run), read-only Workflow preview, `/to-workflow` skill (checks for a close existing Workflow before writing a new one).
-
-## Icebox
-
-- Child Runs: a feature Run splitting its spec into one Run per ticket (ADR 0001).
-- Verifier Agent: a Step that runs the real app and the opt-in smoke tests and checks each acceptance criterion before the final Gate (green unit tests missed m1-03's undecidable Gates). To grill.
-- Conductor Agent (the sprint manager): reads the roadmap, computes the frontier, spots hidden dependencies and parallel-safe items, proposes the next Runs; advisory first, then driving Child Runs. Touches ADR 0001. To grill.
-- Runner fallback when a Quota is exhausted.
-- Competing Runs: the same Step on two Runners, then pick.
-- Codecks sync: import cards, update status.
-- Reading the human's GitHub PR comments as Feedback.
-- Automatic solo/duo review choice from diff size.
-- Visual Workflow editor.
-- Containerised or API-key Runners, multi-user studio instance.
-- Project registration accepts a GitHub remote not named `origin` (today refused as "no GitHub remote").
-- Lock migrations so two Forgequor starts at once cannot apply them twice.
-- Test the startup tool checks and the `ls-remote` default-branch fallback.
-- After a hard crash of Forgequor (kill -9, power loss), detached Runner and Check process groups survive; on restart, kill or wait for them before restarting the Step, so two Developers never share a worktree.
-- Keep the partial Check results of an interrupted attempt (marked interrupted) instead of deleting them before the Checks run again.
-- Live progress survives a page reload or reconnection mid-Step (events kept as they come, not only at the end of the Step).
-- Stream Check output live, like the Developer's events.
-- Coalesce live "changed" updates so a chatty Agent does not make the UI reload the Run on every event.
-- Tileset atlas: an Asset Request for N tiles delivered as one atlas image (Godot TileSet), instead of one file per tile (M2 grilling).
-- Produce a Run's Asset Requests in parallel instead of one after the other (image generation burns Quota 3-5x faster, so sequential first).
-- Animated preview of an Animation Strip in the gallery (frames played in a loop, larger than the 4x a 64 px strip gets today), to judge the motion (real strip test, m2-07).
-- Should an Approved Run keep its Project slot until its pull request is merged? It uses no Quota any more, but holds the queue while the human has not merged (real strip test, m2-07). To grill.
-
-## Done
 
 ### M1 Walking skeleton (done 2026-11-26)
 
