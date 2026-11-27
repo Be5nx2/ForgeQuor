@@ -7,10 +7,22 @@ steps:
   - id: griller
     type: conversation
     agent: griller
+  # Art, only when the grilling ordered Assets: the Artist draws them, the human judges them, then the Developer builds on them.
+  - id: artist
+    type: artist
+    needs: [griller]
+    when: assets
+  - id: asset-gate
+    type: gate
+    gate: asset
+    needs: [artist]
+    when: assets
+    # Rejected Assets go back to the Artist with their Feedback in a new Iteration.
+    on_reject: artist
   - id: developer
     type: agent
     agent: developer
-    needs: [griller]
+    needs: [asset-gate]
   - id: checks
     type: checks
     needs: [developer]

@@ -102,6 +102,20 @@ steps:
 
     expect(parsed.ok).toBe(true);
   });
+
+  it("accepts a when input produced by a conversation Step it depends on", () => {
+    const catalogue = { agents: { developer: { produces: [] } }, conversations: { griller: { produces: ["assets" as const] } } };
+    const text = `
+name: feature
+inputs: [task]
+steps:
+  - { id: grill, type: conversation, agent: griller }
+  - { id: draw, type: artist, needs: [grill], when: assets }
+`;
+
+    expect(parseWorkflow(text, catalogue).ok).toBe(true);
+    expect(parseWorkflow(text, { ...catalogue, conversations: { griller: { produces: [] } } }).ok).toBe(false);
+  });
 });
 
 describe("an invalid Workflow", () => {

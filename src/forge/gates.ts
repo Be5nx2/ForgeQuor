@@ -49,6 +49,11 @@ export interface GateKindModule {
   /** Why a Gate Step of this kind opens it, as the human reads it. */
   reason?: string | ((ctx: WorkflowContext) => Promise<string>);
   /**
+   * Runs when a Gate Step of this kind finds its Gate approved, before the Step is done, and again if the Step is
+   * replayed after a restart: it must be safe to repeat (the Asset Gate commits the approved Assets).
+   */
+  approved?(ctx: WorkflowContext): Promise<void>;
+  /**
    * Validates a decision the Gate offers (the core already refused the others) and says where the Run goes. Throws an
    * InvalidInputError for a decision that does not fit, such as a rejection without Feedback.
    */

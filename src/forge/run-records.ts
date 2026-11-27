@@ -46,6 +46,8 @@ export interface RunRecords {
   inputs(): Promise<WorkflowInput[]>;
   /** Adds an input the Step `stepId` produced; it goes again when that Step is replayed. */
   giveInput(input: WorkflowInput, stepId: string): Promise<void>;
+  /** The repository paths of the Run's approved Assets, in order. */
+  approvedAssetPaths(): Promise<string[]>;
   /** The decision of the latest Gate the Step opened in the current Iteration: null when it is still open, undefined when it opened none. */
   gateDecision(stepId: string): Promise<GateDecision | null | undefined>;
   /** The Feedback the human gave when they rejected the Gate `gateDecision` reads, or null when they gave none. */
@@ -127,6 +129,10 @@ export function createRunRecords(pool: pg.Pool, runId: number, iteration: number
         "UPDATE step_states SET produced = produced || to_jsonb($4::text) WHERE run_id = $1 AND iteration = $2 AND step = $3",
         [runId, iteration, stepId, input],
       );
+    },
+    async approvedAssetPaths() {
+      const { rows } = await pool.query("SELECT target_path FROM assets WHERE run_id = $1 AND status = 'approved' ORDER BY position", [runId]);
+      return rows.map((r) => r.target_path);
     },
     async gateDecision(stepId) {
       const { rows } = await pool.query(

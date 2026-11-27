@@ -86,8 +86,8 @@ export type ParsedWorkflow = { ok: true; definition: WorkflowDefinition } | { ok
 /** The coded parts a Workflow can name: each Agent, and the inputs it produces for the Steps after it. */
 export interface StepCatalogue {
   agents: Record<string, { produces: readonly WorkflowInput[] }>;
-  /** The Agents a conversation Step can name. */
-  conversations?: readonly string[];
+  /** The Agents a conversation Step can name, and the inputs each produces. */
+  conversations?: Record<string, { produces: readonly WorkflowInput[] }>;
 }
 
 /** Forgequor's Agents today. */
@@ -226,7 +226,7 @@ export function parseWorkflow(text: string, catalogue: StepCatalogue = DEFAULT_C
     if (raw.type === undefined) fail(at("type"), `${label} needs a type, one of ${list(STEP_TYPES)}.`);
     else if (!STEP_TYPES.includes(type)) fail(at("type"), `${label} has an unknown type ${JSON.stringify(raw.type)}; it must be one of ${list(STEP_TYPES)}.`);
 
-    const agents = type === "conversation" ? [...(catalogue.conversations ?? [])] : Object.keys(catalogue.agents);
+    const agents = type === "conversation" ? Object.keys(catalogue.conversations ?? {}) : Object.keys(catalogue.agents);
     if (type === "agent" || type === "conversation") {
       if (raw.agent === undefined) fail(at("agent"), `${label} is ${type === "agent" ? "an Agent Step" : "a conversation Step"}, so it needs an agent, one of ${list(agents)}.`);
       else if (!agents.includes(raw.agent as string)) {
@@ -373,7 +373,8 @@ function checkGraph(
     if (step.when !== undefined) {
       const produced = [...ancestorsOf(i)].flatMap((k) => {
         const s = steps[k]!;
-        return s.type === "agent" ? (catalogue.agents[s.agent]?.produces ?? []) : [];
+        if (s.type === "agent") return catalogue.agents[s.agent]?.produces ?? [];
+        return s.type === "conversation" ? (catalogue.conversations?.[s.agent]?.produces ?? []) : [];
       });
       if (!inputs.includes(step.when) && !produced.includes(step.when)) {
         fail(

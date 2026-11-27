@@ -28,9 +28,10 @@ This Run fixes a bug, and the task is the bug description. Follow the \`diagnosi
  * The Developer's prompt; on a retry it carries what sent the work back: the Check that failed, or the Review that asked
  * for changes. The Feedback of the human's rejections is listed as well.
  */
-export function developerPrompt(task: string, sentBack?: string, feedbacks: string[] = [], summary?: string | null): string {
+export function developerPrompt(task: string, sentBack?: string, feedbacks: string[] = [], summary?: string | null, assetPaths: string[] = []): string {
   let prompt = `Task:\n\n${task}`;
   if (summary) prompt += `\n\nThe human talked this task through with the Griller and confirmed this summary of what to build; build exactly that:\n\n${summary}`;
+  if (assetPaths.length) prompt += `\n\nThe Artist drew these Assets for this work and the human approved them. They are already committed on this branch: use them, and do not redraw or change them.\n${assetPaths.map((p) => `- ${p}`).join("\n")}`;
   if (feedbacks.length) {
     const history = feedbacks.map((f, i) => `${i + 1}. ${f}`).join("\n");
     prompt += `\n\nThe reviewer rejected your earlier work. Your work is already on this branch: build on it, address the latest Feedback (the last one), keep the earlier ones satisfied, commit, and rewrite the Review Brief.\n\nFeedback so far, oldest first:\n${history}`;
@@ -69,7 +70,7 @@ export const developerAgent: AgentModule = {
     return true;
   },
   async prompt(ctx, attempt) {
-    return developerPrompt(ctx.run.task, attempt.sentBack ?? undefined, await ctx.records.earlierFeedbacks(), await ctx.records.conversation.confirmedSummary());
+    return developerPrompt(ctx.run.task, attempt.sentBack ?? undefined, await ctx.records.earlierFeedbacks(), await ctx.records.conversation.confirmedSummary(), await ctx.records.approvedAssetPaths());
   },
   async after(ctx) {
     await commitLeftovers(ctx.worktreePath, "chore: commit work left by the Developer");

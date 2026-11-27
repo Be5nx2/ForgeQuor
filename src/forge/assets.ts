@@ -12,7 +12,7 @@ import { loadBuiltInWorkflow } from "./workflow-definition.js";
 import type { Publication, RunInput, RunPlan, Workflow, WorkflowContext } from "./workflow.js";
 import type { Asset, AssetKind, AssetRequest } from "./types.js";
 import { commitPaths, existsAtHead, repositoryPath, RUN_NOTES_DIR, slugify } from "./workspace.js";
-import type { Extension, RunDetailPart } from "./extension.js";
+import type { Extension, InputProducer, RunDetailPart } from "./extension.js";
 import type pg from "pg";
 
 export type { Asset, AssetAttempt, AssetKind, AssetRequest, AssetStatus, AssetVersion, GateVerdict, Verdict } from "./types.js";
@@ -102,6 +102,42 @@ export async function checkAgainstRepository(assets: AssetRequest[], artFolder: 
       }
     }
   }
+}
+
+/** The Run Note where the Griller of a `feature` Run writes the Asset Requests the feature needs, as a JSON array in the launch shape. */
+export const ASSET_REQUESTS_NOTE = `${RUN_NOTES_DIR}/asset-requests.json`;
+
+/**
+ * The `assets` input an Agent produces mid-Run: the Asset Requests it wrote in the Run Note, validated as launch input is
+ * (the same checks, against the Run's branch, which starts from the freshly fetched default branch), and the Art Direction
+ * must be there. Invalid ones are described for the Agent to fix. No file, or an empty list, means no art is ordered.
+ */
+function assetRequestsProducer(store: AssetStore): InputProducer {
+  return async (ctx) => {
+    const { project, worktreePath } = ctx;
+    const file = join(worktreePath, ASSET_REQUESTS_NOTE);
+    if (!existsSync(file)) return { given: false };
+    let raw: unknown;
+    try {
+      raw = JSON.parse(readFileSync(file, "utf8"));
+    } catch (e) {
+      return { invalid: `${ASSET_REQUESTS_NOTE} is not valid JSON (${(e as Error).message}): it must hold a JSON array of Asset Requests.` };
+    }
+    if (!Array.isArray(raw)) return { invalid: `${ASSET_REQUESTS_NOTE} must hold a JSON array of Asset Requests.` };
+    if (!raw.length) return { given: false };
+    let requests: AssetRequest[];
+    try {
+      requests = validateAssetRequests(raw);
+      await checkAgainstRepository(requests, project.artFolder, (path) => existsAtHead(worktreePath, path));
+    } catch (e) {
+      return { invalid: (e as Error).message };
+    }
+    if (readArtDirection(worktreePath, project.artDirectionPath) === null) {
+      return { invalid: `The Project has no Art Direction at ${project.artDirectionPath}, so no art can be ordered: delete ${ASSET_REQUESTS_NOTE} and tell the human that art needs an Art Direction first.` };
+    }
+    await store.replaceRequests(ctx.run.id, requests, (a) => assetTargetPath(project.artFolder, a.kind, a.name));
+    return { given: true };
+  };
 }
 
 /** The Artist Agent's standing instructions. */
@@ -457,6 +493,11 @@ export function createAssetGate(store: AssetStore): GateKindModule {
       const waiting = (await store.load(ctx.run.id)).filter((a) => a.status === "waiting").length;
       return `${waiting} ${waiting === 1 ? "Asset is" : "Assets are"} waiting for your verdict.`;
     },
+    // Approved Assets are committed at once: in a Workflow whose pull request opens later (`feature`), the Developer builds on them.
+    async approved(ctx) {
+      const assets = await store.load(ctx.run.id);
+      if (assets.length) await commitPaths(ctx.worktreePath, assets.map((a) => a.targetPath), commitMessage(assets));
+    },
     async decide(gate, { action, verdicts }) {
       if (action === "abandon") return { next: "abandon" };
       let given;
@@ -487,6 +528,7 @@ export function createAssetsExtension(pool: pg.Pool): Extension {
     workflows: [createAssetsWorkflow(store)],
     gateKinds: [createAssetGate(store)],
     stepTypes: [artistStepType(store)],
+    inputProducers: { assets: assetRequestsProducer(store) },
     async detail(runId, gateIds) {
       const assets = await store.load(runId);
       const verdicts = await store.gateVerdicts(gateIds);

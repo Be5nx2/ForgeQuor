@@ -154,7 +154,7 @@ Griller with a **Conversation Gate** (it writes the Project's glossary and ADRs 
     - the Architect reads the spec and the code and writes an Implementation Plan to the Run Notes (modules, test seams, order of small steps);
     - it writes a Project ADR when a decision warrants one; no Gate follows it;
     - the Developer is given the plan.
-- [ ] `m3-16` **Art inside `feature`**: the grilling can order art that the code then uses.
+- [x] `m3-16` **Art inside `feature`**: the grilling can order art that the code then uses.
   - Spec: `docs/specs/m3b-the-team.md`
   - Blocked by: `m3-13`, `m3-05`
   - Acceptance:
