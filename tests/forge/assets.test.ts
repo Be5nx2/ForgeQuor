@@ -760,6 +760,21 @@ describe("the Asset Gate", () => {
     await forge.setMaxConcurrentRuns(project.id, 5);
     await forge.whenIdle();
   });
+
+  it("frees its slot once Approved after its pull request, and the next Queued Run starts", async () => {
+    const { project } = await projectWithRemote();
+    await forge.setMaxConcurrentRuns(project.id, 1);
+    artist.use(drawing());
+    const waiting = await startAssets(project, [hero]);
+    const next = await forge.startRun({ projectId: project.id, task: "Do the thing." });
+    expect(next.state).toBe("queued");
+
+    await judge(waiting);
+    await forge.whenIdle();
+
+    expect((await forge.getRun(waiting.id)).state).toBe("approved");
+    expect((await forge.getRun(next.id)).state).toBe("waiting");
+  });
 });
 
 describe("approving the Asset Gate", () => {
