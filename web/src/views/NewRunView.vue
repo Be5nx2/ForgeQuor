@@ -52,11 +52,19 @@ const assets = ref<AssetDraft[]>([newAsset()]);
 const sizeOf = (a: AssetDraft) => (a.size === "custom" ? { width: a.width, height: a.height } : { width: Number(a.size.split("x")[0]), height: Number(a.size.split("x")[1]) });
 const error = ref("");
 
+/** False until the Projects arrive, so the page never says "Register a Project first" while loading or after a failure. */
+const projectsLoaded = ref(false);
+const projectsError = ref("");
+
 async function loadProjects() {
-  const known = await getJson<Project[]>("/api/projects").catch(() => [] as Project[]);
-  projects.value = known;
-  // Whichever load wins sets the form's default Project.
-  form.value.projectId ||= String(known[0]?.id ?? "");
+  try {
+    const known = await getJson<Project[]>("/api/projects");
+    projects.value = known;
+    form.value.projectId ||= String(known[0]?.id ?? "");
+    projectsLoaded.value = true;
+  } catch (e: any) {
+    projectsError.value = `Could not load the Projects: ${e.message}`;
+  }
 }
 
 async function start() {
@@ -111,7 +119,9 @@ watch(
 
 <template>
   <h2>New Run</h2>
-  <p v-if="!projects.length" class="muted">Register a Project first.</p>
+  <p v-if="projectsError" class="error">{{ projectsError }}</p>
+  <p v-else-if="!projectsLoaded" class="muted" role="status">Loading…</p>
+  <p v-else-if="!projects.length" class="muted">Register a Project first.</p>
   <form v-else class="stack" @submit.prevent="start">
     <select v-model="form.projectId" aria-label="Project">
       <option v-for="p in projects" :key="p.id" :value="String(p.id)">{{ projectLabel(p) }}</option>
