@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
-import { followRuns, getJson, postJson, type ArtInfo, type AssetKind, type Project, type Run } from "../api";
+import { followRuns, getJson, postJson, type ArtInfo, type AssetKind, type Project, type Run, type WorkflowList, type WorkflowOption } from "../api";
 
 const emit = defineEmits<{ open: [id: number] }>();
 
@@ -11,6 +11,14 @@ const runs = ref<Run[]>([]);
 const filterProject = ref("");
 const filterState = ref("");
 const form = ref({ projectId: "", workflow: "developer", task: "", title: "", trackerRef: "" });
+/** The chosen Project's Workflows (built-in and its own), and why its own could not be read. */
+const workflows = ref<WorkflowOption[]>([]);
+const workflowsProblem = ref("");
+const chosen = computed(() => workflows.value.find((w) => w.name === form.value.workflow));
+/** The form asks for what the chosen Workflow takes at launch. */
+const asks = (input: "task" | "assets") => chosen.value?.inputs.includes(input) ?? false;
+const launchable = computed(() => !!chosen.value && !chosen.value.errors.length);
+const originLabel = (w: WorkflowOption) => (w.origin === "project" ? "Project" : "built-in");
 
 /** The size presets of an Asset Request; "custom" shows the width and height fields. */
 const SIZES = ["16x16", "18x18", "32x32"];
@@ -74,12 +82,11 @@ async function load() {
 async function start() {
   error.value = "";
   try {
-    const isAssets = form.value.workflow === "assets";
     const run = await postJson<Run>("/api/runs", {
       projectId: Number(form.value.projectId),
       workflow: form.value.workflow,
-      task: isAssets ? undefined : form.value.task,
-      assets: isAssets ? assets.value.map((a) => ({ name: a.name, kind: a.kind, description: a.description, fill: a.fill, replace: a.replace, references: a.references, frames: a.kind === "animation" ? a.frames : undefined, ...sizeOf(a) })) : undefined,
+      task: asks("task") ? form.value.task : undefined,
+      assets: asks("assets") ? assets.value.map((a) => ({ name: a.name, kind: a.kind, description: a.description, fill: a.fill, replace: a.replace, references: a.references, frames: a.kind === "animation" ? a.frames : undefined, ...sizeOf(a) })) : undefined,
       title: form.value.title || undefined,
       trackerRef: form.value.trackerRef || undefined,
     });
@@ -114,8 +121,14 @@ watch(
   async (id) => {
     const none: ArtInfo = { present: false, defaultSize: null, references: [], images: [] };
     const fetched = id ? await getJson<ArtInfo>(`/api/projects/${id}/art-info`).catch(() => none) : none;
+    const noWorkflows: WorkflowList = { workflows: [], problem: null };
+    const list = id ? await getJson<WorkflowList>(`/api/projects/${id}/workflows`).catch((e): WorkflowList => ({ workflows: [], problem: `Could not load the Workflows: ${e.message}` })) : noWorkflows;
     // A quicker switch to another Project already moved on: drop this answer.
     if (form.value.projectId !== id) return;
+    workflows.value = list.workflows;
+    workflowsProblem.value = list.problem ?? "";
+    // The Workflow picked for the previous Project may not exist here: fall back to the first one.
+    if (!list.workflows.some((w) => w.name === form.value.workflow)) form.value.workflow = list.workflows[0]?.name ?? "developer";
     art.value = fetched;
     // References are the previous Project's images; the preset size is the new Project's.
     assets.value = assets.value.map((a) => (a.name || a.description ? { ...a, references: [] } : newAsset()));
@@ -132,11 +145,17 @@ watch(
       <option v-for="p in projects" :key="p.id" :value="String(p.id)">{{ projectLabel(p) }}</option>
     </select>
     <select v-model="form.workflow" aria-label="Workflow">
-      <option value="developer">developer: code a task</option>
-      <option value="assets">assets: draw pixel art</option>
+      <option v-for="w in workflows" :key="w.name" :value="w.name">{{ w.name }} ({{ originLabel(w) }}){{ w.errors.length ? " - invalid" : w.description ? `: ${w.description}` : "" }}</option>
     </select>
-    <textarea v-if="form.workflow === 'developer'" v-model="form.task" rows="4" placeholder="Task" aria-label="Task" required />
-    <template v-else>
+    <p v-if="workflowsProblem" class="error">{{ workflowsProblem }}</p>
+    <div v-if="chosen && chosen.errors.length" class="error" role="alert">
+      <strong>{{ chosen.file }} is invalid and cannot be launched:</strong>
+      <ul>
+        <li v-for="(e, i) in chosen.errors" :key="i">{{ e.line ? `line ${e.line}: ` : e.path ? `${e.path}: ` : "" }}{{ e.message }}</li>
+      </ul>
+    </div>
+    <textarea v-if="asks('task')" v-model="form.task" rows="4" placeholder="Task" aria-label="Task" required />
+    <template v-if="asks('assets')">
       <fieldset v-for="(a, i) in assets" :key="i" class="stack asset-request">
         <legend>Asset Request {{ i + 1 }}</legend>
         <input v-model="a.name" placeholder="Name (e.g. Hero idle)" aria-label="Asset name" required />
@@ -173,7 +192,7 @@ watch(
     </template>
     <input v-model="form.title" placeholder="Title (derived from the task or Assets if empty)" aria-label="Title" />
     <input v-model="form.trackerRef" placeholder="Tracker reference (optional, e.g. $12a)" aria-label="Tracker reference" />
-    <button type="submit">Start Run</button>
+    <button type="submit" :disabled="!launchable">Start Run</button>
   </form>
   <p v-if="error" class="error">{{ error }}</p>
 

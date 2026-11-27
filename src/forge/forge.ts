@@ -1,10 +1,12 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import type pg from "pg";
 import type { Runner } from "../runner/runner.js";
 import { developerAgent, developerWorkflow } from "./developer.js";
 import { runEngine, type StepTypeModule } from "./engine.js";
-import { agentStepType, checksStepType, gateStepType, publishStepType, type AgentModule } from "./step-types.js";
+import { agentStepType, catalogueOf, checksStepType, gateStepType, publishStepType, type AgentModule } from "./step-types.js";
+import { describeInvalid, resolveWorkflows, type ResolvedWorkflow } from "./project-workflows.js";
 import type { WorkflowDefinition } from "./workflow-definition.js";
 import { publishPullRequest } from "./publish.js";
 import { createRunRecords } from "./run-records.js";
@@ -32,6 +34,7 @@ import type {
   StepAttempt,
   StepState,
   Verdict,
+  WorkflowList,
 } from "./types.js";
 import { createRunWorktree, existsInBranch, inspectRepository, listInBranch, readInBranch, RegistrationError, refreshDefaultBranch, repositoryPath, slugify } from "./workspace.js";
 
@@ -57,7 +60,14 @@ export interface Forge {
    */
   artInfo(projectId: number): Promise<ArtInfo>;
   /**
-   * Creates a Run of the given Workflow (`developer` when omitted; an unknown name is refused) and starts it in the background; follow it with `getRun`. A `developer` Run takes a task, an `assets` Run
+   * The Workflows a Project can launch, for its Run form: the built-in ones and those of the Project's own
+   * `forgequor/workflows/*.yaml`, read from its default branch freshly fetched. A Project Workflow named like a built-in
+   * replaces it; an invalid one is listed with its errors. If the remote cannot be reached, only the built-in ones are
+   * listed, with `problem` saying why.
+   */
+  listWorkflows(projectId: number): Promise<WorkflowList>;
+  /**
+   * Creates a Run of the given Workflow (`developer` when omitted; an unknown name or an invalid Project Workflow is refused, the Project's Workflows being read from its freshly fetched default branch) and starts it in the background; follow it with `getRun`. A `developer` Run takes a task, an `assets` Run
    * its Asset Requests; the input is refused with an error saying what is wrong before anything starts. A Project already at its concurrent Runs
    * limit leaves the new Run Queued; it starts by itself, in creation order, when a slot frees up.
    */
@@ -235,8 +245,19 @@ export function createForge(deps: ForgeDeps): Forge {
   /** The Workflows a Run can follow, by name. */
   const extensions = deps.extensions ?? builtInExtensions(pool);
   const workflows = new Map<string, Workflow>([developerWorkflow, ...extensions.flatMap((e) => e.workflows)].map((w) => [w.name, w]));
-  /** How each Workflow's pull request is made, when it is not the default. */
+  /** How each built-in Workflow's pull request is made, when it is not the default. */
   const publications = new Map<string, Publication>([...workflows.values()].flatMap((w) => (w.publication ? [[w.name, w.publication] as const] : [])));
+  /**
+   * The Run's pull request rules: its Workflow's when the Run follows the built-in Workflow of its name, else (a Project
+   * Workflow) those of the built-in Workflow that takes the same launch inputs.
+   */
+  async function publicationOf(run: Run): Promise<Publication | undefined> {
+    const { rows } = await pool.query("SELECT definition FROM runs WHERE id = $1", [run.id]);
+    const frozen: WorkflowDefinition | null = rows[0]?.definition ?? null;
+    const own = workflows.get(run.workflow);
+    if (!frozen || (own && isDeepStrictEqual(frozen, own.definition))) return publications.get(run.workflow);
+    return [...workflows.values()].find((w) => w.inputs.length === frozen.inputs.length && frozen.inputs.every((i) => w.inputs.includes(i)))?.publication;
+  }
   /** The Gate kinds, by kind: each decides its own Gates. */
   const gateKinds = new Map<GateKind, GateKindModule>([finalGate, escalationGate, ...extensions.flatMap((e) => e.gateKinds)].map((k) => [k.kind, k]));
   const gateOf = (r: Record<string, any>): Gate => toGate(r, gateKinds.get(r.kind)?.actions ?? []);
@@ -244,7 +265,7 @@ export function createForge(deps: ForgeDeps): Forge {
   const agentModules = new Map<string, AgentModule>([developerAgent, ...extensions.flatMap((e) => e.agents ?? [])].map((a) => [a.name, a]));
   /** What the engine runs, by Step type. */
   const stepTypes = new Map<StepTypeModule["type"], StepTypeModule>(
-    [agentStepType(agentModules), checksStepType, publishStepType(publications), gateStepType(gateKinds), ...extensions.flatMap((e) => e.stepTypes ?? [])].map((t) => [t.type, t]),
+    [agentStepType(agentModules), checksStepType, publishStepType(publicationOf), gateStepType(gateKinds), ...extensions.flatMap((e) => e.stepTypes ?? [])].map((t) => [t.type, t]),
   );
   /** Each Agent's Runner: the Developer works through Claude Code, the Artist through Codex. */
   const agents: { developer: AgentSeat; artist?: AgentSeat } = {
@@ -477,10 +498,9 @@ export function createForge(deps: ForgeDeps): Forge {
 
   /** The Run's Steps in Workflow order with where each stands in the Run's current Iteration. */
   async function stepsOf(run: Run): Promise<StepState[]> {
-    const flow = workflows.get(run.workflow);
-    if (!flow) return [];
     const { rows: frozen } = await pool.query("SELECT definition FROM runs WHERE id = $1", [run.id]);
-    const definition: WorkflowDefinition = frozen[0]?.definition ?? flow.definition;
+    const definition: WorkflowDefinition | undefined = frozen[0]?.definition ?? workflows.get(run.workflow)?.definition;
+    if (!definition) return [];
     const { rows } = await pool.query("SELECT step, status, attempts FROM step_states WHERE run_id = $1 AND iteration = $2", [run.id, run.iteration]);
     const recorded = new Map(rows.map((r) => [r.step as string, r]));
     return definition.steps.map((s) => ({
@@ -513,6 +533,16 @@ export function createForge(deps: ForgeDeps): Forge {
     return fresh;
   }
 
+  /** The Workflows the Project can launch, its own read from `branch` (its default branch, fetched now when not given; null: none is read). */
+  async function projectWorkflows(project: Project, branch?: string | null): Promise<ResolvedWorkflow[]> {
+    return resolveWorkflows(project.localPath, branch === undefined ? await freshDefaultBranch(project.id, project.localPath) : branch, {
+      builtIn: [...workflows.values()],
+      catalogue: catalogueOf(agentModules.values()),
+      stepTypes: new Set(stepTypes.keys()),
+      gateKinds: new Set(gateKinds.keys()),
+    });
+  }
+
   /** Prepares the Run's worktree, then hands the Run to its Workflow. Any failure opens an Escalation. */
   async function work(run: Run, project: Project, stop: AbortSignal) {
     try {
@@ -532,12 +562,11 @@ export function createForge(deps: ForgeDeps): Forge {
 
       // Abandoned between being restarted and getting here: nothing to work on, no Quota to spend.
       if (!(await stillRunning(run.id))) return;
-      const workflow = workflows.get(run.workflow);
-      if (!workflow) throw new Error(`Unknown Workflow "${run.workflow}".`);
       const records = createRunRecords(pool, run.id, run.iteration);
-      // The definition the Run started with, not the Workflow's as it is now.
+      // The definition the Run started with, not the Workflow's as it is now (a Project Workflow is not in the code, and may be gone from the repository).
       const { rows: frozen } = await pool.query("SELECT definition FROM runs WHERE id = $1", [run.id]);
-      const definition: WorkflowDefinition = frozen[0]?.definition ?? workflow.definition;
+      const definition: WorkflowDefinition | undefined = frozen[0]?.definition ?? workflows.get(run.workflow)?.definition;
+      if (!definition) throw new Error(`Unknown Workflow "${run.workflow}".`);
       const context: WorkflowContext = {
         run,
         project,
@@ -642,20 +671,40 @@ export function createForge(deps: ForgeDeps): Forge {
       return () => void listeners.delete(listener);
     },
 
-    async startRun({ projectId, trackerRef, workflow = "developer", ...input }) {
-      const flow = workflows.get(workflow);
-      if (!flow) throw new Error(`Unknown Workflow "${workflow}".`);
+    async listWorkflows(projectId) {
       const { rows: found } = await pool.query(`SELECT ${COLUMNS} FROM projects WHERE id = $1`, [projectId]);
       if (!found[0]) throw new Error(`No Project ${projectId}.`);
       const project = toProject(found[0]);
-      const plan = flow.plan(input);
-      // Refused now, not after a Quota-costly generation. What is checked is what the Run will start from: the default
-      // branch as it is on the remote now, fetched once and only when a check asks.
+      try {
+        const resolved = await projectWorkflows(project);
+        return { workflows: resolved.map((r) => r.option), problem: null };
+      } catch (e: any) {
+        const options = [...workflows.values()].map((w) => ({ name: w.name, description: w.definition.description, inputs: [...w.inputs], origin: "built-in" as const, errors: [], file: null }));
+        return { workflows: options, problem: `The Project's own Workflows could not be read: ${e?.message ?? e}` };
+      }
+    },
+
+    async startRun({ projectId, trackerRef, workflow = "developer", ...input }) {
+      const { rows: found } = await pool.query(`SELECT ${COLUMNS} FROM projects WHERE id = $1`, [projectId]);
+      if (!found[0]) throw new Error(`No Project ${projectId}.`);
+      const project = toProject(found[0]);
+      // What a Run starts from is the default branch as it is on the remote now: fetched once, here, for the Project's
+      // Workflows and for whatever the launch checks ask of the repository. A remote out of reach leaves the Project's
+      // Workflows unread; the Run is still created and opens an Escalation when its worktree cannot be made.
       let fresh: Promise<string> | undefined;
-      await plan.check?.({
-        project,
-        exists: async (path) => existsInBranch(project.localPath, await (fresh ??= freshDefaultBranch(projectId, project.localPath)), path),
+      const freshBranch = () => (fresh ??= freshDefaultBranch(projectId, project.localPath));
+      let unreadable = "";
+      const branch = await freshBranch().catch((e) => {
+        unreadable = ` (the Project's own Workflows could not be read: ${e?.message ?? e})`;
+        return null;
       });
+      const chosen = (await projectWorkflows(project, branch)).find((r) => r.option.name === workflow);
+      if (!chosen) throw new Error(`Unknown Workflow "${workflow}"${unreadable}.`);
+      if (!chosen.workflow) throw new Error(describeInvalid(chosen.option));
+      const flow = chosen.workflow;
+      const plan = flow.plan(input);
+      // Refused now, not after a Quota-costly generation.
+      await plan.check?.({ project, exists: async (path) => existsInBranch(project.localPath, await freshBranch(), path) });
       const client = await pool.connect();
       let runId: number;
       try {

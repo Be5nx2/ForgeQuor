@@ -28,6 +28,33 @@ export interface ArtInfo {
   images: string[];
 }
 
+/** One thing wrong with a Workflow file, and where: a path such as `steps[1].needs[0]`, and the 1-based line and column. */
+export interface WorkflowError {
+  path: string;
+  line?: number;
+  column?: number;
+  message: string;
+}
+
+/** A Workflow a Run form can offer, from Forgequor or from the Project's own `forgequor/workflows/` folder. */
+export interface WorkflowOption {
+  name: string;
+  description: string;
+  /** What the human gives at launch: the Run form asks for each. Empty for an invalid Workflow. */
+  inputs: ("task" | "assets")[];
+  origin: "built-in" | "project";
+  /** Why the Workflow cannot be launched; empty when it can. */
+  errors: WorkflowError[];
+  /** The Project file it comes from, or null for a built-in. */
+  file: string | null;
+}
+
+/** The Workflows a Project can launch. `problem` says why the Project's own could not be read (then only built-ins are listed). */
+export interface WorkflowList {
+  workflows: WorkflowOption[];
+  problem: string | null;
+}
+
 export type RunState = "queued" | "running" | "waiting" | "paused" | "approved" | "merged" | "closed" | "abandoned";
 export type GateKind = "final" | "escalation" | "asset";
 /** What a Gate records as decided. */
