@@ -189,7 +189,7 @@ Griller with a **Conversation Gate** (it writes the Project's glossary and ADRs 
     - Runs archived more than `FORGEQUOR_ARCHIVE_DAYS` (default 60) days ago are deleted with everything that belongs to them; a Run that is not Archived is never purged;
     - the purge runs at startup and every 24 hours, and logs how many Runs it deleted;
     - Forge core takes an injectable clock; tests drive the delay with it.
-- [ ] `m4-03` **macOS notifications**: the human hears about a Run that needs them without watching the tab.
+- [x] `m4-03` **macOS notifications**: the human hears about a Run that needs them without watching the tab.
   - Spec: `docs/specs/m4-comfort.md`
   - Blocked by: none
   - Acceptance:
