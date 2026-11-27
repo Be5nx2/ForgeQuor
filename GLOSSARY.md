@@ -32,6 +32,10 @@ _Avoid_: Error, alert, failure
 A **Gate** where the human and an **Agent** (the Griller) exchange questions and answers in one ongoing session, until the **Agent** says it has covered everything and the human agrees.
 _Avoid_: Chat, interview step, Q&A
 
+**Spec Gate**:
+The **Gate** where the human reads the spec the Spec Writer wrote, rendered, and approves it or rejects it with **Feedback** so the Spec Writer redoes it.
+_Avoid_: Spec review, plan Gate
+
 **Feedback**:
 The human's written reason for rejecting a **Gate**, or one **Asset** at an **Asset Gate**, handed to the **Step** the **Run** goes back to.
 _Avoid_: Comment, review notes

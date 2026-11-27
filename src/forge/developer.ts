@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { commitLeftovers, REVIEW_BRIEF_FILE, RUN_NOTES_DIR } from "./workspace.js";
 import { describeFailure, passed, runChecks } from "./checks.js";
 import { REVIEW_REASON_PREFIX } from "./review.js";
+import { specOf } from "./spec.js";
 import type { AgentModule } from "./step-types.js";
 import { catalogueOf } from "./step-types.js";
 import { loadBuiltInWorkflow } from "./workflow-definition.js";
@@ -28,9 +29,10 @@ This Run fixes a bug, and the task is the bug description. Follow the \`diagnosi
  * The Developer's prompt; on a retry it carries what sent the work back: the Check that failed, or the Review that asked
  * for changes. The Feedback of the human's rejections is listed as well.
  */
-export function developerPrompt(task: string, sentBack?: string, feedbacks: string[] = [], summary?: string | null): string {
+export function developerPrompt(task: string, sentBack?: string, feedbacks: string[] = [], summary?: string | null, specPath?: string | null): string {
   let prompt = `Task:\n\n${task}`;
   if (summary) prompt += `\n\nThe human talked this task through with the Griller and confirmed this summary of what to build; build exactly that:\n\n${summary}`;
+  if (specPath) prompt += `\n\nThe human approved the spec at ${specPath}: read it first, and build what it says.`;
   if (feedbacks.length) {
     const history = feedbacks.map((f, i) => `${i + 1}. ${f}`).join("\n");
     prompt += `\n\nThe reviewer rejected your earlier work. Your work is already on this branch: build on it, address the latest Feedback (the last one), keep the earlier ones satisfied, commit, and rewrite the Review Brief.\n\nFeedback so far, oldest first:\n${history}`;
@@ -69,7 +71,8 @@ export const developerAgent: AgentModule = {
     return true;
   },
   async prompt(ctx, attempt) {
-    return developerPrompt(ctx.run.task, attempt.sentBack ?? undefined, await ctx.records.earlierFeedbacks(), await ctx.records.conversation.confirmedSummary());
+    const spec = await specOf(ctx);
+    return developerPrompt(ctx.run.task, attempt.sentBack ?? undefined, await ctx.records.earlierFeedbacks(), await ctx.records.conversation.confirmedSummary(), spec?.path);
   },
   async after(ctx) {
     await commitLeftovers(ctx.worktreePath, "chore: commit work left by the Developer");

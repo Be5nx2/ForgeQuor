@@ -61,7 +61,7 @@ export interface WorkflowList {
 }
 
 export type RunState = "queued" | "running" | "waiting" | "paused" | "approved" | "merged" | "closed" | "abandoned";
-export type GateKind = "final" | "escalation" | "asset" | "review" | "conversation";
+export type GateKind = "final" | "escalation" | "asset" | "review" | "conversation" | "spec";
 /** What a Gate records as decided. */
 export type GateDecision = "approve" | "reject" | "abandon" | "retry" | "go_back" | "answer" | "confirm";
 /** `judge` is the verdicts of an Asset Gate: its decision is recorded as approve when every Asset was approved, reject when any was not. */
