@@ -6,18 +6,167 @@ Milestones are specified one at a time with `/to-spec`, then split into items wi
 
 ## Now
 
-### M3 Full loop
+### M3a Workflow engine
 
-YAML **Workflows** with parallel **Steps**, Griller with chat, Spec Writer, Architect, solo or duo review (chosen at Run launch) with **Consolidator** (an unsettled reviewer disagreement opens a **Gate** with its recommendation), **Escalation**, configurable iteration limit (default 3), default `feature` and `bugfix` Workflows.
+The engine behind every Workflow, with no change visible to the human: a deeper Workflow seam, YAML **Workflows** with parallel **Steps**, a configurable cap on automatic attempts (default 3), **Escalation** with more choices than abandon, and the `developer` and `assets` Workflows rewritten as YAML with unchanged behaviour.
 
-- Spec: to write after the M3 grilling.
-- Prefactor first (M2 branch review): deepen the Workflow seam. The core imports a dozen asset helpers and `startRun` writes asset rows itself, `WorkflowContext` has ~17 members, and Step-result handling is copied in both Workflows; YAML Workflows need a seam where adding one touches no core code.
+- Spec: `docs/specs/m3a-workflow-engine.md`. Items below.
+- Decided in the grilling: built-in Workflows live in Forgequor, a Project adds or overrides one in `forgequor/workflows/` at its root; a Run freezes the Workflow it started with; an invalid YAML is not offered at launch; Escalations offer retry (optional Feedback), go back to an earlier Step (with Feedback) or abandon; order: m3-00a, m3-00b, seam, engine, `developer` then `assets` in YAML with existing tests unchanged, richer Escalations.
+- Workflow YAML (ADR 0007): Steps with `id`, a coded type (`agent`, `checks`, `gate` with its kind, `publish`, coded composites such as `artist`), `needs` (independent Steps run in parallel), `on_reject` with `max_attempts` (default 3) for automatic loops, Iterations (human-driven) staying uncapped, and one `when` condition; only `readonly` Steps run in parallel and fail if they change anything outside the Run Notes; a slot is per Run; going back to an earlier Step replays the Steps after it without reverting files.
+- Prefactor in M3a (M2 branch review): deepen the Workflow seam. The core imports a dozen asset helpers and `startRun` writes asset rows itself, `WorkflowContext` has ~17 members, and Step-result handling is copied in both Workflows; YAML Workflows need a seam where adding one touches no core code.
+- [ ] `m3-00a` **Approved Runs free their slot**: a Run releases its Project slot as soon as it is Approved, and Approved Runs stay easy to find until merged (from the M2 real tests, where open sandbox PRs blocked the queue twice).
+  - Spec: `docs/specs/m3a-workflow-engine.md`
+  - Blocked by: none
+  - Acceptance:
+    - an Approved Run no longer counts against its Project's concurrency limit, and becoming Approved starts the next Queued Run;
+    - "Waiting for you" gains a "Waiting for your merge" list: every Approved Run, all Projects, with its pull-request link, until merged or closed;
+    - the Runs list shows every Run in every state (the human once could not find a Run there; check it by hand and fix what hides one).
+- [ ] `m3-00b` **M2 review follow-ups**: the small gaps the M2 branch review found (listed below under "M2 review follow-ups").
+  - Spec: `docs/specs/m3a-workflow-engine.md`
+  - Blocked by: `m3-00a`
+- [ ] `m3-01` **One Step executor, a small context**: how a Step's result becomes progress, an Escalation or a Pause is written once and used by both Workflows.
+  - Spec: `docs/specs/m3a-workflow-engine.md`
+  - Blocked by: `m3-00b`
+  - Acceptance:
+    - one executor runs every Agent Step, records its attempts and streams progress; success moves on, failure or timeout opens an Escalation, Quota exhaustion pauses;
+    - the copies in the `developer` and `assets` Workflows are gone;
+    - the context handed to a Step holds the Run (Project, worktree, branch), the stop signal, the Agent seat it needs and a few operations, with no raw database pool;
+    - every existing test passes unchanged.
+- [ ] `m3-02` **Assets out of the core**: the Forge core knows nothing about Assets.
+  - Spec: `docs/specs/m3a-workflow-engine.md`
+  - Blocked by: `m3-01`
+  - Acceptance:
+    - each Gate kind (final, asset, escalation) is a module that knows its choices, validates and records a decision and says where the Run goes next; the core's decide operation delegates to it;
+    - a Workflow declares its launch inputs, and the Step types that use one validate and store it at launch inside the core's transaction;
+    - Asset Request validation, Asset rows, verdicts and Asset images live behind the `artist` Step type and the `asset` Gate kind;
+    - every existing test passes unchanged.
+- [ ] `m3-03` **Workflow definitions**: a YAML Workflow turns into a validated definition or a full list of errors.
+  - Spec: `docs/specs/m3a-workflow-engine.md`
+  - Blocked by: none
+  - Acceptance:
+    - steps with `id`, `type` (`agent` with `agent`, `checks`, `gate` with `final` or `asset`, `publish`, `artist`), optional `needs`, `readonly`, `on_reject`, `max_attempts` (default 3), `when`; the Workflow's name, description and launch inputs;
+    - errors, each with its location and all at once: duplicate id, unknown type, unknown id in `needs` or `on_reject`, a `needs` cycle, Steps that can run together without both being read-only, a `when` input neither given at launch nor produced by a Step it depends on;
+    - the built-in `developer` and `assets` YAML files ship with Forgequor and validate;
+    - tested directly at the module's interface; a pure-JavaScript YAML parser is the only new dependency.
+- [ ] `m3-04` **The engine runs `developer` from YAML**: Runs follow a frozen definition, starting with `developer`.
+  - Spec: `docs/specs/m3a-workflow-engine.md`
+  - Blocked by: `m3-02`, `m3-03`
+  - Acceptance:
+    - a Run stores the definition it started with; Runs created before M3a get their built-in definition at migration;
+    - Steps start when what they need is done or skipped; `when` is evaluated when a Step is ready, on inputs given at launch or produced by earlier Steps (a produced input is validated like launch input and an invalid one goes back to its Step);
+    - a rejecting Step loops back to its `on_reject` target and replays what follows; automatic loops past `max_attempts` open an Escalation saying so; Gate rejections start a new Iteration with no cap;
+    - each Step's state (waiting, running, done, skipped, failed, attempts) is persisted per Iteration and shown in order in the Run detail;
+    - a restart or a resume after a Pause restarts only the Steps that were running;
+    - `developer` runs from its YAML (`max_attempts: 3` on Checks) and every existing test passes unchanged.
+- [ ] `m3-05` **`assets` runs from YAML**: the art Workflow follows its definition too.
+  - Spec: `docs/specs/m3a-workflow-engine.md`
+  - Blocked by: `m3-04`
+  - Acceptance:
+    - `assets` is `artist` → asset Gate (`on_reject: artist`) → `publish`, the Run being Approved after Publish;
+    - `artist` is a coded composite that still draws each Asset Request in turn with its Asset Checks and retries;
+    - every existing test passes unchanged.
+- [ ] `m3-06` **Parallel read-only Steps**: independent read-only Steps run at the same time.
+  - Spec: `docs/specs/m3a-workflow-engine.md`
+  - Blocked by: `m3-04`
+  - Acceptance:
+    - read-only Steps whose needs are met start together and really overlap (tested with a test Workflow);
+    - after a read-only Step, any change outside the Run Notes fails it and opens an Escalation naming the files;
+    - a Run counts once against its Project's limit however many of its Steps run.
+- [ ] `m3-07` **Project Workflows and the Run form**: a game can bring its own Workflows.
+  - Spec: `docs/specs/m3a-workflow-engine.md`
+  - Blocked by: `m3-04`
+  - Acceptance:
+    - a Project's Workflows are read from `forgequor/workflows/*.yaml` on the freshly fetched default branch, at form load and at launch;
+    - a Project Workflow named like a built-in one replaces it for that Project; the form marks each Workflow built-in or Project;
+    - an invalid Workflow is listed with its errors and refused at launch;
+    - the Run form builds itself from the chosen Workflow's launch inputs;
+    - a Run keeps its frozen Workflow after the YAML changes.
+- [ ] `m3-08` **Escalations with choices**: the human can retry, go back or abandon.
+  - Spec: `docs/specs/m3a-workflow-engine.md`
+  - Blocked by: `m3-04`
+  - Acceptance:
+    - retry runs the failed Step again with a fresh attempt budget and the optional Feedback;
+    - go back lists the done Steps before the failed one; the chosen one and every Step after it replay in order with the required Feedback, without reverting files;
+    - abandon stays available;
+    - Feedback reaches replayed Agent Steps like Gate Feedback does.
+
+### M3b The team
+
+Griller with a **Conversation Gate** (it writes the Project's glossary and ADRs and produces Asset Requests), Spec Writer, Architect, solo or duo review (chosen at Run launch) with **Consolidator** (an unsettled reviewer disagreement opens a **Gate** with its recommendation), and the default `feature` and `bugfix` Workflows. `feature`: Griller ⇄ human → spec Gate → Spec Writer → Gate → Architect → Artist → Asset Gate (skipped without Asset Requests) → Developer → Checks → Reviewer(s) + Consolidator ⇄ Developer → pull request + Review Brief → final Gate.
+
+- Spec: to write with `/to-spec M3b` before `m3-11`; the items below follow the grilling decisions.
+- Decided in the grilling (round 1):
+  - the Griller writes its transcript to the Run Notes, the Project's glossary and ADRs as Deliverables, and Asset Requests in a structured Run Note that Forgequor validates like launch input (fresh fetch), sending invalid ones back to the Griller;
+  - Conversation Gate: one round of questions at a time, the human answers in one message, the Griller resumes the same Claude session (the Claude Runner gains session persistence for this only), proposes a summary at the end and the human confirms or goes on; the transcript is saved at each exchange;
+  - that confirmation is the first decision point; then the Spec Writer (`to-spec`, no questions) writes `docs/specs/<slug>.md` as a Deliverable, no tickets, and a spec Gate shows it rendered: approve, or reject with Feedback to redo it;
+  - the Architect writes an Implementation Plan to the Run Notes (modules, test seams, order of small steps) and a Project ADR when warranted; no Gate after it;
+  - review: solo is one Reviewer on Claude; duo is two read-only Reviewers in parallel (Claude, and Codex in its read-only sandbox) plus the Consolidator, who checks each remark against the code and opens a Gate on an unsettled disagreement; each Reviewer uses `code-review` (standards and spec); changes requested go back to the Developer, capped by `max_attempts`, then an Escalation;
+  - `bugfix`: a bug description, the Developer with `diagnosing-bugs` writing a failing test first, Checks, solo review by default (duo at launch), pull request, final Gate.
+- Decided in the grilling (round 2):
+  - default Runners: Claude for the Griller, Spec Writer, Architect, Developer, Reviewer A and Consolidator; Codex for Reviewer B and the Artist; set through environment variables until M4;
+  - minimal Skill Packs move into M3b: at each Run's start Forgequor places its own `shared` pack in the worktree (`.claude/skills` and `.agents/skills`), never committed, and a skill the Project has itself wins; choosing packs per Project stays in M4;
+  - the `feature` Developer gets the task, the spec, the Implementation Plan and the approved Assets' paths; a final Gate rejection sends it back with the Feedback; an Escalation can go back to any earlier Step, the Griller included, which reopens the conversation;
+  - a `feature` Run starts from a free-text subject and a solo or duo review choice (duo by default; solo by default for `bugfix`).
+- [ ] `m3-10` **Shared Skill Pack in every Run**: Agents find the skills they need in any Project.
+  - Spec: to write (`docs/specs/m3b-the-team.md`), from the grilling decisions above
+  - Blocked by: none
+  - Acceptance:
+    - at a Run's start Forgequor places its `shared` Skill Pack in the worktree, for Claude and for Codex, never committed;
+    - a skill the Project already has wins over the pack's;
+    - tested with a Project that has none of the skills and one that overrides one.
+- [ ] `m3-11` **`bugfix` with a solo Reviewer**: a bug goes from description to reviewed pull request.
+  - Spec: to write (`docs/specs/m3b-the-team.md`), from the grilling decisions above
+  - Blocked by: `m3-04`, `m3-10`
+  - Acceptance:
+    - a Reviewer Agent (Claude by default) uses `code-review` against the Project's standards and the Run's task or spec, and writes a Review ending in pass or changes requested;
+    - changes requested loops back to the Developer, capped by `max_attempts`, then an Escalation;
+    - `bugfix` takes a bug description; the Developer uses `diagnosing-bugs` and writes a failing test first; then Checks, review, pull request, final Gate;
+    - the Run form offers solo or duo review, solo by default for `bugfix`.
+- [ ] `m3-12` **Duo review and Consolidator**: two models review, one review reaches the Developer.
+  - Spec: to write (`docs/specs/m3b-the-team.md`), from the grilling decisions above
+  - Blocked by: `m3-11`, `m3-06`
+  - Acceptance:
+    - duo runs a Claude Reviewer and a Codex Reviewer in parallel, both read-only (Codex in its read-only sandbox);
+    - the Consolidator (Claude) checks each remark against the code and writes one Review;
+    - a disagreement it cannot settle opens a Gate carrying its recommendation;
+    - Runners per Agent default as decided and can be changed through environment variables.
+- [ ] `m3-13` **`feature` v0: Griller and Conversation Gate**: a subject becomes code after a grilling.
+  - Spec: to write (`docs/specs/m3b-the-team.md`), from the grilling decisions above
+  - Blocked by: `m3-11`, `m3-10`, `m3-08`
+  - Acceptance:
+    - the Claude Runner can keep and resume a session, for Conversation Gates only;
+    - the Griller uses `grill-with-docs`, asks one round at a time; the Run waits; the human answers in one message in a chat in the UI; the same session resumes;
+    - the transcript is saved to the Run Notes at each exchange and survives a restart;
+    - the Griller ends with a summary the human confirms or continues from; the Project's glossary and ADRs it changed are committed;
+    - `feature` v0 is Griller → Developer → Checks → review (duo by default) → pull request → final Gate, launched from a free-text subject;
+    - going back to the Griller from an Escalation reopens the conversation.
+- [ ] `m3-14` **Spec Writer and spec Gate**: the grilling becomes a spec the human approves.
+  - Spec: to write (`docs/specs/m3b-the-team.md`), from the grilling decisions above
+  - Blocked by: `m3-13`
+  - Acceptance:
+    - the Spec Writer uses `to-spec` without asking questions and writes `docs/specs/<slug>.md` in the Project, committed in the pull request, with no tickets;
+    - a spec Gate shows the spec rendered; approve goes on, reject with Feedback has it redone;
+    - the Developer is given the spec.
+- [ ] `m3-15` **Architect and Implementation Plan**: the Developer follows a plan.
+  - Spec: to write (`docs/specs/m3b-the-team.md`), from the grilling decisions above
+  - Blocked by: `m3-14`
+  - Acceptance:
+    - the Architect reads the spec and the code and writes an Implementation Plan to the Run Notes (modules, test seams, order of small steps);
+    - it writes a Project ADR when a decision warrants one; no Gate follows it;
+    - the Developer is given the plan.
+- [ ] `m3-16` **Art inside `feature`**: the grilling can order art that the code then uses.
+  - Spec: to write (`docs/specs/m3b-the-team.md`), from the grilling decisions above
+  - Blocked by: `m3-13`, `m3-05`
+  - Acceptance:
+    - the Griller produces Asset Requests in a structured Run Note, validated like launch input on the fresh branch, invalid ones going back to it;
+    - the Artist and the Asset Gate run only when there are Asset Requests;
+    - the Developer is given the approved Assets' paths.
 
 ## Next
 
 ### M4 Comfort
 
-**Quota** gauges refreshed after every Step (unknown shown greyed), **Archive** and purge after 60 days, macOS notifications, **Skill Packs** per Project plus the Project's own Skills, one-click Runner assignment (default and per Run), read-only Workflow preview, `/to-workflow` skill (checks for a close existing Workflow before writing a new one).
+**Quota** gauges refreshed after every Step (unknown shown greyed), **Archive** and purge after 60 days, macOS notifications, choosing **Skill Packs** per Project (M3b already provides the `shared` pack to every Run), one-click Runner assignment (default and per Run), read-only Workflow preview, `/to-workflow` skill (checks for a close existing Workflow before writing a new one).
 
 ### Dogfood Notes
 
@@ -43,8 +192,8 @@ YAML **Workflows** with parallel **Steps**, Griller with chat, Spec Writer, Arch
 ## Icebox
 
 - Child Runs: a feature Run splitting its spec into one Run per ticket (ADR 0001).
-- Verifier Agent: a Step that runs the real app and the opt-in smoke tests and checks each acceptance criterion before the final Gate (green unit tests missed m1-03's undecidable Gates). To grill.
-- Conductor Agent (the sprint manager): reads the roadmap, computes the frontier, spots hidden dependencies and parallel-safe items, proposes the next Runs; advisory first, then driving Child Runs. Touches ADR 0001. To grill.
+- Verifier Agent (M5 candidate, decided in the M3 grilling): a Step that runs the real app and the opt-in smoke tests and checks each acceptance criterion before the final Gate (green unit tests missed m1-03's undecidable Gates). To think through later.
+- Conductor Agent (the sprint manager), after M3: reads the roadmap, computes the frontier, spots hidden dependencies and parallel-safe items, proposes the next Runs; advisory first, then driving Child Runs. Touches ADR 0001.
 - Runner fallback when a Quota is exhausted.
 - Competing Runs: the same Step on two Runners, then pick.
 - Codecks sync: import cards, update status.
@@ -63,9 +212,8 @@ YAML **Workflows** with parallel **Steps**, Griller with chat, Spec Writer, Arch
 - Tileset atlas: an Asset Request for N tiles delivered as one atlas image (Godot TileSet), instead of one file per tile (M2 grilling).
 - Produce a Run's Asset Requests in parallel instead of one after the other (image generation burns Quota 3-5x faster, so sequential first).
 - Animated preview of an Animation Strip in the gallery (frames played in a loop, larger than the 4x a 64 px strip gets today), to judge the motion (real strip test, m2-07).
-- Should an Approved Run keep its Project slot until its pull request is merged? It uses no Quota any more, but holds the queue while the human has not merged (real strip test, m2-07). To grill.
 
-- M2 review follow-ups (2026-11-27), small:
+- M2 review follow-ups (2026-11-27), small, to fix in `m3-00b`:
   - the `assets` Review Brief omits palette warnings (spec story 46);
   - Gates do not record their Iteration, so an `assets` Iteration shows no Feedback in the Run detail;
   - a read Run does not expose each attempt's Asset Check failures;

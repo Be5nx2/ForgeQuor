@@ -9,7 +9,7 @@ A git repository Forgequor works on, usually a game, possibly Forgequor itself.
 _Avoid_: Repo, target, workspace
 
 **Workflow**:
-A reusable, versioned definition of the graph of **Steps** (sequential or in parallel) that turns a task into a reviewed change.
+A reusable, versioned definition of the graph of **Steps** (sequential or in parallel, with loops back on rejection) that turns a task into a reviewed change; a **Run** keeps the version it started with.
 _Avoid_: Pipeline, process, template
 
 **Run**:
@@ -17,7 +17,7 @@ One execution of a **Workflow** on one task of a **Project**, isolated in its ow
 _Avoid_: Job, execution, pipeline run
 
 **Step**:
-One stage of a **Workflow**, performed either by an **Agent** or by the human at a **Gate**.
+One stage of a **Workflow**, of one of a fixed set of kinds: an **Agent**'s work, **Checks**, a **Gate** for the human, or publishing the pull request.
 _Avoid_: Stage, phase, task
 
 **Gate**:
@@ -25,8 +25,12 @@ A **Step** where the **Run** waits for the human, who answers, approves or rejec
 _Avoid_: Checkpoint, approval, human-in-the-loop
 
 **Escalation**:
-A **Gate** a **Run** opens on its own when it cannot go on (iteration limit reached, **Runner** failure, **Check** failing repeatedly), stating why.
+A **Gate** a **Run** opens on its own when it cannot go on (attempt limit reached, **Runner** failure, **Check** failing repeatedly), stating why.
 _Avoid_: Error, alert, failure
+
+**Conversation Gate**:
+A **Gate** where the human and an **Agent** (the Griller) exchange questions and answers in one ongoing session, until the **Agent** says it has covered everything and the human agrees.
+_Avoid_: Chat, interview step, Q&A
 
 **Feedback**:
 The human's written reason for rejecting a **Gate**, or one **Asset** at an **Asset Gate**, handed to the **Step** the **Run** goes back to.
@@ -47,6 +51,14 @@ _Avoid_: Test, CI, validation
 **Setup**:
 A command a **Project** declares to prepare a **Run**'s new worktree (installing dependencies, linking skills) before the **Developer** starts; a failing one opens an **Escalation** and the **Developer** never starts.
 _Avoid_: Bootstrap, install step, init
+
+**Implementation Plan**:
+The Architect's note, in the **Run Notes**, of how the change will be built: the modules it touches, where it will be tested, and the order of small steps the Developer follows.
+_Avoid_: Design doc, technical spec, plan
+
+**Review**:
+A Reviewer's findings on a **Run**'s change, against the **Project**'s standards and the **Run**'s spec, ending in pass or changes requested.
+_Avoid_: Verdict (that is one **Asset**'s decision at an **Asset Gate**), code review report
 
 **Review Brief**:
 The comment a **Run** posts on its pull request for the final **Gate**: what the change does, where to look closely, and what to test.
@@ -103,7 +115,7 @@ A packaged set of instructions an **Agent** follows for one kind of work.
 _Avoid_: Prompt, command, recipe
 
 **Skill Pack**:
-A named group of **Skills** for one audience (shared, godot, forgequor); a **Project** picks the packs its **Agents** use, plus any **Skills** of its own.
+A named group of **Skills** for one audience (shared, godot, forgequor); every **Run** gets the shared pack, a **Project** picks any others its **Agents** use, and its own **Skills** win over a pack's.
 _Avoid_: Skill set, bundle, plugin
 
 **Artist**:
