@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { commitDeliverables, type MayChange } from "./deliverables.js";
+import { commitDeliverables, sweepForbiddenChanges, type MayChange } from "./deliverables.js";
 import { specOf } from "./spec.js";
 import type { AgentModule } from "./step-types.js";
 import { RUN_NOTES_DIR } from "./workspace.js";
@@ -37,6 +37,11 @@ export async function architectPrompt(ctx: WorkflowContext, sentBack: string | n
   if (summary) prompt += `\n\nThe human confirmed this summary of what to build:\n\n${summary}`;
   if (spec) prompt += `\n\nThe human approved this spec (it is at ${spec.path} on the branch):\n\n${spec.content}`;
   prompt += `\n\nWrite the Implementation Plan to ${IMPLEMENTATION_PLAN}.`;
+  const feedbacks = await ctx.records.earlierFeedbacks();
+  if (feedbacks.length) {
+    const history = feedbacks.map((f, i) => `${i + 1}. ${f}`).join("\n");
+    prompt += `\n\nThe human sent the Run back with this Feedback: address the latest (the last one) and keep the earlier ones satisfied.\n\nFeedback so far, oldest first:\n${history}`;
+  }
   if (sentBack) prompt += `\n\nYour previous attempt could not be used: ${sentBack}`;
   return prompt;
 }
@@ -51,14 +56,15 @@ export const architectAgent: AgentModule = {
   async before(ctx) {
     // A plan from an earlier pass (a rejected spec, a go back) must not pass for this attempt's.
     rmSync(join(ctx.worktreePath, IMPLEMENTATION_PLAN), { force: true });
+    // Likewise the ADRs of an attempt that failed: only the successful attempt's are committed.
+    await sweepForbiddenChanges(ctx.worktreePath, (path) => !path.startsWith(ADR_DIR));
     return true;
   },
   prompt: (ctx, attempt) => architectPrompt(ctx, attempt.sentBack),
-  async after(ctx) {
-    await commitDeliverables(ctx.worktreePath, architectAgent.mayChange!(ctx), `docs(adr): ${ctx.run.title}`.slice(0, 72));
-  },
   async harvest(ctx) {
     if (!planOf(ctx.worktreePath)) return { invalid: `No Implementation Plan was written: ${IMPLEMENTATION_PLAN} is missing or empty. Write the whole plan there.` };
+    // Only an attempt that gave a plan has its ADRs committed.
+    await commitDeliverables(ctx.worktreePath, architectAgent.mayChange!(ctx), `docs(adr): ${ctx.run.title}`.slice(0, 72));
     return { produced: [] };
   },
 };

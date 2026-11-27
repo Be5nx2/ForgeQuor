@@ -188,6 +188,26 @@ describe("the Architect", () => {
     expect(git(run.worktreePath!, "status", "--porcelain")).toBe("");
   });
 
+  it("leaves no ADR of a failed attempt: only the successful attempt's ADRs are committed", async () => {
+    const p = await project();
+    let n = 0;
+    architecting = (step) => {
+      if (++n === 1) write(step, "docs/adr/0009-x.md", "# X\n");
+      else {
+        write(step, "docs/adr/0009-y.md", "# Y\n");
+        write(step, PLAN, "# Plan\n");
+      }
+    };
+
+    const run = await toArchitect(p);
+
+    expect(architects()).toHaveLength(2);
+    const changed = git(run.worktreePath!, "diff", "--name-only", "origin/main", "HEAD").split("\n");
+    expect(changed).toContain("docs/adr/0009-y.md");
+    expect(changed).not.toContain("docs/adr/0009-x.md");
+    expect(existsSync(join(run.worktreePath!, "docs/adr/0009-x.md"))).toBe(false);
+  });
+
   it("may change nothing but ADRs: other files are put back and an Escalation names them", async () => {
     const p = await project();
     architecting = (step) => {
@@ -235,6 +255,8 @@ describe("the Architect", () => {
     run = await forge.getRun(run.id);
 
     expect(architects()).toHaveLength(2);
+    expect(architects()[1]!.prompt).toContain("1. Plan it differently.");
+    expect(architects()[0]!.prompt).not.toContain("Plan it differently.");
     expect(stepsOf(run)).toContain("architect:done");
     expect(stepsOf(run).at(-1)).toBe("final:running");
     expect(developers().at(-1)!.prompt).toContain("Second plan.");
