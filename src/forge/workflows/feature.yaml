@@ -1,5 +1,5 @@
 name: feature
-description: The Griller talks the subject through with the human until they confirm its summary, the Spec Writer writes the spec and the human approves it, the Developer builds it, the Checks run, a Reviewer reviews the change (duo by default), the pull request opens, then the human approves or rejects at the final Gate.
+description: The Griller talks the subject through with the human until they confirm its summary, the Spec Writer writes the spec and the human approves it, the Architect writes the Implementation Plan, the Developer builds it, the Checks run, a Reviewer reviews the change (duo by default), the pull request opens, then the human approves or rejects at the final Gate.
 inputs: [task, review]
 # The review mode the Run form preselects.
 review: duo
@@ -17,10 +17,15 @@ steps:
     needs: [spec-writer]
     # A rejection with Feedback starts a new Iteration in which the Spec Writer redoes the spec; the human decides when to stop.
     on_reject: spec-writer
+  # The Architect reads the spec and the code and writes the Implementation Plan (and any ADR); no Gate follows it.
+  - id: architect
+    type: agent
+    agent: architect
+    needs: [spec]
   # Art, only when the grilling ordered Assets: the Artist draws them, the human judges them, then the Developer builds on them.
   - id: artist
     type: artist
-    needs: [spec]
+    needs: [architect]
     when: assets
   - id: asset-gate
     type: gate

@@ -147,7 +147,7 @@ Griller with a **Conversation Gate** (it writes the Project's glossary and ADRs 
     - the Spec Writer uses `to-spec` without asking questions and writes `docs/specs/<slug>.md` in the Project, committed in the pull request, with no tickets;
     - a spec Gate shows the spec rendered; approve goes on, reject with Feedback has it redone;
     - the Developer is given the spec.
-- [ ] `m3-15` **Architect and Implementation Plan**: the Developer follows a plan.
+- [x] `m3-15` **Architect and Implementation Plan**: the Developer follows a plan.
   - Spec: `docs/specs/m3b-the-team.md`
   - Blocked by: `m3-14`
   - Acceptance:
