@@ -7,6 +7,7 @@ import { bugfixAgent, bugfixWorkflow, developerAgent, developerWorkflow } from "
 import { createConversationRecords } from "./conversation-records.js";
 import { createConversationGate, conversationStepType, type ConversationAgent } from "./conversation.js";
 import { featureWorkflow, grillerAgent } from "./feature.js";
+import { specGate, specWriterAgent } from "./spec.js";
 import { runEngine, type StepTypeModule } from "./engine.js";
 import { agentStepType, catalogueOf, checksStepType, gateStepType, publishStepType, type AgentModule } from "./step-types.js";
 import { describeInvalid, resolveWorkflows, type ResolvedWorkflow } from "./project-workflows.js";
@@ -291,14 +292,14 @@ export function createForge(deps: ForgeDeps): Forge {
     return [...workflows.values()].find((w) => w.inputs.length === frozen.inputs.length && frozen.inputs.every((i) => w.inputs.includes(i)))?.publication;
   }
   /** The Gate kinds, by kind: each decides its own Gates. */
-  const gateKinds = new Map<GateKind, GateKindModule>([finalGate, escalationGate, reviewGate, createConversationGate(pool), ...extensions.flatMap((e) => e.gateKinds)].map((k) => [k.kind, k]));
+  const gateKinds = new Map<GateKind, GateKindModule>([finalGate, escalationGate, reviewGate, specGate, createConversationGate(pool), ...extensions.flatMap((e) => e.gateKinds)].map((k) => [k.kind, k]));
   const gateOf = async (r: Record<string, any>): Promise<Gate> => {
     const kind = gateKinds.get(r.kind);
     const gate = toGate(r, kind?.actions ?? []);
     return kind ? { ...gate, actions: await offered(kind, gate) } : gate;
   };
   /** The Agents a Workflow's Agent Step can name. */
-  const agentModules = new Map<string, AgentModule>([developerAgent, bugfixAgent, ...extensions.flatMap((e) => e.agents ?? [])].map((a) => [a.name, a]));
+  const agentModules = new Map<string, AgentModule>([developerAgent, bugfixAgent, specWriterAgent, ...extensions.flatMap((e) => e.agents ?? [])].map((a) => [a.name, a]));
   /** The Agents a conversation Step can name. */
   const conversationAgents = new Map<string, ConversationAgent>([grillerAgent].map((a) => [a.name, a]));
   /** What the engine runs, by Step type. */

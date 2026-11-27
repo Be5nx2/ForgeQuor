@@ -28,8 +28,11 @@ let counter = 0;
 const isGriller = (s: StepRequest) => s.instructions.includes("You are the Griller");
 const isReviewer = (s: StepRequest) => s.instructions.includes("You are the Reviewer") || s.instructions.includes("You are the Consolidator");
 const passing: StepResult = { status: "succeeded", summary: "Summary: Fine.\n\nFindings:\n- None.\n\nDoubts: None.\n\nVerdict: pass" };
+const isSpecWriter = (s: StepRequest) => s.instructions.includes("You are the Spec Writer");
 const grillers = () => claude.steps.filter(isGriller);
-const developers = () => claude.steps.filter((s) => !isGriller(s) && !isReviewer(s));
+const developers = () => claude.steps.filter((s) => !isGriller(s) && !isSpecWriter(s) && !isReviewer(s));
+/** Where the Spec Writer writes the spec of the Run these tests start. */
+const SPEC = "docs/specs/let-the-player-jump-twice.md";
 
 const questions = (body = "1. What should the double jump feel like? (Recommended: a short hop.)") => `Kind: questions\n\n${body}`;
 const summary = (body = "Build a double jump: a second jump in mid-air, once per fall.") => `Kind: summary\n\n${body}`;
@@ -39,6 +42,11 @@ function script(turns: (string | ((step: StepRequest, n: number) => StepResult |
   let n = 0;
   return (step: StepRequest): StepResult | void => {
     if (isReviewer(step)) return passing;
+    if (isSpecWriter(step)) {
+      mkdirSync(join(step.cwd, "docs/specs"), { recursive: true });
+      writeFileSync(join(step.cwd, SPEC), "# Double jump\n\nThe spec.\n");
+      return;
+    }
     if (!isGriller(step)) {
       writeFileSync(join(step.cwd, "jump.txt"), `jump ${claude.steps.length}\n`);
       writeFileSync(join(step.cwd, ".forgequor", "review-brief.md"), "What the Developer did.\n");
@@ -107,6 +115,13 @@ async function confirm(r: RunDetail, f: Forge = forge): Promise<RunDetail> {
   await f.whenIdle();
   return f.getRun(r.id);
 }
+/** Confirms the summary, then approves the spec the Spec Writer wrote, so the Run goes on to the Developer. */
+async function confirmAndApprove(r: RunDetail, f: Forge = forge): Promise<RunDetail> {
+  const confirmed = await confirm(r, f);
+  await f.decideGate({ gateId: open(confirmed).id, action: "approve" });
+  await f.whenIdle();
+  return f.getRun(r.id);
+}
 
 /** The one session the fake Runner keeps (the newest, when the conversation started another). */
 const session = () => [...claude.sessions].at(-1)!;
@@ -122,7 +137,7 @@ describe("a feature Run's grilling", () => {
     expect(run.workflow).toBe("feature");
     expect(run.review).toBe("duo");
     expect(run.state).toBe("waiting");
-    expect(stepsOf(run)).toEqual(["griller:running", "developer:waiting", "checks:waiting", "review:waiting", "publish:waiting", "final:waiting"]);
+    expect(stepsOf(run)).toEqual(["griller:running", "spec-writer:waiting", "spec:waiting", "developer:waiting", "checks:waiting", "review:waiting", "publish:waiting", "final:waiting"]);
     expect(run.steps[0]).toMatchObject({ type: "conversation", detail: "griller" });
     expect(open(run)).toMatchObject({ kind: "conversation", stepId: "griller", actions: ["answer", "abandon"], evidence: expect.stringContaining("double jump feel") });
     expect(grillers()).toHaveLength(1);
@@ -169,11 +184,11 @@ describe("a feature Run's grilling", () => {
 
     let run = await feature(p);
     run = await answer(run, "Short hop.");
-    run = await confirm(run);
+    run = await confirmAndApprove(run);
 
     expect(run.state).toBe("waiting");
-    expect(stepsOf(run)).toEqual(["griller:done", "developer:done", "checks:done", "review:done", "publish:done", "final:running"]);
-    expect(run.gates.map((g) => g.kind)).toEqual(["conversation", "conversation", "final"]);
+    expect(stepsOf(run)).toEqual(["griller:done", "spec-writer:done", "spec:done", "developer:done", "checks:done", "review:done", "publish:done", "final:running"]);
+    expect(run.gates.map((g) => g.kind)).toEqual(["conversation", "conversation", "spec", "final"]);
     expect(run.gates[1]).toMatchObject({ decision: "confirm" });
     expect(developers()).toHaveLength(1);
     expect(developers()[0]!.prompt).toContain("Let the player jump twice.");
@@ -209,7 +224,7 @@ describe("a feature Run's grilling", () => {
     expect(grillers()[1]!.prompt).toBe("You forgot the wall jump.");
     expect(open(run).evidence).toBe("Second summary.");
     expect(open(run).actions).toContain("confirm");
-    run = await confirm(run);
+    run = await confirmAndApprove(run);
     expect(developers()[0]!.prompt).toContain("Second summary.");
     expect(developers()[0]!.prompt).not.toContain("First summary.");
   });
@@ -405,11 +420,12 @@ describe("what the review and the Developer read after a grilling", () => {
     claude.use(script([summary("Build a double jump: once per fall.")]));
 
     let run = await feature(p);
-    run = await confirm(run);
+    run = await confirmAndApprove(run);
 
+    // The Run has a spec, so that is what the Reviewers read the change against; the summary is the fallback for a Run without one.
     const prompts = [...claude.steps, ...codex.steps].filter(isReviewer).map((s) => s.prompt);
     expect(prompts).toHaveLength(3);
-    for (const prompt of prompts) expect(prompt).toContain("The human confirmed this summary of what to build; review against it:\n\nBuild a double jump: once per fall.");
+    for (const prompt of prompts) expect(prompt).toContain(`The human approved this spec (it is at ${SPEC} on the branch); review against it:\n\n# Double jump\n\nThe spec.`);
   });
 
   it("does not reopen the confirmed conversation for a retry at a later Step", async () => {
@@ -417,7 +433,7 @@ describe("what the review and the Developer read after a grilling", () => {
     claude.use(script([summary()]));
     let run = await feature(p);
     await pool.query("UPDATE projects SET setup = $2 WHERE id = $1", [p.id, JSON.stringify(["false"])]);
-    run = await confirm(run);
+    run = await confirmAndApprove(run);
     expect(open(run)).toMatchObject({ kind: "escalation", stepId: "developer" });
     await pool.query("UPDATE projects SET setup = '[]' WHERE id = $1", [p.id]);
 
@@ -426,7 +442,7 @@ describe("what the review and the Developer read after a grilling", () => {
     run = await forge.getRun(run.id);
 
     expect(grillers()).toHaveLength(1);
-    expect(stepsOf(run)).toEqual(["griller:done", "developer:done", "checks:done", "review:done", "publish:done", "final:running"]);
+    expect(stepsOf(run)).toEqual(["griller:done", "spec-writer:done", "spec:done", "developer:done", "checks:done", "review:done", "publish:done", "final:running"]);
   });
 });
 
@@ -540,9 +556,9 @@ describe("going back to the Griller from an Escalation", () => {
     run = await answer(run, "Short hop.");
     // The Developer cannot start: its setup fails, which opens an Escalation at the Developer.
     await pool.query("UPDATE projects SET setup = $2 WHERE id = $1", [p.id, JSON.stringify(["false"])]);
-    run = await confirm(run);
+    run = await confirmAndApprove(run);
     expect(open(run)).toMatchObject({ kind: "escalation", stepId: "developer" });
-    expect(open(run).redo!.goBack.map((s) => s.stepId)).toEqual(["griller"]);
+    expect(open(run).redo!.goBack.map((s) => s.stepId)).toEqual(["griller", "spec-writer", "spec"]);
     await pool.query("UPDATE projects SET setup = '[]' WHERE id = $1", [p.id]);
 
     await forge.decideGate({ gateId: open(run).id, action: "go_back", target: "griller", feedback: "The wall jump matters too." });
@@ -557,9 +573,9 @@ describe("going back to the Griller from an Escalation", () => {
     expect(transcript(run)).toMatch(/### Answer\n\nConfirmed\.\n\n### Feedback\n\n> The wall jump matters too\.\n\n## Round 3/);
 
     run = await answer(run, "Yes, include it.");
-    run = await confirm(run);
+    run = await confirmAndApprove(run);
     expect(developers().at(-1)!.prompt).toContain("The revised summary, with the wall.");
-    expect(stepsOf(run)).toEqual(["griller:done", "developer:done", "checks:done", "review:done", "publish:done", "final:running"]);
+    expect(stepsOf(run)).toEqual(["griller:done", "spec-writer:done", "spec:done", "developer:done", "checks:done", "review:done", "publish:done", "final:running"]);
   });
 });
 

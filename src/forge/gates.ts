@@ -48,6 +48,8 @@ export interface GateKindModule {
   redo?: boolean;
   /** Why a Gate Step of this kind opens it, as the human reads it. */
   reason?: string | ((ctx: WorkflowContext) => Promise<string>);
+  /** What a Gate Step of this kind shows the human beside its reason (the spec's Markdown), when there is something to show. */
+  evidence?(ctx: WorkflowContext): Promise<string | undefined>;
   /**
    * Validates a decision the Gate offers (the core already refused the others) and says where the Run goes. Throws an
    * InvalidInputError for a decision that does not fit, such as a rejection without Feedback.

@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { dirname, join } from "node:path";
 import type { StepRun, StepTypeModule } from "./engine.js";
 import { requireSeat, type SeatName } from "./seats.js";
+import { specOf } from "./spec.js";
 import { runAgentStep } from "./step.js";
 import type { GateKind, Review, ReviewMode, ReviewVerdict } from "./types.js";
 import type { WorkflowContext } from "./workflow.js";
@@ -94,20 +95,27 @@ export interface ReviewerPromptInput {
   problem?: string;
   /** The summary of what to build that the human confirmed at a Conversation Gate, when the Run had one. */
   summary?: string | null;
+  /** The spec the human approved, when the Run had one: what the change is then reviewed against, instead of the summary. */
+  spec?: { path: string; content: string } | null;
 }
 
-/** What a Review of a Run that was grilled is also read against. */
-const confirmedSummaryNote = (summary: string) => `\n\nThe human confirmed this summary of what to build; review against it:\n\n${summary}`;
+/** What a Review of a Run that was grilled is also read against: the approved spec when there is one, else the confirmed summary. */
+const reviewedAgainst = ({ spec, summary }: { spec?: { path: string; content: string } | null; summary?: string | null }) =>
+  spec
+    ? `\n\nThe human approved this spec (it is at ${spec.path} on the branch); review against it:\n\n${spec.content.trimEnd()}`
+    : summary
+      ? `\n\nThe human confirmed this summary of what to build; review against it:\n\n${summary}`
+      : "";
 
 /** The Reviewer's prompt: the task, the human's Feedback, the change to read and, on a retry, what was wrong with the last Review. */
-export function reviewerPrompt({ task, defaultBranch, notePath, feedbacks, problem, summary }: ReviewerPromptInput): string {
+export function reviewerPrompt({ task, defaultBranch, notePath, feedbacks, problem, summary, spec }: ReviewerPromptInput): string {
   const base = `origin/${defaultBranch}`;
   let prompt = `Review the change on this Run's branch.
 
 What was asked (the task, which is the spec for this Run):
 
 ${task}`;
-  if (summary) prompt += confirmedSummaryNote(summary);
+  prompt += reviewedAgainst({ spec, summary });
   if (feedbacks.length) {
     const history = feedbacks.map((f, i) => `${i + 1}. ${f}`).join("\n");
     prompt += `\n\nThe human rejected the Run's earlier work and gave this Feedback, which the change must now satisfy as well (the last is the latest):\n${history}`;
@@ -164,17 +172,18 @@ export interface ConsolidatorPromptInput {
   feedbacks: string[];
   problem?: string;
   summary?: string | null;
+  spec?: { path: string; content: string } | null;
 }
 
 /** The Consolidator's prompt: the task, the human's Feedback, both Reviews and the change to check them against. */
-export function consolidatorPrompt({ task, defaultBranch, notePath, reviews, feedbacks, problem, summary }: ConsolidatorPromptInput): string {
+export function consolidatorPrompt({ task, defaultBranch, notePath, reviews, feedbacks, problem, summary, spec }: ConsolidatorPromptInput): string {
   const base = `origin/${defaultBranch}`;
   let prompt = `Consolidate the Reviews of the change on this Run's branch into one.
 
 What was asked (the task, which is the spec for this Run):
 
 ${task}`;
-  if (summary) prompt += confirmedSummaryNote(summary);
+  prompt += reviewedAgainst({ spec, summary });
   if (feedbacks.length) {
     prompt += `\n\nThe human's Feedback on earlier tries, oldest first (the change must satisfy it):\n\n${feedbacks.map((f, i) => `${i + 1}. ${f}`).join("\n")}`;
   }
@@ -295,13 +304,14 @@ async function runReviewing({ ctx, step, state }: StepRun, spec: ReviewingSpec):
 export async function runReviewer(run: StepRun, seat: ReviewerSeat & { noun?: string }): Promise<Reviewed> {
   const { ctx } = run;
   const summary = await ctx.records.conversation.confirmedSummary();
+  const spec = await specOf(ctx);
   return runReviewing(run, {
     ...seat,
     noun: seat.noun ?? "Reviewer",
     title: reviewerLabel(seat.name),
     instructions: reviewerInstructions(seat.notePath),
     prompt: ({ feedbacks, problem }) =>
-      reviewerPrompt({ task: ctx.run.task, defaultBranch: ctx.defaultBranch, notePath: seat.notePath, feedbacks, problem, summary }),
+      reviewerPrompt({ task: ctx.run.task, defaultBranch: ctx.defaultBranch, notePath: seat.notePath, feedbacks, problem, summary, spec }),
     parse: parseReview,
   });
 }
@@ -310,6 +320,7 @@ export async function runReviewer(run: StepRun, seat: ReviewerSeat & { noun?: st
 export async function runConsolidator(run: StepRun, reviews: ReviewInput[]): Promise<Reviewed> {
   const { ctx } = run;
   const summary = await ctx.records.conversation.confirmedSummary();
+  const spec = await specOf(ctx);
   const reviewed = await runReviewing(run, {
     seat: "consolidator",
     name: "consolidator",
@@ -318,7 +329,7 @@ export async function runConsolidator(run: StepRun, reviews: ReviewInput[]): Pro
     noun: "Consolidator",
     instructions: consolidatorInstructions(CONSOLIDATED_NOTE),
     prompt: ({ feedbacks, problem }) =>
-      consolidatorPrompt({ task: ctx.run.task, defaultBranch: ctx.defaultBranch, notePath: CONSOLIDATED_NOTE, reviews, feedbacks, problem, summary }),
+      consolidatorPrompt({ task: ctx.run.task, defaultBranch: ctx.defaultBranch, notePath: CONSOLIDATED_NOTE, reviews, feedbacks, problem, summary, spec }),
     parse: parseConsolidation,
   });
   if ("stop" in reviewed || reviewed.verdict !== "disagreement") return reviewed;
