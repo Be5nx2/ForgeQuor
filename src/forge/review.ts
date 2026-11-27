@@ -1,24 +1,32 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { StepOutcome, StepRun, StepTypeModule } from "./engine.js";
-import { requireSeat } from "./seats.js";
+import type { StepRun, StepTypeModule } from "./engine.js";
+import { requireSeat, type SeatName } from "./seats.js";
 import { runAgentStep } from "./step.js";
 import type { Review, ReviewMode, ReviewVerdict } from "./types.js";
 import { RUN_NOTES_DIR } from "./workspace.js";
 
-/** Where a Reviewer writes its Review, relative to the worktree: a Run Note, never committed. */
-export const REVIEW_NOTE = `${RUN_NOTES_DIR}/review.md`;
+/**
+ * Where a Reviewer writes its Review, relative to the worktree: a Run Note, never committed. One note per author
+ * (`review-a.md` for `reviewer-a`), so that Reviewers never overwrite each other; `review.md` is the Consolidator's.
+ */
+export const reviewNote = (author: string) => `${RUN_NOTES_DIR}/review-${author.replace(/^reviewer-/, "")}.md`;
 
 /** Starts the reason a Review's rejection hands the Developer, so its prompt can tell a Review from a failed Check. */
 export const REVIEW_REASON_PREFIX = "The Reviewer asked for changes.";
 
-/** The Reviewer Agent's standing instructions. */
-export const REVIEWER_INSTRUCTIONS = `You are the Reviewer on a Forgequor Run. You read a change and write a Review of it; you never edit it.
+/** How many more times a Reviewer is asked when its Review has no usable verdict, within the same attempt of the Step. */
+export const EXTRA_VERDICT_TRIES = 2;
+
+/** A Reviewer Agent's standing instructions, for the Run Note it may write its Review to. */
+export function reviewerInstructions(notePath: string): string {
+  return `You are the Reviewer on a Forgequor Run. You read a change and write a Review of it; you never edit it.
 
 - Work only inside the current directory, this Run's git worktree. Change nothing in it: no edits, no commits, no stash, no checkout. Only the Run Notes folder ${RUN_NOTES_DIR}/ may be written to.
+- Do not run commands that write files outside ${RUN_NOTES_DIR}/ (a build, a formatter, a test run that leaves output): the Step fails if anything else in the worktree changes. Read, search and use git read commands.
 - Use the \`code-review\` Skill: review the change on its two axes, Standards (does it follow this repository's documented standards, such as CLAUDE.md, AGENTS.md, CONTRIBUTING.md and the docs they point to?) and Spec (does it do what the task asked, no less and no more?).
 - Check each finding against the code before you report it. Report only what you are sure of.
-- Write your Review to ${REVIEW_NOTE}, and give the same text as your final message. Use exactly this format:
+- Your FINAL MESSAGE is your Review: it is what Forgequor reads. You may also write the same text to ${notePath}, but you may not be able to (a read-only sandbox), so never rely on it. Use exactly this format:
 
     Summary: one or two sentences on what the change does and your overall judgement.
 
@@ -31,6 +39,7 @@ export const REVIEWER_INSTRUCTIONS = `You are the Reviewer on a Forgequor Run. Y
 
 - The last line is exactly "Verdict: pass" or "Verdict: changes requested", with nothing after it.
 - Ask for changes only for something the Developer must fix: a bug, a requirement that is missing or wrong, a breach of the repository's standards, a missing or weak test. Style preferences and optional ideas go under Findings without changing the verdict.`;
+}
 
 /** What a Reviewer's text said: its body and verdict, or what is wrong with it. */
 export type ParsedReview = { verdict: ReviewVerdict; body: string } | { problem: string };
@@ -50,19 +59,35 @@ export function parseReview(text: string): ParsedReview {
   return { verdict: said, body };
 }
 
-/** The Reviewer's prompt: the task, the change to read and, on a retry, what was wrong with the last Review. */
-export function reviewerPrompt(task: string, defaultBranch: string, sentBack: string | null): string {
+/** What a Reviewer's prompt is built from. */
+export interface ReviewerPromptInput {
+  task: string;
+  defaultBranch: string;
+  notePath: string;
+  /** The human's Feedback on earlier rejections of the Run, oldest first. */
+  feedbacks: string[];
+  /** What was wrong with the Reviewer's previous try, when it is being asked again. */
+  problem?: string;
+}
+
+/** The Reviewer's prompt: the task, the human's Feedback, the change to read and, on a retry, what was wrong with the last Review. */
+export function reviewerPrompt({ task, defaultBranch, notePath, feedbacks, problem }: ReviewerPromptInput): string {
   const base = `origin/${defaultBranch}`;
   let prompt = `Review the change on this Run's branch.
 
 What was asked (the task, which is the spec for this Run):
 
-${task}
+${task}`;
+  if (feedbacks.length) {
+    const history = feedbacks.map((f, i) => `${i + 1}. ${f}`).join("\n");
+    prompt += `\n\nThe human rejected the Run's earlier work and gave this Feedback, which the change must now satisfy as well (the last is the latest):\n${history}`;
+  }
+  prompt += `
 
 The change is everything since the default branch: run \`git log ${base}..HEAD --oneline\` and \`git diff ${base}...HEAD\`. Read the files it touches in full where the diff is not enough. Read the repository's own instructions and coding standards to know what the Project expects.
 
-Write your Review to ${REVIEW_NOTE} in the fixed format, ending with the verdict line.`;
-  if (sentBack) prompt += `\n\nYour previous attempt could not be used: ${sentBack}`;
+Give your Review as your final message, in the fixed format, ending with the verdict line (you may also write it to ${notePath}).`;
+  if (problem) prompt += `\n\nYour previous try could not be used: ${problem}`;
   return prompt;
 }
 
@@ -74,50 +99,81 @@ export function reviewSection(review: Review | null): string {
   return `## Review (${review.verdict})\n\n${body}`;
 }
 
-/** The Review as a Reviewer left it: its Run Note when there is one, else its final message (a read-only sandbox cannot write the note). */
-function readWritten(worktreePath: string, summary: string): string {
-  const file = join(worktreePath, REVIEW_NOTE);
-  const note = existsSync(file) ? readFileSync(file, "utf8") : "";
-  return note.trim() ? note : summary;
+/** The Review as a Reviewer left it: its Run Note when it parses, else its final message. */
+function readReview(worktreePath: string, notePath: string, finalMessage: string): ParsedReview {
+  const file = join(worktreePath, notePath);
+  if (existsSync(file)) {
+    const fromNote = parseReview(readFileSync(file, "utf8"));
+    if (!("problem" in fromNote)) return fromNote;
+  }
+  return parseReview(finalMessage);
 }
 
-function writeNote(worktreePath: string, text: string): void {
-  const file = join(worktreePath, REVIEW_NOTE);
+function writeNote(worktreePath: string, notePath: string, text: string): void {
+  const file = join(worktreePath, notePath);
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, `${text.trim()}\n`);
 }
 
 /**
- * What one way of reviewing came to: the Run cannot go on (an Escalation opened, a Pause, an abandon), the Review was
- * unusable (and says why, so the Reviewer is asked again), or the verdict of the Review the Run acts on.
+ * What one way of reviewing came to: the Run cannot go on (an Escalation opened, a Pause, an abandon), or the verdict of
+ * the Review the Run acts on. New outcomes (a disagreement, for duo) are further members of this union.
  */
-export type Reviewed = { stop: true } | { invalid: string } | { verdict: ReviewVerdict; body: string };
+export type Reviewed = { stop: true } | { verdict: ReviewVerdict; body: string };
 
 /** One way of reviewing a Run's change. Each reads and records its own Reviews, and returns the one the Run acts on. */
 export type Reviewer = (run: StepRun) => Promise<Reviewed>;
 
-/** One Reviewer reads the change and writes the one Review. */
-const soloReview: Reviewer = async ({ ctx, step, state }) => {
-  const seat = await requireSeat(ctx, "reviewer-a", "Reviewer");
+/** Which Reviewer runs, and where its Review goes. */
+export interface ReviewerSeat {
+  /** The seat whose Runner and model it works through. */
+  seat: SeatName;
+  /** Its name in the Run's record: the Step attempts and the Review's author. */
+  name: string;
+  /** Its Run Note, relative to the worktree. */
+  notePath: string;
+  /** Whether its Review is the one the Run acts on (the only Reviewer's, or the Consolidator's), as opposed to one that goes into it. */
+  final: boolean;
+}
+
+/**
+ * Runs one read-only Reviewer and keeps its Review. A Review without a usable verdict is asked for again, up to
+ * EXTRA_VERDICT_TRIES more times, inside the same attempt of the Step: that does not use up the review's `max_attempts`.
+ * When it never gives one, an Escalation opens with what was wrong. Never touches another author's note.
+ */
+export async function runReviewer({ ctx, step, state }: StepRun, { seat: seatName, name, notePath, final }: ReviewerSeat): Promise<Reviewed> {
+  const seat = await requireSeat(ctx, seatName, "Reviewer");
   if (!seat) return { stop: true };
-  rmSync(join(ctx.worktreePath, REVIEW_NOTE), { force: true });
   const attempt = state.attempts + 1;
-  const result = await runAgentStep(ctx, seat, {
-    name: "reviewer",
-    stepId: step.id,
-    attempt,
-    instructions: REVIEWER_INSTRUCTIONS,
-    prompt: reviewerPrompt(ctx.run.task, ctx.defaultBranch, state.sentBack),
-    readonly: step.readonly,
-  });
-  if (!result) return { stop: true };
-  const parsed = parseReview(readWritten(ctx.worktreePath, result.summary));
-  if ("problem" in parsed) return { invalid: parsed.problem };
-  writeNote(ctx.worktreePath, `${parsed.body}\n\nVerdict: ${parsed.verdict}`);
-  await ctx.records.recordReview({ stepId: step.id, attempt, author: "reviewer-a", verdict: parsed.verdict, body: parsed.body, final: true });
-  ctx.changed();
-  return parsed;
-};
+  const feedbacks = await ctx.records.earlierFeedbacks();
+  let problem: string | undefined;
+  for (let tries = 1; tries <= 1 + EXTRA_VERDICT_TRIES; tries++) {
+    rmSync(join(ctx.worktreePath, notePath), { force: true });
+    const result = await runAgentStep(ctx, seat, {
+      name,
+      stepId: step.id,
+      attempt,
+      instructions: reviewerInstructions(notePath),
+      prompt: reviewerPrompt({ task: ctx.run.task, defaultBranch: ctx.defaultBranch, notePath, feedbacks, problem }),
+      readonly: step.readonly,
+    });
+    if (!result) return { stop: true };
+    const parsed = readReview(ctx.worktreePath, notePath, result.summary);
+    if ("problem" in parsed) {
+      problem = parsed.problem;
+      continue;
+    }
+    writeNote(ctx.worktreePath, notePath, `${parsed.body}\n\nVerdict: ${parsed.verdict}`);
+    await ctx.records.recordReview({ stepId: step.id, attempt, author: name, verdict: parsed.verdict, body: parsed.body, final });
+    ctx.changed();
+    return parsed;
+  }
+  await ctx.openGate("escalation", `The Reviewer gave no usable verdict after ${1 + EXTRA_VERDICT_TRIES} tries.`, problem);
+  return { stop: true };
+}
+
+/** One Reviewer reads the change and writes the one Review. */
+const soloReview: Reviewer = (run) => runReviewer(run, { seat: "reviewer-a", name: "reviewer-a", notePath: reviewNote("reviewer-a"), final: true });
 
 /**
  * How each review mode runs. This is the seam of duo review: m3-12 gives `duo` its own Reviewer (two Reviewers side by
@@ -132,17 +188,16 @@ const reviewers: Record<ReviewMode, Reviewer> = {
 /**
  * The Review Step type: the Run's change is reviewed in the mode the Run was launched with. A pass is done; changes
  * requested reject to the Step's `on_reject` (the Developer) with the Review as the reason, and the Checks run again
- * before the next Review. A Review without a usable verdict asks the Reviewer again, as an attempt of the Step.
+ * before the next Review.
  */
 export const reviewStepType: StepTypeModule = {
   type: "review",
-  exhausted: (_step, attempts) => `The Reviewer still asks for changes, or gives no usable verdict, after ${attempts} ${attempts === 1 ? "attempt" : "attempts"}.`,
+  exhausted: (_step, attempts) => `The Reviewer still asks for changes after ${attempts} ${attempts === 1 ? "attempt" : "attempts"}.`,
   async execute(run) {
     const mode: ReviewMode = await run.ctx.records.reviewMode();
     const reviewed = await reviewers[mode](run);
     if ("stop" in reviewed) return { next: "stop" };
-    if ("invalid" in reviewed) return { next: "reject", reason: reviewed.invalid, to: run.step.id };
-    if (reviewed.verdict === "pass") return { next: "done" } satisfies StepOutcome;
+    if (reviewed.verdict === "pass") return { next: "done" };
     return { next: "reject", reason: `${REVIEW_REASON_PREFIX}\n\n${reviewed.body}` };
   },
 };

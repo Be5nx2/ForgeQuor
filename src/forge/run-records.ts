@@ -137,7 +137,9 @@ export function createRunRecords(pool: pg.Pool, runId: number, iteration: number
     },
     async recordReview(r) {
       await pool.query(
-        "INSERT INTO reviews (run_id, iteration, step_id, attempt, author, verdict, body, final) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+        `INSERT INTO reviews (run_id, iteration, step_id, attempt, author, verdict, body, final) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT (run_id, iteration, step_id, attempt, author)
+         DO UPDATE SET verdict = EXCLUDED.verdict, body = EXCLUDED.body, final = EXCLUDED.final, created_at = now()`,
         [runId, iteration, r.stepId, r.attempt, r.author, r.verdict, r.body, r.final],
       );
     },

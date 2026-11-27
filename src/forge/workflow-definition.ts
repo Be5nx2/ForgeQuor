@@ -9,8 +9,8 @@ import { isMap, isScalar, isSeq, LineCounter, parseDocument, type Node } from "y
 export const BUILT_IN_WORKFLOWS_DIR = fileURLToPath(new URL("./workflows/", import.meta.url));
 
 /** The definition of a built-in Workflow, from its YAML file; a built-in file that does not validate is a bug, so it throws. */
-export function loadBuiltInWorkflow(name: string): WorkflowDefinition {
-  const parsed = parseWorkflow(readFileSync(join(BUILT_IN_WORKFLOWS_DIR, `${name}.yaml`), "utf8"), BUILT_IN_CATALOGUE);
+export function loadBuiltInWorkflow(name: string, catalogue: StepCatalogue = DEFAULT_CATALOGUE): WorkflowDefinition {
+  const parsed = parseWorkflow(readFileSync(join(BUILT_IN_WORKFLOWS_DIR, `${name}.yaml`), "utf8"), catalogue);
   if (!parsed.ok) throw new Error(`The built-in Workflow ${name} is invalid:\n${parsed.errors.map((e) => `  ${e.path}: ${e.message}`).join("\n")}`);
   return parsed.definition;
 }
@@ -88,9 +88,6 @@ export interface StepCatalogue {
 
 /** Forgequor's Agents today. */
 export const DEFAULT_CATALOGUE: StepCatalogue = { agents: { developer: { produces: [] } } };
-
-/** What the built-in Workflow files name: the Developer, and the Developer in bug-fixing mode. */
-const BUILT_IN_CATALOGUE: StepCatalogue = { agents: { ...DEFAULT_CATALOGUE.agents, bugfixer: { produces: [] } } };
 
 type Segment = string | number;
 
@@ -250,6 +247,7 @@ export function parseWorkflow(text: string, catalogue: StepCatalogue = DEFAULT_C
     const readonly = raw.readonly ?? false;
     if (typeof readonly !== "boolean") fail(at("readonly"), `${label}: readonly is true or false.`);
     if (type === "review" && readonly === false && raw.readonly !== undefined) fail(at("readonly"), `${label} is a review, which is always read-only.`);
+    if (type === "review" && raw.on_reject === undefined) fail(at("on_reject"), `${label} is a review, so it needs an on_reject: the Step that reworks the change when changes are requested.`);
     if (type === "review" && !inputs.includes("review")) fail(at("type"), `${label} is a review, so the Workflow must take the review input (inputs: [task, review]).`);
 
     let onReject: string | undefined;

@@ -142,11 +142,11 @@ watch(
         <li v-for="(e, i) in chosen.errors" :key="i">{{ e.line ? `line ${e.line}: ` : e.path ? `${e.path}: ` : "" }}{{ e.message }}</li>
       </ul>
     </div>
-    <textarea v-if="asks('task')" v-model="form.task" rows="4" :placeholder="asks('review') && form.workflow === 'bugfix' ? 'Bug description' : 'Task'" aria-label="Task" required />
+    <textarea v-if="asks('task')" v-model="form.task" rows="4" placeholder="Task or bug description" aria-label="Task" required />
     <fieldset v-if="asks('review')" class="review-choice">
       <legend>Review</legend>
       <label><input v-model="form.review" type="radio" value="solo" aria-label="Solo review" /> Solo: one Reviewer</label>
-      <label><input v-model="form.review" type="radio" value="duo" aria-label="Duo review" /> Duo: two Reviewers, one consolidated Review</label>
+      <label><input v-model="form.review" type="radio" value="duo" aria-label="Duo review" /> Duo: two Reviewers, one consolidated Review (Consolidator arrives in m3-12, runs solo for now)</label>
     </fieldset>
     <template v-if="asks('assets')">
       <fieldset v-for="(a, i) in assets" :key="i" class="stack asset-request">

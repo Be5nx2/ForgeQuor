@@ -1,10 +1,10 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type pg from "pg";
 import { createForge, type Forge, type ForgeDeps, type Project, type RunDetail } from "../../src/forge/forge.js";
-import { REVIEW_NOTE, parseReview } from "../../src/forge/review.js";
+import { parseReview, reviewNote } from "../../src/forge/review.js";
 import { seatSettingsFromEnv } from "../../src/forge/seats.js";
 import type { StepRequest, StepResult } from "../../src/runner/runner.js";
 import { createTestDatabase } from "../harness/database.js";
@@ -100,7 +100,7 @@ describe("a bugfix Run", () => {
     expect(run.gates).toMatchObject([{ kind: "final", decision: null }]);
     expect(run.attempts.map((a) => [a.stepId, a.step, a.runner])).toEqual([
       ["developer", "bugfixer", "claude"],
-      ["review", "reviewer", "claude"],
+      ["review", "reviewer-a", "claude"],
     ]);
     expect(codex.steps).toHaveLength(0);
   });
@@ -150,13 +150,59 @@ describe("a bugfix Run", () => {
     expect(brief).toContain("The air-dash was not tried.");
   });
 
+  it("falls back to the final message when the Run Note has no usable verdict", async () => {
+    const { project: p } = await project();
+    claude.use(
+      script([
+        (step) => {
+          mkdirSync(join(step.cwd, ".forgequor"), { recursive: true });
+          writeFileSync(join(step.cwd, reviewNote("reviewer-a")), "half written");
+          return { status: "succeeded", summary: review("pass", "Summary: From the message.") };
+        },
+      ]),
+    );
+
+    const run = await bugfix(p);
+
+    expect(run.reviews[0]).toMatchObject({ verdict: "pass", body: "Summary: From the message." });
+  });
+
+  it("tells the Reviewer its final message is the Review, and leaves another author's note alone", async () => {
+    const { project: p } = await project();
+    const base = script([review("pass")]);
+    claude.use((step) => {
+      if (!isReviewer(step)) writeFileSync(join(step.cwd, ".forgequor", "review-b.md"), "the other Reviewer's note\n");
+      return base(step);
+    });
+
+    const run = await bugfix(p);
+
+    expect(reviewers()[0]!.instructions).toContain("Your FINAL MESSAGE is your Review");
+    expect(reviewers()[0]!.instructions).toContain("Do not run commands that write files outside .forgequor/");
+    expect(readFileSync(join(run.worktreePath!, ".forgequor", "review-a.md"), "utf8")).toContain("Verdict: pass");
+    expect(readFileSync(join(run.worktreePath!, ".forgequor", "review-b.md"), "utf8")).toBe("the other Reviewer's note\n");
+  });
+
+  it("gives the Reviewer the human's Feedback of earlier Iterations", async () => {
+    const { project: p } = await project();
+    claude.use(script([review("pass")]));
+    const first = await bugfix(p);
+
+    await forge.decideGate({ gateId: first.gates[0]!.id, action: "reject", feedback: "Also cover the wall jump." });
+    await forge.whenIdle();
+
+    expect(reviewers()).toHaveLength(2);
+    expect(reviewers()[0]!.prompt).not.toContain("Feedback");
+    expect(reviewers()[1]!.prompt).toContain("Also cover the wall jump.");
+  });
+
   it("takes the Review from the Reviewer's Run Note when it wrote one", async () => {
     const { project: p } = await project();
     claude.use(
       script([
         (step) => {
           mkdirSync(join(step.cwd, ".forgequor"), { recursive: true });
-          writeFileSync(join(step.cwd, REVIEW_NOTE), review("pass", "Summary: From the note."));
+          writeFileSync(join(step.cwd, reviewNote("reviewer-a")), review("pass", "Summary: From the note."));
           return { status: "succeeded", summary: "Done, see the note." };
         },
       ]),
@@ -198,7 +244,7 @@ describe("a Review asking for changes", () => {
     expect(reviewers()).toHaveLength(3);
     expect(developers()).toHaveLength(3);
     expect(run.state).toBe("waiting");
-    expect(escalation(run)).toMatchObject({ stepId: "review", reason: "The Reviewer still asks for changes, or gives no usable verdict, after 3 attempts." });
+    expect(escalation(run)).toMatchObject({ stepId: "review", reason: "The Reviewer still asks for changes after 3 attempts." });
     expect(escalation(run)!.evidence).toContain("Still wrong.");
     expect(codeHost.pullRequests).toHaveLength(0);
   });
@@ -227,6 +273,9 @@ describe("a Review without a usable verdict", () => {
     expect(reviewers()[1]!.prompt).toContain("does not end with a verdict line");
     expect(developers()).toHaveLength(1);
     expect(run.reviews).toHaveLength(1);
+    // Asked again inside the Step: one attempt of it, so nothing was rejected or replayed.
+    expect(run.steps.find((s) => s.id === "review")).toMatchObject({ status: "done", attempts: 1 });
+    expect(run.checks).toHaveLength(0);
     expect(run.gates).toMatchObject([{ kind: "final", decision: null }]);
   });
 
@@ -237,9 +286,21 @@ describe("a Review without a usable verdict", () => {
     const run = await bugfix(p);
 
     expect(reviewers()).toHaveLength(3);
-    expect(escalation(run)).toMatchObject({ stepId: "review" });
+    expect(escalation(run)).toMatchObject({ stepId: "review", reason: "The Reviewer gave no usable verdict after 3 tries." });
     expect(escalation(run)!.evidence).toContain('The Review\'s verdict is "unsure"');
     expect(run.reviews).toHaveLength(0);
+  });
+
+  it("does not use up the review's max_attempts, so three Reviews can still ask for changes, then pass", async () => {
+    const { project: p } = await project();
+    claude.use(script([review("changes requested"), "no verdict", "no verdict", review("changes requested"), review("pass")]));
+
+    const run = await bugfix(p);
+
+    // 2 reworks, as the cap allows; the two retries for the missing verdict were not attempts.
+    expect(developers()).toHaveLength(3);
+    expect(run.reviews.map((r) => r.verdict)).toEqual(["changes requested", "changes requested", "pass"]);
+    expect(run.gates).toMatchObject([{ kind: "final", decision: null }]);
   });
 
   it("fails the Reviewer's attempt like any Agent failure", async () => {
@@ -248,7 +309,7 @@ describe("a Review without a usable verdict", () => {
 
     const run = await bugfix(p);
 
-    expect(escalation(run)).toMatchObject({ stepId: "review", reason: "The Reviewer failed.", evidence: "boom" });
+    expect(escalation(run)).toMatchObject({ stepId: "review", reason: "The Reviewer-a failed.", evidence: "boom" });
   });
 });
 
@@ -349,7 +410,7 @@ describe("the Agent seats", () => {
 
     expect(run.attempts.map((a) => [a.step, a.runner, a.model])).toEqual([
       ["bugfixer", "claude", "opus-test"],
-      ["reviewer", "codex", "gpt-review"],
+      ["reviewer-a", "codex", "gpt-review"],
     ]);
     expect(codex.steps).toHaveLength(1);
     expect(codex.steps[0]!.readonly).toBe(true);

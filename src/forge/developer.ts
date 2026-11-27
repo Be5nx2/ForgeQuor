@@ -4,6 +4,7 @@ import { commitLeftovers, REVIEW_BRIEF_FILE, RUN_NOTES_DIR } from "./workspace.j
 import { describeFailure, passed, runChecks } from "./checks.js";
 import { REVIEW_REASON_PREFIX } from "./review.js";
 import type { AgentModule } from "./step-types.js";
+import { catalogueOf } from "./step-types.js";
 import { loadBuiltInWorkflow } from "./workflow-definition.js";
 import type { Workflow } from "./workflow.js";
 
@@ -18,7 +19,7 @@ export const DEVELOPER_INSTRUCTIONS = `You are the Developer on a Forgequor Run.
 /** What the Developer is told when it works on a bug: the same Developer, in bug-fixing mode. */
 export const BUGFIX_INSTRUCTIONS = `${DEVELOPER_INSTRUCTIONS}
 
-This Run fixes a bug, and the task is the bug description. Follow the \`diagnosing-bugs\` Skill:
+This Run fixes a bug, and the task is the bug description. Follow the \`diagnosing-bugs\` Skill, and the \`tdd\` Skill for the tests. In short:
 - First reproduce the bug: write a test that fails because of it, run it and see it fail for the reason the description gives. Commit that failing test on its own, before any fix.
 - Then find the cause and fix it at the cause, not the symptom. The failing test must now pass, and nothing that passed before may fail.
 - In the Review Brief, say how the bug was reproduced, what the cause was, and which test proves the fix.`;
@@ -98,7 +99,7 @@ export const developerWorkflow: Workflow = {
 export const bugfixWorkflow: Workflow = {
   name: "bugfix",
   inputs: ["task", "review"],
-  definition: loadBuiltInWorkflow("bugfix"),
+  definition: loadBuiltInWorkflow("bugfix", catalogueOf([developerAgent, bugfixAgent])),
   plan({ task, title }) {
     if (!task?.trim()) throw new Error("A bugfix Run needs a bug description.");
     return { task: task.trim(), title: title?.trim() || deriveTitle(task) };

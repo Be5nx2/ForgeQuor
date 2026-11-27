@@ -12,5 +12,8 @@ CREATE TABLE reviews (
   verdict    TEXT NOT NULL,
   body       TEXT NOT NULL,
   final      BOOLEAN NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  -- A Reviewer that is asked again for the same attempt replaces its Review.
+  UNIQUE (run_id, iteration, step_id, attempt, author)
 );
+CREATE INDEX reviews_run ON reviews (run_id);

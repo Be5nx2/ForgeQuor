@@ -370,6 +370,12 @@ ${step}`;
     expect(errorsOf(reviewed("", "[task]"))[0]!.message).toContain("must take the review input");
   });
 
+  it("refuses a review Step that names no Step to rework the change", () => {
+    const errors = errorsOf(reviewed().replace("    on_reject: developer\n", ""));
+
+    expect(errors.map((e) => [e.path, e.message])).toEqual([["steps[1].on_reject", expect.stringContaining("needs an on_reject")]]);
+  });
+
   it("refuses a review Step marked as not read-only", () => {
     const errors = errorsOf(reviewed("", "[task, review]", "    readonly: false\n"));
 
