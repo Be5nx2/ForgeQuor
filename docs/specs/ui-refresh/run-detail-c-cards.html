@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Run detail, variant C: airy cards</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Orbitron:wght@700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="tokens.css">
+<style>
+  /* Variant C: generous space, rounded cards, one idea per card. Larger type. */
+  body { font-size: 1rem; }
+  .app { display: grid; grid-template-columns: 248px 1fr; min-height: 100vh; }
+  aside { padding: var(--sp-6) var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-5); border-right: 1px solid var(--border); }
+  .project { width: 100%; background: var(--surface); color: var(--text); border: 0; border-radius: var(--radius-lg); padding: 0.75rem 1rem; font: 600 var(--fs-md) var(--font-ui); display: flex; justify-content: space-between; }
+  .btn { padding: 0.8rem 1.1rem; border-radius: var(--radius-lg); font-size: var(--fs-md); }
+  .nav a, .nav .soon { padding: 0.65rem 1rem; border-radius: var(--radius-lg); font-size: var(--fs-md); }
+  .spacer { flex: 1; }
+  main { padding: var(--sp-6) clamp(1.5rem, 4vw, 3.5rem); min-width: 0; display: flex; flex-direction: column; gap: var(--sp-6); }
+  .crumbs { font-size: var(--fs-sm); color: var(--text-muted); margin-bottom: var(--sp-2); }
+  h1 { font: 700 2rem/1.15 var(--font-ui); letter-spacing: -0.01em; }
+  .meta { margin-top: var(--sp-3); display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+  .meta span { background: var(--surface); border-radius: 999px; padding: 0.35rem 0.8rem; font-size: var(--fs-sm); color: var(--text-muted); }
+  .meta b { color: var(--text); font-weight: 600; }
+  .card { background: var(--surface); border-radius: var(--radius-lg); padding: var(--sp-5); }
+  .gate { position: sticky; top: var(--sp-3); z-index: 2; background: var(--surface-raised); border: 2px solid var(--action); border-radius: var(--radius-lg); padding: var(--sp-4) var(--sp-5); display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap; }
+  .gate .why { flex: 1; min-width: 18rem; }
+  .gate strong { display: block; font-size: var(--fs-lg); }
+  .gate p { color: var(--text-muted); font-size: var(--fs-sm); margin-top: 2px; }
+  .layout { display: grid; grid-template-columns: 320px 1fr; gap: var(--sp-6); align-items: start; }
+  .steps { display: flex; flex-direction: column; gap: var(--sp-2); }
+  .s { display: grid; grid-template-columns: 2.2rem 1fr; gap: var(--sp-3); align-items: center; padding: var(--sp-3) var(--sp-4); background: var(--surface); border-radius: var(--radius-lg); border: 2px solid transparent; cursor: pointer; }
+  .s .ico { width: 2.2rem; height: 2.2rem; border-radius: 50%; display: grid; place-items: center; font-weight: 700; background: rgb(93 187 138 / 0.15); color: var(--st-ok); }
+  .s.wait .ico { background: rgb(255 140 36 / 0.18); color: var(--action); }
+  .s.idle .ico { background: rgb(148 163 184 / 0.12); color: var(--st-idle); }
+  .s strong { display: block; font-size: var(--fs-md); font-weight: 600; }
+  .s small { color: var(--text-muted); font-size: var(--fs-sm); }
+  .s[aria-selected="true"] { border-color: var(--action); background: var(--surface-raised); }
+  .s.group { padding-bottom: var(--sp-3); }
+  .s .kids { grid-column: 2; display: flex; gap: var(--sp-2); margin-top: var(--sp-2); flex-wrap: wrap; }
+  .detail { display: flex; flex-direction: column; gap: var(--sp-5); }
+  h2 { font-size: var(--fs-lg); font-weight: 700; margin-bottom: var(--sp-3); }
+  .reco { border-left: 4px solid var(--ai); }
+  .reco p { color: var(--text-muted); margin-top: var(--sp-2); }
+  .remarks { display: grid; gap: var(--sp-3); }
+  .remark { background: var(--surface-raised); border-radius: var(--radius-md); padding: var(--sp-4); display: grid; gap: var(--sp-2); }
+  .remark.disputed { outline: 2px solid var(--action); }
+  .remark header { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+  .remark header strong { font-size: var(--fs-md); }
+  .remark header .where { margin-left: auto; color: var(--text-muted); font: var(--fs-xs) var(--font-mono); }
+  .remark .votes { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+  .remark .note { color: var(--text-muted); font-size: var(--fs-sm); }
+  .feedback { width: 100%; min-height: 5.5rem; background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--radius-md); padding: 0.9rem; font: var(--fs-md) var(--font-ui); resize: vertical; }
+  .log { background: var(--bg); border-radius: var(--radius-md); padding: var(--sp-4); font: var(--fs-sm)/1.7 var(--font-mono); color: #b9c6d6; }
+  .log .t { color: var(--text-muted); }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <span class="logo"><span class="logo-mark" aria-hidden="true"></span><span><span class="forge">FORGE</span><span class="quor">QUOR</span></span></span>
+    <button class="btn btn-primary" type="button">+ New Run</button>
+    <button class="project" type="button" aria-label="Project: Skyforge"><span>Skyforge</span><span class="muted">⌄</span></button>
+    <nav class="nav" aria-label="Main">
+      <a href="#" aria-current="page">Runs <span class="count" aria-label="2 waiting for you">2</span></a>
+      <a href="#">Projects</a>
+      <span class="soon">Team <small>M3b</small></span>
+      <span class="soon">Workflows</span>
+      <span class="soon">Quotas <small>M4</small></span>
+      <span class="soon">Skill Packs <small>M4</small></span>
+      <span class="soon">Dogfood Inbox</span>
+    </nav>
+    <div class="spacer"></div>
+    <button class="btn" type="button">+ Note</button>
+  </aside>
+
+  <main>
+    <header>
+      <div class="crumbs"><a href="#">Runs</a> / Skyforge / #42</div>
+      <h1>Add a dash ability to the player</h1>
+      <div class="meta"><span class="chip" data-s="waiting" data-g="●" style="background:transparent">Waiting for you</span><span>Workflow <b>feature v3</b></span><span>Branch <b class="mono">feat/dash-ability</b></span><span>Iteration <b>2</b></span><span>Review <b>duo</b></span><span>1 h 12 min</span></div>
+    </header>
+
+    <div class="gate" role="region" aria-label="Gate actions">
+      <div class="why"><strong>Your decision: review disagreement</strong><p>The Consolidator could not settle remark R3. It recommends sending back for R1 only.</p></div>
+      <button class="btn btn-primary" type="button">Continue as if passed</button>
+      <button class="btn btn-outline-action" type="button">Send back to Developer</button>
+      <button class="btn btn-danger" type="button">Abandon</button>
+    </div>
+
+    <div class="layout">
+      <div class="steps" role="tablist" aria-label="Steps" aria-orientation="vertical">
+        <div class="s" role="tab" aria-selected="false"><span class="ico" aria-label="done">✓</span><div><strong>Griller</strong><small>3 rounds · claude</small></div></div>
+        <div class="s" role="tab" aria-selected="false"><span class="ico" aria-label="done">✓</span><div><strong>Spec Writer</strong><small>spec approved · claude</small></div></div>
+        <div class="s" role="tab" aria-selected="false"><span class="ico" aria-label="done">✓</span><div><strong>Architect</strong><small>6-step plan · claude</small></div></div>
+        <div class="s" role="tab" aria-selected="false"><span class="ico" aria-label="done">✓</span><div><strong>Artist</strong><small>3 Assets, 1 redone · codex</small></div></div>
+        <div class="s" role="tab" aria-selected="false"><span class="ico" aria-label="done">✓</span><div><strong>Developer</strong><small>attempt 2 of 3 · claude</small></div></div>
+        <div class="s" role="tab" aria-selected="false"><span class="ico" aria-label="passed">✓</span><div><strong>Checks</strong><small>4 of 4 passed</small></div></div>
+        <div class="s wait group" role="tab" aria-selected="true"><span class="ico" aria-label="waiting">●</span><div><strong>Review (duo)</strong><small>waiting for you</small></div>
+          <div class="kids"><span class="runner">A · claude</span><span class="runner">B · codex</span><span class="runner">Consolidator · claude</span></div></div>
+        <div class="s idle" role="tab" aria-selected="false"><span class="ico" aria-label="not started">○</span><div><strong>Open pull request</strong><small>not started</small></div></div>
+        <div class="s idle" role="tab" aria-selected="false"><span class="ico" aria-label="not started">○</span><div><strong>Final Gate</strong><small>not started</small></div></div>
+      </div>
+
+      <section class="detail" aria-label="Step detail: Review">
+        <div class="card reco"><h2>Consolidator's recommendation</h2><p style="color:var(--text);margin:0">Send the Developer back to fix R1, a real bug that both Reviewers found.</p><p>Leave R3: a constant is enough until a second ability needs the value.</p></div>
+
+        <div class="card">
+          <h2>Remarks</h2>
+          <div class="remarks">
+            <article class="remark"><header><strong>R1</strong><span>The dash cooldown is not reset on respawn.</span><span class="where">player.gd:84</span></header><div class="votes"><span class="chip" data-s="bad" data-g="✕">A: change</span><span class="chip" data-s="bad" data-g="✕">B: change</span><span class="chip" data-s="ok" data-g="✓">kept</span></div><p class="note">A respawned player cannot dash for up to 2 s.</p></article>
+            <article class="remark"><header><strong>R2</strong><span>Missing null check on <code>AnimationPlayer</code>.</span><span class="where">dash.gd:31</span></header><div class="votes"><span class="chip" data-s="bad" data-g="✕">A: change</span><span class="chip" data-s="ok" data-g="✓">B: pass</span><span class="chip" data-s="idle" data-g="–">dropped</span></div><p class="note">Dropped: the node is required by <code>player.tscn</code>.</p></article>
+            <article class="remark disputed"><header><strong>R3</strong><span>Make the 0.18 s without gravity an <code>@export</code> variable.</span><span class="where">dash.gd:12</span></header><div class="votes"><span class="chip" data-s="bad" data-g="✕">A: change</span><span class="chip" data-s="ok" data-g="✓">B: pass</span><span class="chip" data-s="waiting" data-g="●">disputed</span></div></article>
+          </div>
+        </div>
+
+        <div class="card"><h2>Feedback for the Developer</h2><textarea class="feedback" aria-label="Feedback">Fix R1. Ignore R3, keep the constant.</textarea></div>
+
+        <div class="card"><h2>Live events</h2><div class="log" role="log" aria-live="polite"><div><span class="t">15:06:41</span> Consolidator finished, 3 remarks checked</div><div><span class="t">15:06:42</span> Gate opened: review disagreement</div></div></div>
+      </section>
+    </div>
+  </main>
+</div>
+</body>
+</html>

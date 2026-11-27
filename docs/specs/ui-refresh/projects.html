@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Projects</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Orbitron:wght@700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="shell.css">
+</head>
+<body>
+<div class="app">
+  <aside>
+    <span class="logo"><span class="logo-mark" aria-hidden="true"></span><span><span class="forge">FORGE</span><span class="quor">QUOR</span></span></span>
+    <a class="btn btn-primary" href="new-run.html" style="text-align:center;text-decoration:none">+ New Run</a>
+    <button class="project" type="button" aria-label="Project: Skyforge"><span>Skyforge</span><span class="muted">⌄</span></button>
+    <nav class="nav" aria-label="Main">
+      <a href="runs.html">Runs <span class="count" aria-label="2 waiting for you">2</span></a>
+      <a href="projects.html" aria-current="page">Projects</a>
+      <span class="soon">Team <small>M3b</small></span>
+      <span class="soon">Workflows</span>
+      <span class="soon">Quotas <small>M4</small></span>
+      <span class="soon">Skill Packs <small>M4</small></span>
+      <span class="soon">Dogfood Inbox</span>
+    </nav>
+    <div class="spacer"></div>
+    <button class="btn" type="button">+ Note</button>
+  </aside>
+  <main>
+
+    <div class="head"><div><h1>Projects</h1><p class="lede">Git repositories Forgequor works on</p></div><button class="btn btn-primary" type="button">+ Register Project</button></div>
+    <div class="banner" role="status">Codex CLI not found on this machine: Reviewer B and the Artist cannot start until it is installed.</div>
+
+    <div class="split2">
+      <div class="plist" role="list">
+        <div class="p" role="listitem" aria-current="true"><strong>Skyforge</strong><small>~/Games/skyforge · 2 slots</small></div>
+        <div class="p" role="listitem"><strong>Forgequor</strong><small>~/Dev/ForgeQuor · 1 slot</small></div>
+      </div>
+
+      <form class="panel" onsubmit="return false">
+        <div class="field"><label for="path">Repository</label><input id="path" type="text" value="/Users/me/Games/skyforge"><span class="hint">Default branch <code>main</code> · found</span></div>
+        <div class="field">
+          <span class="label">Checks <span class="muted" style="font-weight:400">a Run cannot reach its final Gate while one fails</span></span>
+          <div class="cmdrow"><input type="text" value="lint" aria-label="Check name"><input type="text" class="mono" value="gdlint ." aria-label="Command"><button class="btn btn-ghost" type="button">Remove</button></div>
+          <div class="cmdrow"><input type="text" value="unit tests" aria-label="Check name"><input type="text" class="mono" value="godot --headless -s addons/gut/gut_cmdln.gd" aria-label="Command"><button class="btn btn-ghost" type="button">Remove</button></div>
+          <div><button class="btn" type="button">+ Add Check</button></div>
+        </div>
+        <div class="field"><span class="label">Setup <span class="muted" style="font-weight:400">prepares each new worktree</span></span>
+          <div class="cmdrow"><input type="text" value="import" aria-label="Setup name"><input type="text" class="mono" value="godot --headless --import" aria-label="Command"><button class="btn btn-ghost" type="button">Remove</button></div>
+        </div>
+        <div class="field" style="max-width:16rem"><label for="slots">Max concurrent Runs</label><input id="slots" type="text" value="2"></div>
+        <div class="field"><label for="art">Art Direction</label><input id="art" type="text" class="mono" value="docs/art-direction.md"><span class="hint">Palette, resolution, sprite sizes, read by the Artist.</span></div>
+        <div class="field"><label for="folder">Art folder</label><input id="folder" type="text" class="mono" value="assets/art"></div>
+        <div style="display:flex;gap:var(--sp-3);justify-content:flex-end"><button class="btn btn-ghost" type="button">Discard</button><button class="btn btn-primary" type="submit">Save</button></div>
+      </form>
+    </div>
+  </main>
+</div>
+</body>
+</html>

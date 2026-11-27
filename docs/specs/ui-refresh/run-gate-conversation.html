@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Conversation Gate</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Orbitron:wght@700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="shell.css">
+</head>
+<body>
+<div class="app">
+  <aside>
+    <span class="logo"><span class="logo-mark" aria-hidden="true"></span><span><span class="forge">FORGE</span><span class="quor">QUOR</span></span></span>
+    <a class="btn btn-primary" href="new-run.html" style="text-align:center;text-decoration:none">+ New Run</a>
+    <button class="project" type="button" aria-label="Project: Skyforge"><span>Skyforge</span><span class="muted">⌄</span></button>
+    <nav class="nav" aria-label="Main">
+      <a href="runs.html" aria-current="page">Runs <span class="count" aria-label="2 waiting for you">2</span></a>
+      <a href="projects.html">Projects</a>
+      <span class="soon">Team <small>M3b</small></span>
+      <span class="soon">Workflows</span>
+      <span class="soon">Quotas <small>M4</small></span>
+      <span class="soon">Skill Packs <small>M4</small></span>
+      <span class="soon">Dogfood Inbox</span>
+    </nav>
+    <div class="spacer"></div>
+    <button class="btn" type="button">+ Note</button>
+  </aside>
+  <main>
+
+    <div class="head">
+      <div>
+        <div class="crumbs"><a href="runs.html">Runs</a> / Skyforge / #44</div>
+        <h1>Add an inventory screen</h1>
+        <div class="meta"><span>Workflow <b>feature v3</b></span><span>Iteration <b>1</b></span><span>Review <b>duo</b></span><span>Started <b>15:02</b></span></div>
+      </div>
+      <span class="chip" data-s="waiting" data-g="●">Waiting for you</span>
+    </div>
+    <div class="gate" role="region" aria-label="Gate actions">
+      <div class="why"><strong>Conversation Gate</strong>The Griller asked 3 questions (round 2) and is waiting for your answers. Nothing runs, no Quota is spent while you think.</div>
+      <button class="btn btn-danger" type="button">Abandon</button>
+    </div>
+    <div class="layout">
+      <ol class="rail" role="tablist" aria-label="Steps" aria-orientation="vertical">
+        <li class="wait" role="tab" aria-selected="true"><span>Griller <small>round 2</small></span><span class="runner">claude</span></li>
+        <li class="idle" role="tab" aria-selected="false"><span>Spec Writer</span><span class="runner">claude</span></li>
+        <li class="idle" role="tab" aria-selected="false"><span>Spec Gate</span></li>
+        <li class="idle" role="tab" aria-selected="false"><span>Architect</span><span class="runner">claude</span></li>
+        <li class="idle" role="tab" aria-selected="false"><span>Artist</span><span class="runner">codex</span></li>
+        <li class="idle" role="tab" aria-selected="false"><span>Asset Gate</span></li>
+        <li class="idle" role="tab" aria-selected="false"><span>Developer</span><span class="runner">claude</span></li>
+        <li class="idle" role="tab" aria-selected="false"><span>Checks</span></li>
+        <li class="idle" role="tab" aria-selected="false"><span>Review <small>duo</small></span></li>
+        <li class="idle" role="tab" aria-selected="false"><span>Open pull request</span></li>
+        <li class="idle" role="tab" aria-selected="false"><span>Final Gate</span></li>
+      </ol>
+      <section class="panel" aria-label="Conversation with the Griller">
+        <div class="chat" role="log" aria-live="polite">
+          <div class="msg agent"><div class="who">Griller · round 1</div>3 questions about when the screen opens, how items are laid out and how stacks work.</div>
+          <div class="msg human"><div class="who">You</div>Q1 Tab opens it, Tab or Esc closes. Q2 a grid, 6 × 4 slots. Q3 stacks of up to 99.</div>
+          <div class="msg agent"><div class="who">Griller · round 2</div>Thanks. That settles the layout. Now what the player can do with an item.
+            <div class="q"><b>Q4 · Using an item</b>Pressing Enter on a slot: use it at once, or open a small menu (Use, Drop, Details)?<div class="rec">A menu. It leaves room for Drop and Details later without redesigning the screen.</div></div>
+            <div class="q"><b>Q5 · A full inventory</b>When 24 slots are full and the player picks up a new item, should it be left on the ground, or replace the oldest?<div class="rec">Left on the ground, with a short "Inventory full" message.</div></div>
+            <div class="q"><b>Q6 · Art</b>The screen needs 3 Assets: a slot frame, a selection cursor and an item-count badge, 16 × 16 each. Should the Artist draw them in this Run?<div class="rec">Yes, add them as Asset Requests in this Run.</div></div>
+          </div>
+        </div>
+        <div class="compose">
+          <label class="label" for="ans">Your answers</label>
+          <textarea id="ans" class="feedback">Q4 yes, a menu. Q5 yes, left on the ground. Q6 yes.</textarea>
+          <div class="row"><span class="muted" style="font-size:var(--fs-xs)">Saved to the Run Notes at each exchange.</span><span style="display:flex;gap:var(--sp-2)"><button class="btn btn-outline-action" type="button">Confirm summary</button><button class="btn btn-primary" type="button">Send answers</button></span></div>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+</body>
+</html>

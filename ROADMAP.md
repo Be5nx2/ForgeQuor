@@ -189,6 +189,10 @@ Griller with a **Conversation Gate** (it writes the Project's glossary and ADRs 
   - Blocked by: `dogfood-03`
   - Acceptance: the skill lives with the Forgequor-only skills and is linked by `scripts/link-skills.sh`; for each group it proposes a roadmap item, a spec to write, the icebox or dismissal; nothing is written before the human agrees; kept groups go through `/to-spec` or `/to-tickets`; it ends with the note IDs to mark triaged or dismissed and where each went; `skills/README.md` has a "Dogfooding" section explaining the flow (+ Note → Inbox → Export → `/dogfood-triage` → roadmap) and why; the role table in `CLAUDE.md` mentions it; checked by hand on a real export.
 
+### UI refresh
+
+New information architecture and cinematic restyle of the web UI: Runs home with "Waiting for you" pinned, left sidebar with Project selector and Gate count, `vue-router` with a URL per Run, Gate and Project, Run detail as Step rail plus panel with fixed Gate actions, a status system (colour, glyph and label), shared loading, empty and error states, an accessibility floor, and design tokens as CSS variables. Desktop only, dark only. Spec and mockups: `docs/specs/ui-refresh/README.md`. Planned after M4, with the Dogfood Notes; M3b screens are built on the current UI until then. Items are cut with `/to-tickets` when it is scheduled.
+
 ## Icebox
 
 - Child Runs: a feature Run splitting its spec into one Run per ticket (ADR 0001).

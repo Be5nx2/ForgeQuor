@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Run detail, variant B: cinematic</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Orbitron:wght@700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="tokens.css">
+<style>
+  /* Variant B: dual lighting. Blue glow for AI work, orange glow where the human is needed.
+     Vertical glowing rail for Steps; Orbitron only on the logotype and section titles. */
+  body { background:
+      radial-gradient(900px 500px at 8% -10%, rgb(56 189 248 / 0.12), transparent 60%),
+      radial-gradient(800px 480px at 100% 110%, rgb(255 140 36 / 0.14), transparent 60%),
+      var(--bg); background-attachment: fixed; }
+  .app { display: grid; grid-template-columns: 232px 1fr; min-height: 100vh; }
+  aside { background: linear-gradient(180deg, rgb(16 29 45 / 0.9), rgb(8 15 25 / 0.9)); border-right: 1px solid var(--border); padding: var(--sp-5) var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-5); backdrop-filter: blur(6px); }
+  .project { width: 100%; background: rgb(8 15 25 / 0.7); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--radius-md); padding: 0.55rem 0.7rem; font: 500 var(--fs-sm) var(--font-ui); display: flex; justify-content: space-between; box-shadow: inset 0 0 0 1px rgb(56 189 248 / 0.08); }
+  .spacer { flex: 1; }
+  .btn-primary { box-shadow: 0 0 18px rgb(255 140 36 / 0.35); }
+  .nav a[aria-current="page"] { box-shadow: inset 2px 0 0 var(--ai); background: linear-gradient(90deg, rgb(56 189 248 / 0.14), transparent); }
+  main { padding: var(--sp-5) var(--sp-6); min-width: 0; display: flex; flex-direction: column; gap: var(--sp-5); }
+  .head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-4); flex-wrap: wrap; }
+  .crumbs { font-size: var(--fs-sm); color: var(--text-muted); margin-bottom: var(--sp-1); }
+  h1 { font: 700 var(--fs-xl)/1.2 var(--font-brand); letter-spacing: 0.03em; }
+  .meta { margin-top: var(--sp-2); display: flex; gap: var(--sp-4); flex-wrap: wrap; font-size: var(--fs-xs); color: var(--text-muted); }
+  .meta b { color: var(--ice-blue); font-weight: 500; }
+  .gate { position: sticky; top: 0; z-index: 2; border: 1px solid var(--action); border-radius: var(--radius-lg); padding: var(--sp-4) var(--sp-5); background: linear-gradient(90deg, rgb(255 140 36 / 0.16), rgb(16 29 45 / 0.92)); box-shadow: 0 0 28px rgb(255 140 36 / 0.18); display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+  .gate .why { flex: 1; min-width: 18rem; font-size: var(--fs-sm); }
+  .gate strong { font: 700 var(--fs-sm) var(--font-brand); letter-spacing: 0.06em; color: var(--molten-gold); display: block; margin-bottom: 2px; }
+  .layout { display: grid; grid-template-columns: 290px 1fr; gap: var(--sp-6); align-items: start; }
+  /* the rail */
+  .rail { position: relative; padding-left: 28px; list-style: none; margin: 0; }
+  .rail::before { content: ""; position: absolute; left: 9px; top: 6px; bottom: 6px; width: 2px; background: linear-gradient(180deg, var(--ai), var(--ai) 62%, var(--border) 62%); box-shadow: 0 0 8px rgb(56 189 248 / 0.5); }
+  .rail li { position: relative; padding: 0.42rem 0.6rem; margin-bottom: 2px; border-radius: var(--radius-md); font-size: var(--fs-sm); display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
+  .rail li::before { content: ""; position: absolute; left: -24px; top: 50%; width: 10px; height: 10px; transform: translateY(-50%); border-radius: 50%; background: var(--st-ok); box-shadow: 0 0 8px var(--st-ok); }
+  .rail li.idle::before { background: var(--bg); border: 2px solid var(--border-strong); box-shadow: none; }
+  .rail li.wait::before { background: var(--action); width: 14px; height: 14px; left: -26px; box-shadow: 0 0 16px 3px rgb(255 140 36 / 0.7); }
+  .rail li.sub { margin-left: 1rem; font-size: var(--fs-xs); }
+  .rail li[aria-selected="true"] { background: linear-gradient(90deg, rgb(255 140 36 / 0.16), transparent); color: var(--text); }
+  .rail small { color: var(--text-muted); margin-left: 0.4rem; }
+  .panel { background: linear-gradient(180deg, rgb(23 40 61 / 0.85), rgb(16 29 45 / 0.85)); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); padding: var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-5); box-shadow: 0 0 0 1px rgb(56 189 248 / 0.06), 0 12px 40px rgb(0 0 0 / 0.35); }
+  h2 { font: 700 var(--fs-sm) var(--font-brand); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ice-blue); margin-bottom: var(--sp-3); }
+  .reco { border-radius: var(--radius-md); padding: var(--sp-4); border: 1px solid rgb(56 189 248 / 0.45); background: rgb(56 189 248 / 0.08); font-size: var(--fs-sm); box-shadow: 0 0 20px rgb(56 189 248 / 0.12); }
+  .reco strong { color: var(--ai); }
+  .remarks { display: grid; gap: var(--sp-3); }
+  .remark { display: grid; grid-template-columns: 2.4rem 1fr auto; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); background: rgb(8 15 25 / 0.55); border: 1px solid var(--border); border-radius: var(--radius-md); font-size: var(--fs-sm); }
+  .remark.disputed { border-color: var(--action); box-shadow: 0 0 14px rgb(255 140 36 / 0.2); }
+  .remark .id { font: 700 var(--fs-md) var(--font-brand); color: var(--steel-grey); }
+  .votes { display: flex; gap: var(--sp-1); flex-wrap: wrap; justify-content: flex-end; align-items: flex-start; }
+  .remark small { display: block; color: var(--text-muted); margin-top: 2px; }
+  .feedback { width: 100%; min-height: 4.5rem; background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--radius-md); padding: 0.7rem; font: var(--fs-sm) var(--font-ui); resize: vertical; }
+  .log { background: #050a12; border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--sp-3); font: var(--fs-xs)/1.6 var(--font-mono); color: #b9c6d6; }
+  .log .t { color: var(--ai); }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <span class="logo"><span class="logo-mark" aria-hidden="true"></span><span><span class="forge">FORGE</span><span class="quor">QUOR</span></span></span>
+    <button class="btn btn-primary" type="button">+ New Run</button>
+    <button class="project" type="button" aria-label="Project: Skyforge"><span>Skyforge</span><span class="muted">⌄</span></button>
+    <nav class="nav" aria-label="Main">
+      <a href="#" aria-current="page">Runs <span class="count" aria-label="2 waiting for you">2</span></a>
+      <a href="#">Projects</a>
+      <span class="soon">Team <small>M3b</small></span>
+      <span class="soon">Workflows</span>
+      <span class="soon">Quotas <small>M4</small></span>
+      <span class="soon">Skill Packs <small>M4</small></span>
+      <span class="soon">Dogfood Inbox</span>
+    </nav>
+    <div class="spacer"></div>
+    <button class="btn" type="button">+ Note</button>
+  </aside>
+
+  <main>
+    <div class="head">
+      <div>
+        <div class="crumbs"><a href="#">Runs</a> / Skyforge / #42</div>
+        <h1>Add a dash ability to the player</h1>
+        <div class="meta"><span>Workflow <b>feature v3</b></span><span>Branch <b class="mono">feat/dash-ability</b></span><span>Iteration <b>2</b></span><span>Review <b>duo</b></span><span>Started <b>14:02</b> · 1 h 12 min</span></div>
+      </div>
+      <span class="chip" data-s="waiting" data-g="●">Waiting for you</span>
+    </div>
+
+    <div class="gate" role="region" aria-label="Gate actions">
+      <div class="why"><strong>REVIEW DISAGREEMENT</strong>The Consolidator could not settle remark R3. Its recommendation: send back for R1 only.</div>
+      <button class="btn btn-primary" type="button">Continue as if passed</button>
+      <button class="btn btn-outline-action" type="button">Send back to Developer</button>
+      <button class="btn btn-danger" type="button">Abandon</button>
+    </div>
+
+    <div class="layout">
+      <ol class="rail" role="tablist" aria-label="Steps" aria-orientation="vertical">
+        <li role="tab" aria-selected="false"><span>Griller <small>3 rounds</small></span><span class="runner">claude</span></li>
+        <li role="tab" aria-selected="false"><span>Spec Writer</span><span class="runner">claude</span></li>
+        <li role="tab" aria-selected="false"><span>Spec Gate <small>approved</small></span></li>
+        <li role="tab" aria-selected="false"><span>Architect <small>6 steps</small></span><span class="runner">claude</span></li>
+        <li role="tab" aria-selected="false"><span>Artist <small>3 Assets</small></span><span class="runner">codex</span></li>
+        <li role="tab" aria-selected="false"><span>Asset Gate <small>1 redone</small></span></li>
+        <li role="tab" aria-selected="false"><span>Developer <small>attempt 2/3</small></span><span class="runner">claude</span></li>
+        <li role="tab" aria-selected="false"><span>Checks <small>4/4</small></span></li>
+        <li class="wait" role="tab" aria-selected="true"><span>Review <small>duo · waiting</small></span></li>
+        <li class="sub" role="tab" aria-selected="false"><span>Reviewer A</span><span class="runner">claude</span></li>
+        <li class="sub" role="tab" aria-selected="false"><span>Reviewer B</span><span class="runner">codex</span></li>
+        <li class="sub" role="tab" aria-selected="false"><span>Consolidator</span><span class="runner">claude</span></li>
+        <li class="idle" role="tab" aria-selected="false"><span>Open pull request</span></li>
+        <li class="idle" role="tab" aria-selected="false"><span>Final Gate</span></li>
+      </ol>
+
+      <section class="panel" aria-label="Step detail: Review">
+        <div class="reco"><strong>Consolidator's recommendation.</strong> Send the Developer back to fix R1 (a real bug, both Reviewers agree). Leave R3: a constant is enough until a second ability needs the value.</div>
+
+        <div>
+          <h2>Remarks</h2>
+          <div class="remarks">
+            <div class="remark"><span class="id">R1</span><div>The dash cooldown is not reset on respawn, so a respawned player cannot dash for up to 2 s.<small class="mono">player.gd:84</small></div><div class="votes"><span class="chip" data-s="bad" data-g="✕">A change</span><span class="chip" data-s="bad" data-g="✕">B change</span><span class="chip" data-s="ok" data-g="✓">kept</span></div></div>
+            <div class="remark"><span class="id">R2</span><div>Missing null check on <code>AnimationPlayer</code>.<small>Dropped: the node is required by <code>player.tscn</code>. <span class="mono">dash.gd:31</span></small></div><div class="votes"><span class="chip" data-s="bad" data-g="✕">A change</span><span class="chip" data-s="ok" data-g="✓">B pass</span><span class="chip" data-s="idle" data-g="–">dropped</span></div></div>
+            <div class="remark disputed"><span class="id">R3</span><div>Gravity is off for 0.18 s during the dash: make it an <code>@export</code> variable.<small class="mono">dash.gd:12</small></div><div class="votes"><span class="chip" data-s="bad" data-g="✕">A change</span><span class="chip" data-s="ok" data-g="✓">B pass</span><span class="chip" data-s="waiting" data-g="●">disputed</span></div></div>
+          </div>
+        </div>
+
+        <div>
+          <h2>Feedback for the Developer</h2>
+          <textarea class="feedback" aria-label="Feedback">Fix R1. Ignore R3, keep the constant.</textarea>
+        </div>
+
+        <div>
+          <h2>Live events</h2>
+          <div class="log" role="log" aria-live="polite"><div><span class="t">15:06:41</span> Consolidator finished, 3 remarks checked</div><div><span class="t">15:06:42</span> Gate opened: review disagreement</div></div>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+</body>
+</html>

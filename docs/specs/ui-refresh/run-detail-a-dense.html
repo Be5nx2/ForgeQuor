@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Run detail, variant A: sober and dense</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Orbitron:wght@700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="tokens.css">
+<style>
+  /* Variant A: CI-tool density. Flat, 1px borders, small radius, tight rows. */
+  .app { display: grid; grid-template-columns: 216px 1fr; height: 100vh; }
+  aside { background: var(--surface); border-right: 1px solid var(--border); padding: var(--sp-4) var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-4); }
+  .project { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 0.5rem 0.6rem; font: 500 var(--fs-sm) var(--font-ui); display: flex; justify-content: space-between; }
+  .spacer { flex: 1; }
+  main { display: grid; grid-template-rows: auto auto auto 1fr; min-width: 0; min-height: 0; }
+  .top { padding: var(--sp-3) var(--sp-5); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: var(--sp-4); }
+  .crumbs { font-size: var(--fs-sm); color: var(--text-muted); }
+  .top h1 { font-size: var(--fs-lg); font-weight: 600; }
+  .gatebar { position: sticky; top: 0; background: #1e1405; border-bottom: 1px solid var(--action); padding: var(--sp-3) var(--sp-5); display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+  .gatebar .why { flex: 1; min-width: 18rem; font-size: var(--fs-sm); }
+  .gatebar strong { color: var(--action); }
+  .meta { display: flex; gap: var(--sp-5); padding: var(--sp-2) var(--sp-5); border-bottom: 1px solid var(--border); font-size: var(--fs-xs); color: var(--text-muted); }
+  .meta b { color: var(--text); font-weight: 500; }
+  .split { display: grid; grid-template-columns: 300px 1fr; min-height: 0; }
+  .steps { border-right: 1px solid var(--border); overflow: auto; padding: var(--sp-2) 0; }
+  .step { display: grid; grid-template-columns: 18px 1fr auto; gap: var(--sp-2); align-items: center; padding: 0.42rem var(--sp-4); font-size: var(--fs-sm); border-left: 2px solid transparent; cursor: pointer; }
+  .step:hover { background: var(--surface); }
+  .step[aria-selected="true"] { background: var(--surface-raised); border-left-color: var(--action); }
+  .step .g { font-size: 0.85rem; text-align: center; }
+  .step small { color: var(--text-muted); font-size: var(--fs-xs); }
+  .g.ok { color: var(--st-ok); } .g.run { color: var(--st-running); } .g.wait { color: var(--st-waiting); } .g.idle { color: var(--st-idle); }
+  .sub { padding-left: calc(var(--sp-4) + 26px); }
+  .detail { overflow: auto; padding: var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-5); }
+  .tabs { display: flex; gap: var(--sp-1); border-bottom: 1px solid var(--border); }
+  .tabs button { background: none; border: 0; color: var(--text-muted); padding: 0.5rem 0.8rem; font: 500 var(--fs-sm) var(--font-ui); cursor: pointer; border-bottom: 2px solid transparent; }
+  .tabs [aria-selected="true"] { color: var(--text); border-bottom-color: var(--ai); }
+  h2 { font-size: var(--fs-md); font-weight: 600; margin-bottom: var(--sp-2); }
+  .reco { border: 1px solid var(--border-strong); border-left: 3px solid var(--ai); padding: var(--sp-3) var(--sp-4); background: var(--surface); font-size: var(--fs-sm); }
+  table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+  th { text-align: left; color: var(--text-muted); font-weight: 500; font-size: var(--fs-xs); padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); }
+  td { padding: 0.55rem 0.6rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+  .feedback { width: 100%; min-height: 4.5rem; background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--radius-md); padding: 0.6rem; font: var(--fs-sm) var(--font-ui); resize: vertical; }
+  .log { background: #050a12; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--sp-3); font: var(--fs-xs)/1.6 var(--font-mono); color: #b9c6d6; max-height: 9rem; overflow: auto; }
+  .log .t { color: var(--text-muted); }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <span class="logo"><span class="logo-mark" aria-hidden="true"></span><span><span class="forge">FORGE</span><span class="quor">QUOR</span></span></span>
+    <button class="btn btn-primary" type="button">+ New Run</button>
+    <button class="project" type="button" aria-label="Project: Skyforge"><span>Skyforge</span><span class="muted">⌄</span></button>
+    <nav class="nav" aria-label="Main">
+      <a href="#" aria-current="page">Runs <span class="count" aria-label="2 waiting for you">2</span></a>
+      <a href="#">Projects</a>
+      <span class="soon">Team <small>M3b</small></span>
+      <span class="soon">Workflows</span>
+      <span class="soon">Quotas <small>M4</small></span>
+      <span class="soon">Skill Packs <small>M4</small></span>
+      <span class="soon">Dogfood Inbox</span>
+    </nav>
+    <div class="spacer"></div>
+    <button class="btn" type="button">+ Note</button>
+  </aside>
+
+  <main>
+    <header class="top">
+      <div>
+        <div class="crumbs"><a href="#">Runs</a> / Skyforge / #42</div>
+        <h1>Add a dash ability to the player</h1>
+      </div>
+      <span class="chip" data-s="waiting" data-g="●">Waiting</span>
+    </header>
+
+    <div class="gatebar" role="region" aria-label="Gate actions">
+      <div class="why"><strong>Gate: review disagreement.</strong> The Consolidator could not settle remark R3. Recommendation: send back for R1 only.</div>
+      <button class="btn btn-primary" type="button">Continue as if passed</button>
+      <button class="btn btn-outline-action" type="button">Send back to Developer</button>
+      <button class="btn btn-danger" type="button">Abandon</button>
+    </div>
+
+    <div class="meta"><span>Workflow <b>feature v3</b></span><span>Branch <b class="mono">feat/dash-ability</b></span><span>Iteration <b>2</b></span><span>Review <b>duo</b></span><span>Started <b>14:02</b> · 1 h 12 min</span></div>
+
+    <div class="split">
+      <div class="steps" role="tablist" aria-label="Steps" aria-orientation="vertical">
+        <div class="step" role="tab" aria-selected="false"><span class="g ok" aria-label="done">✓</span><span>Griller <small>3 rounds</small></span><span class="runner">claude</span></div>
+        <div class="step" role="tab" aria-selected="false"><span class="g ok" aria-label="done">✓</span><span>Spec Writer</span><span class="runner">claude</span></div>
+        <div class="step" role="tab" aria-selected="false"><span class="g ok" aria-label="approved">✓</span><span>Spec Gate <small>approved</small></span><span></span></div>
+        <div class="step" role="tab" aria-selected="false"><span class="g ok" aria-label="done">✓</span><span>Architect <small>6 steps</small></span><span class="runner">claude</span></div>
+        <div class="step" role="tab" aria-selected="false"><span class="g ok" aria-label="done">✓</span><span>Artist <small>3 Assets</small></span><span class="runner">codex</span></div>
+        <div class="step" role="tab" aria-selected="false"><span class="g ok" aria-label="approved">✓</span><span>Asset Gate <small>1 redone</small></span><span></span></div>
+        <div class="step" role="tab" aria-selected="false"><span class="g ok" aria-label="done">✓</span><span>Developer <small>attempt 2/3</small></span><span class="runner">claude</span></div>
+        <div class="step" role="tab" aria-selected="false"><span class="g ok" aria-label="passed">✓</span><span>Checks <small>4/4</small></span><span></span></div>
+        <div class="step" role="tab" aria-selected="true"><span class="g wait" aria-label="waiting">●</span><span>Review <small>duo</small></span><span></span></div>
+        <div class="step sub" role="tab" aria-selected="false"><span class="g ok" aria-label="done">✓</span><span>Reviewer A</span><span class="runner">claude</span></div>
+        <div class="step sub" role="tab" aria-selected="false"><span class="g ok" aria-label="done">✓</span><span>Reviewer B</span><span class="runner">codex</span></div>
+        <div class="step sub" role="tab" aria-selected="false"><span class="g ok" aria-label="done">✓</span><span>Consolidator</span><span class="runner">claude</span></div>
+        <div class="step" role="tab" aria-selected="false"><span class="g idle" aria-label="not started">○</span><span>Open pull request</span><span></span></div>
+        <div class="step" role="tab" aria-selected="false"><span class="g idle" aria-label="not started">○</span><span>Final Gate</span><span></span></div>
+      </div>
+
+      <section class="detail" aria-label="Step detail: Review">
+        <div class="tabs" role="tablist"><button role="tab" aria-selected="true">Review</button><button role="tab" aria-selected="false">Reviewer A</button><button role="tab" aria-selected="false">Reviewer B</button><button role="tab" aria-selected="false">Events</button></div>
+
+        <div class="reco"><strong>Consolidator's recommendation.</strong> Send the Developer back to fix R1 (a real bug, both Reviewers agree). Leave R3: a constant is enough until a second ability needs the value.</div>
+
+        <div>
+          <h2>Remarks (3)</h2>
+          <table>
+            <thead><tr><th>#</th><th>Remark</th><th>Where</th><th>A</th><th>B</th><th>Consolidator</th></tr></thead>
+            <tbody>
+              <tr><td>R1</td><td>The dash cooldown is not reset on respawn, so a respawned player cannot dash for up to 2 s.</td><td class="mono">player.gd:84</td><td><span class="chip" data-s="bad" data-g="✕">change</span></td><td><span class="chip" data-s="bad" data-g="✕">change</span></td><td><span class="chip" data-s="ok" data-g="✓">kept</span></td></tr>
+              <tr><td>R2</td><td>Missing null check on <code>AnimationPlayer</code>.</td><td class="mono">dash.gd:31</td><td><span class="chip" data-s="bad" data-g="✕">change</span></td><td><span class="chip" data-s="ok" data-g="✓">pass</span></td><td><span class="chip" data-s="idle" data-g="–">dropped</span></td></tr>
+              <tr><td>R3</td><td>Gravity is off for 0.18 s during the dash: make it an <code>@export</code> variable.</td><td class="mono">dash.gd:12</td><td><span class="chip" data-s="bad" data-g="✕">change</span></td><td><span class="chip" data-s="ok" data-g="✓">pass</span></td><td><span class="chip" data-s="waiting" data-g="●">disputed</span></td></tr>
+            </tbody>
+          </table>
+          <p class="muted" style="margin-top:.5rem;font-size:var(--fs-xs)">R2 dropped: the node is required by <code>player.tscn</code>, checked in the scene.</p>
+        </div>
+
+        <div>
+          <h2>Feedback for the Developer <span class="muted" style="font-weight:400">(used only if you send it back)</span></h2>
+          <textarea class="feedback" aria-label="Feedback">Fix R1. Ignore R3, keep the constant.</textarea>
+        </div>
+
+        <div>
+          <h2>Live events</h2>
+          <div class="log" role="log" aria-live="polite"><div><span class="t">15:06:41</span> Consolidator finished, 3 remarks checked</div><div><span class="t">15:06:42</span> Gate opened: review disagreement</div></div>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+</body>
+</html>
