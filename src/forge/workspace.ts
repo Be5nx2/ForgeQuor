@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -187,4 +188,42 @@ export function repositoryPath(value: string): string {
     throw new Error(`"${value.trim()}" is not a path inside the repository.`);
   }
   return path;
+}
+
+/** How the worktree stands outside the Run Notes: the commit it is at, and a fingerprint of each changed or untracked file. */
+export interface WorktreeSnapshot {
+  head: string;
+  files: Map<string, string>;
+}
+
+/** Takes the snapshot a read-only Step is compared against. The Run Notes folder is left out. */
+export async function snapshotWorktree(worktreePath: string): Promise<WorktreeSnapshot> {
+  const head = await gitOrThrow(worktreePath, "rev-parse", "HEAD");
+  const { stdout } = await run("git", ["status", "--porcelain", "-z", "-uall"], { cwd: worktreePath, maxBuffer: 64 * 1024 * 1024 });
+  const files = new Map<string, string>();
+  const entries = stdout.split("\0").filter(Boolean);
+  for (let i = 0; i < entries.length; i++) {
+    const status = entries[i]!.slice(0, 2);
+    const path = entries[i]!.slice(3);
+    // A rename lists the old path as the next entry.
+    if (status.includes("R") || status.includes("C")) files.set(entries[++i]!, "renamed");
+    if (path === RUN_NOTES_DIR || path.startsWith(`${RUN_NOTES_DIR}/`)) continue;
+    const file = join(worktreePath, path);
+    files.set(path, existsSync(file) ? createHash("sha1").update(readFileSync(file)).digest("hex") : "missing");
+  }
+  return { head, files };
+}
+
+/** The paths outside the Run Notes that differ between two snapshots of the same worktree, sorted. */
+export async function changesBetween(worktreePath: string, before: WorktreeSnapshot, after: WorktreeSnapshot): Promise<string[]> {
+  const changed = new Set<string>();
+  for (const path of new Set([...before.files.keys(), ...after.files.keys()])) {
+    if (before.files.get(path) !== after.files.get(path)) changed.add(path);
+  }
+  if (before.head !== after.head) {
+    const out = await gitOrThrow(worktreePath, "diff", "--name-only", "-z", before.head, after.head);
+    for (const path of out.split("\0").filter(Boolean)) if (path !== RUN_NOTES_DIR && !path.startsWith(`${RUN_NOTES_DIR}/`)) changed.add(path);
+    if (!changed.size) changed.add(`(HEAD moved from ${before.head.slice(0, 7)} to ${after.head.slice(0, 7)})`);
+  }
+  return [...changed].sort();
 }

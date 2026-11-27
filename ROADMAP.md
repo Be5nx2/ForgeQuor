@@ -65,7 +65,7 @@ The engine behind every Workflow, with no change visible to the human: a deeper 
     - `assets` is `artist` → asset Gate (`on_reject: artist`) → `publish`, the Run being Approved after Publish;
     - `artist` is a coded composite that still draws each Asset Request in turn with its Asset Checks and retries;
     - every existing test passes unchanged.
-- [ ] `m3-06` **Parallel read-only Steps**: independent read-only Steps run at the same time.
+- [x] `m3-06` **Parallel read-only Steps**: independent read-only Steps run at the same time.
   - Spec: `docs/specs/m3a-workflow-engine.md`
   - Blocked by: `m3-04`
   - Acceptance:
