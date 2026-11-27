@@ -130,7 +130,7 @@ Griller with a **Conversation Gate** (it writes the Project's glossary and ADRs 
     - the Consolidator (Claude) checks each remark against the code and writes one Review;
     - a disagreement it cannot settle opens a Gate carrying its recommendation;
     - Runners per Agent default as decided and can be changed through environment variables.
-- [ ] `m3-13` **`feature` v0: Griller and Conversation Gate**: a subject becomes code after a grilling.
+- [x] `m3-13` **`feature` v0: Griller and Conversation Gate**: a subject becomes code after a grilling.
   - Spec: `docs/specs/m3b-the-team.md`
   - Blocked by: `m3-11`, `m3-10`, `m3-08`
   - Acceptance:

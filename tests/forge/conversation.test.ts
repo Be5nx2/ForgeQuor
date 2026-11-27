@@ -26,7 +26,8 @@ const forges: Forge[] = [];
 let counter = 0;
 
 const isGriller = (s: StepRequest) => s.instructions.includes("You are the Griller");
-const isReviewer = (s: StepRequest) => s.instructions.includes("You are the Reviewer");
+const isReviewer = (s: StepRequest) => s.instructions.includes("You are the Reviewer") || s.instructions.includes("You are the Consolidator");
+const passing: StepResult = { status: "succeeded", summary: "Summary: Fine.\n\nFindings:\n- None.\n\nDoubts: None.\n\nVerdict: pass" };
 const grillers = () => claude.steps.filter(isGriller);
 const developers = () => claude.steps.filter((s) => !isGriller(s) && !isReviewer(s));
 
@@ -37,7 +38,7 @@ const summary = (body = "Build a double jump: a second jump in mid-air, once per
 function script(turns: (string | ((step: StepRequest, n: number) => StepResult | string | void))[]) {
   let n = 0;
   return (step: StepRequest): StepResult | void => {
-    if (isReviewer(step)) return { status: "succeeded", summary: "Summary: Fine.\n\nFindings:\n- None.\n\nDoubts: None.\n\nVerdict: pass" };
+    if (isReviewer(step)) return passing;
     if (!isGriller(step)) {
       writeFileSync(join(step.cwd, "jump.txt"), `jump ${claude.steps.length}\n`);
       writeFileSync(join(step.cwd, ".forgequor", "review-brief.md"), "What the Developer did.\n");
@@ -56,6 +57,7 @@ beforeAll(async () => {
   pool = db.pool;
   worktrees = mkdtempSync(join(tmpdir(), "forgequor-conversation-"));
   forge = forgeWith({});
+  codex.use(() => passing);
 });
 function forgeWith(overrides: Partial<ForgeDeps>): Forge {
   const created = createForge({ pool, runner: claude, artistRunner: codex, codeHost, worktreesRoot: worktrees, ...overrides });
@@ -71,7 +73,7 @@ afterEach(() => {
   claude.use(() => {});
   claude.steps.length = 0;
   claude.sessions.clear();
-  codex.use(() => {});
+  codex.use(() => passing);
   codex.steps.length = 0;
   codeHost.pullRequests.length = 0;
   cleanups.splice(0).forEach((c) => c());
@@ -178,6 +180,10 @@ describe("a feature Run's grilling", () => {
     expect(developers()[0]!.prompt).toContain("Build a double jump: once per fall.");
     expect(transcript(run)).toMatch(/### Proposed summary\n\nBuild a double jump: once per fall\.\n\n### Answer\n\nConfirmed\.\n$/);
     expect(codeHost.pullRequests).toHaveLength(1);
+    // `feature` reviews in duo by default: the second Reviewer is on the other Runner, then the Consolidator.
+    expect(run.review).toBe("duo");
+    expect(codex.steps).toHaveLength(1);
+    expect(run.attempts.filter((a) => a.stepId === "review").map((a) => a.step).sort()).toEqual(["consolidator", "reviewer-a", "reviewer-b"]);
   });
 
   it("refuses to confirm questions, and an empty answer", async () => {
