@@ -44,10 +44,16 @@ export interface ConversationRecords {
   openGate(stepId: string): Promise<number | null>;
   /** How a Gate was decided; null for a Gate that does not exist. */
   answerOf(gateId: number): Promise<GateAnswer | null>;
-  /** The latest Feedback the human gave after the Gate `gateId` when sending the Run back (a go back, a retry, a rejection): what reopens a confirmed conversation. */
-  feedbackAfter(gateId: number): Promise<string | null>;
-  /** The summary the human last confirmed, or null when no conversation of the Run was confirmed. */
-  confirmedSummary(): Promise<string | null>;
+  /**
+   * The Feedback of the go back that sent the Run back to the conversation Step after the Gate `confirmedAt` confirmed it,
+   * or null: only a go back that replays the Step reopens a confirmed conversation (the Step state remembers the Gate it
+   * was last sent back at).
+   */
+  reopenFeedback(stepId: string, confirmedAt: number): Promise<string | null>;
+  /** Whether the Agent turn the Gate waits on is a proposed summary (which the human can then confirm). */
+  summaryAt(gateId: number): Promise<boolean>;
+  /** The summary the human last confirmed (in the conversation Step `stepId` when given, else in any of the Run's), or null when there is none. */
+  confirmedSummary(stepId?: string): Promise<string | null>;
   /** Every message of the Run, for its detail. */
   all(): Promise<ConversationTurn[]>;
 }
@@ -87,18 +93,24 @@ export function createConversationRecords(pool: pg.Pool, runId: number): Convers
       const { rows } = await pool.query("SELECT decision, feedback FROM gates WHERE id = $1 AND run_id = $2", [gateId, runId]);
       return rows[0] ? { decision: rows[0].decision, message: rows[0].feedback } : null;
     },
-    async feedbackAfter(gateId) {
+    async reopenFeedback(stepId, confirmedAt) {
       const { rows } = await pool.query(
-        "SELECT feedback FROM gates WHERE run_id = $1 AND id > $2 AND feedback IS NOT NULL AND decision IN ('go_back', 'retry', 'reject') ORDER BY id DESC LIMIT 1",
-        [runId, gateId],
+        `SELECT g.feedback FROM step_states s JOIN gates g ON g.id = s.since_gate
+         WHERE s.run_id = $1 AND s.step = $2 AND s.since_gate > $3 AND g.decision = 'go_back' AND g.feedback IS NOT NULL
+         ORDER BY s.iteration DESC LIMIT 1`,
+        [runId, stepId, confirmedAt],
       );
       return rows[0]?.feedback ?? null;
     },
-    async confirmedSummary() {
+    async summaryAt(gateId) {
+      const { rows } = await pool.query("SELECT 1 FROM conversation_turns WHERE run_id = $1 AND gate_id = $2 AND author = 'agent' AND kind = 'summary'", [runId, gateId]);
+      return rows.length > 0;
+    },
+    async confirmedSummary(stepId) {
       const { rows } = await pool.query(
         `SELECT s.body FROM conversation_turns c JOIN conversation_turns s ON s.run_id = c.run_id AND s.step_id = c.step_id AND s.kind = 'summary' AND s.seq < c.seq
-         WHERE c.run_id = $1 AND c.kind = 'confirm' ORDER BY c.id DESC, s.seq DESC LIMIT 1`,
-        [runId],
+         WHERE c.run_id = $1 AND c.kind = 'confirm' AND ($2::text IS NULL OR c.step_id = $2) ORDER BY c.id DESC, s.seq DESC LIMIT 1`,
+        [runId, stepId ?? null],
       );
       return rows[0]?.body ?? null;
     },

@@ -1,15 +1,14 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import type pg from "pg";
 import type { Runner } from "../runner/runner.js";
 import type { StepOutcome, StepTypeModule } from "./engine.js";
-import type { Turn } from "./conversation-records.js";
-import { commitDeliverables, undoForbiddenChanges, type MayChange } from "./deliverables.js";
+import { createConversationRecords, type Turn } from "./conversation-records.js";
+import { commitDeliverables, headOf, sweepForbiddenChanges, type MayChange } from "./deliverables.js";
 import { InvalidInputError } from "./errors.js";
 import type { GateKindModule } from "./gates.js";
 import { requireSeat, type SeatName } from "./seats.js";
 import { runAgentStep } from "./step.js";
-import type { Gate } from "./types.js";
-import { snapshotWorktree } from "./workspace.js";
 import type { AgentSeat, WorkflowContext } from "./workflow.js";
 
 /** What an Agent's text says as one turn of a conversation: a round of questions, or the summary it proposes, or what is wrong with it. */
@@ -41,8 +40,8 @@ export interface ConversationAgent {
 /** How many more times an Agent is asked for a turn that could be read, within the same round. */
 export const EXTRA_TURN_TRIES = 2;
 
-/** What a Conversation Gate says when the Agent proposes a summary: the Gate then offers `confirm`. */
-export const SUMMARY_PROPOSED = "proposes a summary";
+/** What a Conversation Gate says when the Agent proposes a summary. */
+const SUMMARY_PROPOSED = "proposes a summary";
 
 const capitalised = (name: string) => name.charAt(0).toUpperCase() + name.slice(1);
 const stop: StepOutcome = { next: "stop" };
@@ -52,11 +51,12 @@ const done: StepOutcome = { next: "done" };
  * The Conversation Gate: the Agent has questions, or proposes a summary, and the Run waits for the human. They answer in
  * one message, or confirm the summary (offered only when there is one); abandoning is always possible.
  */
-export const conversationGate: GateKindModule = {
+export const createConversationGate = (pool: pg.Pool): GateKindModule => ({
   kind: "conversation",
   label: "A Conversation Gate",
   actions: ["answer", "confirm", "abandon"],
-  offers: (gate: Gate) => (gate.reason.includes(SUMMARY_PROPOSED) ? ["answer", "confirm", "abandon"] : ["answer", "abandon"]),
+  // `confirm` is for a summary: the Agent turn this Gate waits on says whether there is one.
+  offers: async (gate) => ((await createConversationRecords(pool, gate.runId).summaryAt(gate.id)) ? ["answer", "confirm", "abandon"] : ["answer", "abandon"]),
   async decide(_gate, { action, message }) {
     if (action === "abandon") return { next: "abandon" };
     if (action === "confirm") return { next: "continue", decision: "confirm", nextIteration: false };
@@ -64,16 +64,19 @@ export const conversationGate: GateKindModule = {
     // The message is kept as it was written: the transcript quotes it verbatim.
     return { next: "continue", decision: "answer", feedback: message, nextIteration: false };
   },
-};
+});
 
-/** The conversation as an Agent (and the human) reads it: one heading per round, the questions, then the answer verbatim. */
+/** A human's words as a blockquote: verbatim, and unable to add a heading of the transcript's own. */
+const quote = (text: string) => text.split("\n").map((l) => `> ${l}`.trimEnd()).join("\n");
+
+/** The conversation as an Agent (and the human) reads it: one heading per round (each of the Agent's turns), the questions, then the answer verbatim, quoted. */
 export function renderTranscript(title: string, subject: string, turns: Turn[]): string {
-  const parts = [`# ${title}\n\nSubject:\n\n${subject.trim()}`];
+  const parts = [`# ${title}\n\nSubject:\n\n${quote(subject.trim())}`];
   let round = 0;
   for (const t of turns) {
     if (t.author === "agent") parts.push(`## Round ${++round}\n\n### ${t.kind === "summary" ? "Proposed summary" : "Questions"}\n\n${t.body.trim()}`);
-    else if (t.kind === "feedback") parts.push(`## Round ${++round}\n\n### Feedback\n\n${t.body}`);
-    else parts.push(`### Answer\n\n${t.kind === "confirm" ? "Confirmed." : t.body}`);
+    else if (t.kind === "feedback") parts.push(`### Feedback\n\n${quote(t.body)}`);
+    else parts.push(`### Answer\n\n${t.kind === "confirm" ? "Confirmed." : quote(t.body)}`);
   }
   return `${parts.join("\n\n")}\n`;
 }
@@ -83,6 +86,9 @@ function writeNote(worktreePath: string, path: string, text: string): void {
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, text);
 }
+
+/** Starts a human message that is given again because the turn it was given for was cut off or discarded. */
+const DISCARDED = "Your previous attempt at this turn was cut off or discarded; answer this message again.";
 
 /** What the Agent is told of a human message: an answer as written, Feedback that reopens the conversation with its context. */
 function humanMessage(turn: Turn): string {
@@ -133,10 +139,10 @@ export function conversationStepType(agents: ReadonlyMap<string, ConversationAge
       const last = turns.at(-1);
       let message: string;
       if (!last) message = agent.opening(ctx);
-      else if (last.author === "human" && last.kind !== "confirm") message = humanMessage(last);
+      else if (last.author === "human" && last.kind !== "confirm") message = `${DISCARDED}\n\n${humanMessage(last)}`;
       else if (last.author === "human") {
         // Confirmed already. Only a Run sent back to this Step with Feedback reopens the conversation.
-        const feedback = last.gateId === null ? null : await conversation.feedbackAfter(last.gateId);
+        const feedback = last.gateId === null ? null : await conversation.reopenFeedback(step.id, last.gateId);
         if (feedback === null) return done;
         message = humanMessage(await conversation.add(step.id, { author: "human", kind: "feedback", body: feedback }));
       } else {
@@ -212,17 +218,29 @@ async function takeTurn(
   let problem = "";
   for (let tries = 1; tries <= 1 + EXTRA_TURN_TRIES; tries++) {
     rmSync(notePath, { force: true });
-    const before = await snapshotWorktree(ctx.worktreePath);
-    const result = await runAgentStep(ctx, runner, {
-      name: agent.name,
-      stepId,
-      attempt,
-      instructions: agent.instructions,
-      prompt,
-      session: resume ? { resume } : { start: true },
-    });
-    if (!result) return null;
-    const forbidden = await undoForbiddenChanges(ctx.worktreePath, before, agent.mayChange);
+    // Whatever an earlier turn (or a crash) left outside what the Agent may change goes first, so it cannot escape later.
+    await sweepForbiddenChanges(ctx.worktreePath, agent.mayChange);
+    const head = await headOf(ctx.worktreePath);
+    let result;
+    try {
+      result = await runAgentStep(ctx, runner, {
+        name: agent.name,
+        stepId,
+        attempt,
+        instructions: agent.instructions,
+        prompt,
+        session: resume ? { resume } : { start: true },
+      });
+    } catch (e) {
+      await sweepForbiddenChanges(ctx.worktreePath, agent.mayChange, head);
+      throw e;
+    }
+    // A turn that did not succeed (failed, timed out, paused, abandoned) is swept silently: it is not used anyway.
+    if (!result) {
+      await sweepForbiddenChanges(ctx.worktreePath, agent.mayChange, head).catch(() => {});
+      return null;
+    }
+    const forbidden = await sweepForbiddenChanges(ctx.worktreePath, agent.mayChange, head);
     if (forbidden.length) {
       await ctx.openGate(
         "escalation",

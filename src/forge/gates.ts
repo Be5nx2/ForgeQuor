@@ -43,7 +43,7 @@ export interface GateKindModule {
   /** What the human can do at it. */
   actions: GateAction[];
   /** The actions a particular Gate offers, when that depends on the Gate (a Conversation Gate offers `confirm` only for a summary); `actions` otherwise. */
-  offers?(gate: Gate): GateAction[];
+  offers?(gate: Gate): Promise<GateAction[]>;
   /** Whether the human can also retry the Step that failed or go back to an earlier one (an Escalation). */
   redo?: boolean;
   /** Why a Gate Step of this kind opens it, as the human reads it. */
@@ -56,9 +56,9 @@ export interface GateKindModule {
 }
 
 /** Why a Gate does not offer `action`. */
-export function refusal(gate: GateKindModule, action: GateAction, at?: Gate): string {
+export function refusal(gate: GateKindModule, action: GateAction, offers: GateAction[] = gate.actions): string {
   const past: Record<GateAction, string> = { approve: "approved", reject: "rejected", abandon: "abandoned", judge: "judged", retry: "retried", go_back: "gone back from", answer: "answered", confirm: "confirmed" };
-  return `${gate.label} cannot be ${past[action]}; it can only be ${(at ? offered(gate, at) : gate.actions).map((a) => past[a]).join(" or ")}.`;
+  return `${gate.label} cannot be ${past[action]}; it can only be ${offers.map((a) => past[a]).join(" or ")}.`;
 }
 
 /** The Developer finished: the human approves the pull request, sends it back with Feedback, or abandons the Run. */
@@ -77,8 +77,8 @@ export const finalGate: GateKindModule = {
 };
 
 /** What a particular Gate of this kind offers. */
-export function offered(kind: GateKindModule, gate: Gate): GateAction[] {
-  return kind.offers?.(gate) ?? kind.actions;
+export async function offered(kind: GateKindModule, gate: Gate): Promise<GateAction[]> {
+  return (await kind.offers?.(gate)) ?? kind.actions;
 }
 
 /**
@@ -100,8 +100,8 @@ export const reviewGate: GateKindModule = {
 };
 
 /** Whether the human can decide a Gate of this kind with `action`: what it lists, and for an Escalation retrying and going back. */
-export function allows(gate: GateKindModule, action: GateAction, at?: Gate): boolean {
-  return (at ? offered(gate, at) : gate.actions).includes(action) || (!!gate.redo && (action === "retry" || action === "go_back"));
+export function allows(gate: GateKindModule, action: GateAction, offers: GateAction[] = gate.actions): boolean {
+  return offers.includes(action) || (!!gate.redo && (action === "retry" || action === "go_back"));
 }
 
 /**

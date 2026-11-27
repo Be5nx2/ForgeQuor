@@ -146,7 +146,7 @@ describe("a feature Run's grilling", () => {
     expect(grillers()[1]!.prompt).toBe("Round one: short hop.\n\n- also: no air dash");
     expect(open(run).evidence).toContain("Round two question");
     expect(transcript(run)).toBe(
-      "# Grilling\n\nSubject:\n\nLet the player jump twice.\n\n## Round 1\n\n### Questions\n\n1. Round one question?\n\n### Answer\n\nRound one: short hop.\n\n- also: no air dash\n\n## Round 2\n\n### Questions\n\n1. Round two question?\n",
+      "# Grilling\n\nSubject:\n\n> Let the player jump twice.\n\n## Round 1\n\n### Questions\n\n1. Round one question?\n\n### Answer\n\n> Round one: short hop.\n>\n> - also: no air dash\n\n## Round 2\n\n### Questions\n\n1. Round two question?\n",
     );
 
     run = await answer(run, "Round two: yes.");
@@ -356,6 +356,80 @@ describe("what the Griller may change in the Project", () => {
   });
 });
 
+describe("stray files", () => {
+  it("never reach the branch, even from a turn that failed", async () => {
+    const p = await project();
+    claude.use(
+      script([
+        (step) => {
+          mkdirSync(join(step.cwd, "src"), { recursive: true });
+          writeFileSync(join(step.cwd, "src/x.ts"), "export {};\n");
+          writeFileSync(join(step.cwd, "README.md"), "scribbled\n");
+          return { status: "failed", error: "The Runner died." };
+        },
+        questions(),
+        summary(),
+      ]),
+    );
+    let run = await feature(p);
+    expect(open(run)).toMatchObject({ kind: "escalation", stepId: "griller" });
+    // Swept at once, silently: the failure path names nothing.
+    expect(existsSync(join(run.worktreePath!, "src/x.ts"))).toBe(false);
+
+    await forge.decideGate({ gateId: open(run).id, action: "retry" });
+    await forge.whenIdle();
+    run = await forge.getRun(run.id);
+    run = await answer(run, "ok");
+    run = await confirm(run);
+
+    expect(existsSync(join(run.worktreePath!, "src/x.ts"))).toBe(false);
+    expect(git(run.worktreePath!, "status", "--porcelain")).toBe("");
+    expect(git(run.worktreePath!, "diff", "--name-only", "origin/main", "HEAD")).not.toMatch(/x\.ts|README/);
+  });
+
+  it("are swept before a turn when a crash left them behind", async () => {
+    const p = await project();
+    claude.use(script([questions(), questions("1. Again?")]));
+    const run = await feature(p);
+    writeFileSync(join(run.worktreePath!, "left-behind.txt"), "x\n");
+
+    await answer(run, "go on");
+
+    expect(existsSync(join(run.worktreePath!, "left-behind.txt"))).toBe(false);
+  });
+});
+
+describe("what the review and the Developer read after a grilling", () => {
+  it("gives the Reviewers and the Consolidator the confirmed summary", async () => {
+    const p = await project();
+    claude.use(script([summary("Build a double jump: once per fall.")]));
+
+    let run = await feature(p);
+    run = await confirm(run);
+
+    const prompts = [...claude.steps, ...codex.steps].filter(isReviewer).map((s) => s.prompt);
+    expect(prompts).toHaveLength(3);
+    for (const prompt of prompts) expect(prompt).toContain("The human confirmed this summary of what to build; review against it:\n\nBuild a double jump: once per fall.");
+  });
+
+  it("does not reopen the confirmed conversation for a retry at a later Step", async () => {
+    const p = await project();
+    claude.use(script([summary()]));
+    let run = await feature(p);
+    await pool.query("UPDATE projects SET setup = $2 WHERE id = $1", [p.id, JSON.stringify(["false"])]);
+    run = await confirm(run);
+    expect(open(run)).toMatchObject({ kind: "escalation", stepId: "developer" });
+    await pool.query("UPDATE projects SET setup = '[]' WHERE id = $1", [p.id]);
+
+    await forge.decideGate({ gateId: open(run).id, action: "retry", feedback: "Try again, please." });
+    await forge.whenIdle();
+    run = await forge.getRun(run.id);
+
+    expect(grillers()).toHaveLength(1);
+    expect(stepsOf(run)).toEqual(["griller:done", "developer:done", "checks:done", "review:done", "publish:done", "final:running"]);
+  });
+});
+
 describe("a restart during the conversation", () => {
   it("keeps waiting at an open Conversation Gate, and the answer then resumes the same session", async () => {
     const p = await project();
@@ -393,7 +467,7 @@ describe("a restart during the conversation", () => {
     run = await restarted.getRun(run.id);
     expect(grillers()).toHaveLength(2);
     expect(grillers()[1]!.session).toEqual({ resume: session() });
-    expect(grillers()[1]!.prompt).toBe("My answer.");
+    expect(grillers()[1]!.prompt).toBe("Your previous attempt at this turn was cut off or discarded; answer this message again.\n\nMy answer.");
     expect(open(run).evidence).toBe("1. Second round?");
     // The answer is in the transcript once.
     expect(run.conversation.map((t) => t.kind)).toEqual(["questions", "answer", "questions"]);
@@ -403,8 +477,8 @@ describe("a restart during the conversation", () => {
     const p = await project();
     claude.use(script([questions()]));
     const run = await feature(p);
-    await pool.query("DELETE FROM gates WHERE id = $1", [open(run).id]);
     await pool.query("UPDATE conversation_turns SET gate_id = NULL WHERE run_id = $1", [run.id]);
+    await pool.query("DELETE FROM gates WHERE id = $1", [open(run).id]);
     await pool.query("UPDATE runs SET state = 'running' WHERE id = $1", [run.id]);
     const restarted = forgeWith({});
 
@@ -480,7 +554,7 @@ describe("going back to the Griller from an Escalation", () => {
     expect(reopened.prompt).toContain("The wall jump matters too.");
     expect(reopened.prompt).toMatch(/reopened/);
     expect(open(run)).toMatchObject({ kind: "conversation", evidence: "1. Reopened: what about the wall?" });
-    expect(transcript(run)).toMatch(/### Answer\n\nConfirmed\.\n\n## Round 3\n\n### Feedback\n\nThe wall jump matters too\.\n\n## Round 4/);
+    expect(transcript(run)).toMatch(/### Answer\n\nConfirmed\.\n\n### Feedback\n\n> The wall jump matters too\.\n\n## Round 3/);
 
     run = await answer(run, "Yes, include it.");
     run = await confirm(run);

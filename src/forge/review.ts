@@ -92,16 +92,22 @@ export interface ReviewerPromptInput {
   feedbacks: string[];
   /** What was wrong with the Reviewer's previous try, when it is being asked again. */
   problem?: string;
+  /** The summary of what to build that the human confirmed at a Conversation Gate, when the Run had one. */
+  summary?: string | null;
 }
 
+/** What a Review of a Run that was grilled is also read against. */
+const confirmedSummaryNote = (summary: string) => `\n\nThe human confirmed this summary of what to build; review against it:\n\n${summary}`;
+
 /** The Reviewer's prompt: the task, the human's Feedback, the change to read and, on a retry, what was wrong with the last Review. */
-export function reviewerPrompt({ task, defaultBranch, notePath, feedbacks, problem }: ReviewerPromptInput): string {
+export function reviewerPrompt({ task, defaultBranch, notePath, feedbacks, problem, summary }: ReviewerPromptInput): string {
   const base = `origin/${defaultBranch}`;
   let prompt = `Review the change on this Run's branch.
 
 What was asked (the task, which is the spec for this Run):
 
 ${task}`;
+  if (summary) prompt += confirmedSummaryNote(summary);
   if (feedbacks.length) {
     const history = feedbacks.map((f, i) => `${i + 1}. ${f}`).join("\n");
     prompt += `\n\nThe human rejected the Run's earlier work and gave this Feedback, which the change must now satisfy as well (the last is the latest):\n${history}`;
@@ -157,16 +163,18 @@ export interface ConsolidatorPromptInput {
   reviews: ReviewInput[];
   feedbacks: string[];
   problem?: string;
+  summary?: string | null;
 }
 
 /** The Consolidator's prompt: the task, the human's Feedback, both Reviews and the change to check them against. */
-export function consolidatorPrompt({ task, defaultBranch, notePath, reviews, feedbacks, problem }: ConsolidatorPromptInput): string {
+export function consolidatorPrompt({ task, defaultBranch, notePath, reviews, feedbacks, problem, summary }: ConsolidatorPromptInput): string {
   const base = `origin/${defaultBranch}`;
   let prompt = `Consolidate the Reviews of the change on this Run's branch into one.
 
 What was asked (the task, which is the spec for this Run):
 
 ${task}`;
+  if (summary) prompt += confirmedSummaryNote(summary);
   if (feedbacks.length) {
     prompt += `\n\nThe human's Feedback on earlier tries, oldest first (the change must satisfy it):\n\n${feedbacks.map((f, i) => `${i + 1}. ${f}`).join("\n")}`;
   }
@@ -286,13 +294,14 @@ async function runReviewing({ ctx, step, state }: StepRun, spec: ReviewingSpec):
 /** Runs one read-only Reviewer, which reviews the change on its own and gives `pass` or `changes requested`. */
 export async function runReviewer(run: StepRun, seat: ReviewerSeat & { noun?: string }): Promise<Reviewed> {
   const { ctx } = run;
+  const summary = await ctx.records.conversation.confirmedSummary();
   return runReviewing(run, {
     ...seat,
     noun: seat.noun ?? "Reviewer",
     title: reviewerLabel(seat.name),
     instructions: reviewerInstructions(seat.notePath),
     prompt: ({ feedbacks, problem }) =>
-      reviewerPrompt({ task: ctx.run.task, defaultBranch: ctx.defaultBranch, notePath: seat.notePath, feedbacks, problem }),
+      reviewerPrompt({ task: ctx.run.task, defaultBranch: ctx.defaultBranch, notePath: seat.notePath, feedbacks, problem, summary }),
     parse: parseReview,
   });
 }
@@ -300,6 +309,7 @@ export async function runReviewer(run: StepRun, seat: ReviewerSeat & { noun?: st
 /** Runs the read-only Consolidator on the Reviews it is given: it checks them against the code and gives the one Review. */
 export async function runConsolidator(run: StepRun, reviews: ReviewInput[]): Promise<Reviewed> {
   const { ctx } = run;
+  const summary = await ctx.records.conversation.confirmedSummary();
   const reviewed = await runReviewing(run, {
     seat: "consolidator",
     name: "consolidator",
@@ -308,7 +318,7 @@ export async function runConsolidator(run: StepRun, reviews: ReviewInput[]): Pro
     noun: "Consolidator",
     instructions: consolidatorInstructions(CONSOLIDATED_NOTE),
     prompt: ({ feedbacks, problem }) =>
-      consolidatorPrompt({ task: ctx.run.task, defaultBranch: ctx.defaultBranch, notePath: CONSOLIDATED_NOTE, reviews, feedbacks, problem }),
+      consolidatorPrompt({ task: ctx.run.task, defaultBranch: ctx.defaultBranch, notePath: CONSOLIDATED_NOTE, reviews, feedbacks, problem, summary }),
     parse: parseConsolidation,
   });
   if ("stop" in reviewed || reviewed.verdict !== "disagreement") return reviewed;

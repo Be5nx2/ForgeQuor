@@ -5,7 +5,7 @@ import type pg from "pg";
 import type { Runner } from "../runner/runner.js";
 import { bugfixAgent, bugfixWorkflow, developerAgent, developerWorkflow } from "./developer.js";
 import { createConversationRecords } from "./conversation-records.js";
-import { conversationGate, conversationStepType, type ConversationAgent } from "./conversation.js";
+import { createConversationGate, conversationStepType, type ConversationAgent } from "./conversation.js";
 import { featureWorkflow, grillerAgent } from "./feature.js";
 import { runEngine, type StepTypeModule } from "./engine.js";
 import { agentStepType, catalogueOf, checksStepType, gateStepType, publishStepType, type AgentModule } from "./step-types.js";
@@ -291,11 +291,11 @@ export function createForge(deps: ForgeDeps): Forge {
     return [...workflows.values()].find((w) => w.inputs.length === frozen.inputs.length && frozen.inputs.every((i) => w.inputs.includes(i)))?.publication;
   }
   /** The Gate kinds, by kind: each decides its own Gates. */
-  const gateKinds = new Map<GateKind, GateKindModule>([finalGate, escalationGate, reviewGate, conversationGate, ...extensions.flatMap((e) => e.gateKinds)].map((k) => [k.kind, k]));
-  const gateOf = (r: Record<string, any>): Gate => {
+  const gateKinds = new Map<GateKind, GateKindModule>([finalGate, escalationGate, reviewGate, createConversationGate(pool), ...extensions.flatMap((e) => e.gateKinds)].map((k) => [k.kind, k]));
+  const gateOf = async (r: Record<string, any>): Promise<Gate> => {
     const kind = gateKinds.get(r.kind);
     const gate = toGate(r, kind?.actions ?? []);
-    return kind ? { ...gate, actions: offered(kind, gate) } : gate;
+    return kind ? { ...gate, actions: await offered(kind, gate) } : gate;
   };
   /** The Agents a Workflow's Agent Step can name. */
   const agentModules = new Map<string, AgentModule>([developerAgent, bugfixAgent, ...extensions.flatMap((e) => e.agents ?? [])].map((a) => [a.name, a]));
@@ -877,7 +877,7 @@ export function createForge(deps: ForgeDeps): Forge {
         checks: checks.rows.map(toCheck),
         reviews: (await pool.query("SELECT * FROM reviews WHERE run_id = $1 ORDER BY id", [id])).rows.map(toReview),
         conversation: await createConversationRecords(pool, id).all(),
-        gates: await Promise.all(gates.rows.map((g) => withRedo({ ...gateOf(g), verdicts: verdictsOf(Number(g.id)) }))),
+        gates: await Promise.all(gates.rows.map(async (g) => withRedo({ ...(await gateOf(g)), verdicts: verdictsOf(Number(g.id)) }))),
       };
     },
 
@@ -897,7 +897,7 @@ export function createForge(deps: ForgeDeps): Forge {
          FROM gates g JOIN runs r ON r.id = g.run_id JOIN projects p ON p.id = r.project_id
          WHERE g.decided_at IS NULL ORDER BY g.id`,
       );
-      return Promise.all(rows.map(async (r) => ({ ...(await withRedo(gateOf(r))), runTitle: r.run_title, projectName: r.project_name })));
+      return Promise.all(rows.map(async (r) => ({ ...(await withRedo(await gateOf(r))), runTitle: r.run_title, projectName: r.project_name })));
     },
 
     async listApprovedRuns() {
@@ -912,10 +912,10 @@ export function createForge(deps: ForgeDeps): Forge {
     async decideGate({ gateId, action, feedback, verdicts, target, message }) {
       const { rows } = await pool.query("SELECT * FROM gates WHERE id = $1", [gateId]);
       if (!rows[0]) throw new GateError(`No Gate ${gateId}.`);
-      const gate = gateOf(rows[0]);
+      const gate = await gateOf(rows[0]);
       if (gate.decidedAt) throw new GateError(`Gate ${gateId} is already decided.`);
       const kind = gateKinds.get(gate.kind)!;
-      if (!allows(kind, action, gate)) throw new GateError(refusal(kind, action, gate));
+      if (!allows(kind, action, gate.actions)) throw new GateError(refusal(kind, action, gate.actions));
       // The kind validates the decision and says where the Run goes; the core carries it out.
       const outcome = await kind.decide(gate, { action, feedback, verdicts, target, message });
       if (outcome.next === "redo") return redoEscalation(gate, outcome);

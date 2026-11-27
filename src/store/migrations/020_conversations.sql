@@ -10,8 +10,7 @@ CREATE TABLE conversation_turns (
   kind       TEXT NOT NULL,
   body       TEXT NOT NULL,
   session_id TEXT,
-  gate_id    BIGINT,
+  gate_id    BIGINT REFERENCES gates(id),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (run_id, step_id, seq)
 );
-CREATE INDEX conversation_turns_run ON conversation_turns (run_id);

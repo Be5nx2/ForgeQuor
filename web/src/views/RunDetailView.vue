@@ -92,7 +92,7 @@ onUnmounted(() => stopFollowing?.());
       <h3>Conversation</h3>
       <ol class="chat" aria-label="Conversation">
         <li v-for="t in run.conversation" :key="t.id" :class="t.author">
-          <strong>{{ t.author === "agent" ? "Griller" : "You" }}</strong>
+          <strong>{{ t.author === "agent" ? (run.steps.find((s) => s.id === t.stepId)?.detail ?? "Agent").replace(/^./, (c) => c.toUpperCase()) : "You" }}</strong>
           <span class="badge">{{ { questions: "questions", summary: "proposed summary", answer: "answer", confirm: "confirmed", feedback: "feedback" }[t.kind] }}</span>
           <pre>{{ t.body }}</pre>
         </li>

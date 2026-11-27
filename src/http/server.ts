@@ -177,6 +177,7 @@ export async function createServer(deps: {
     if (action !== "approve" && action !== "reject" && action !== "abandon" && action !== "judge" && action !== "retry" && action !== "go_back" && action !== "answer" && action !== "confirm") {
       return reply.code(400).send({ error: "action must be approve, reject, judge, retry, go_back, answer, confirm or abandon." });
     }
+    if (message !== undefined && typeof message !== "string") return reply.code(400).send({ error: "message must be text." });
     try {
       return await deps.forge.decideGate({ gateId: Number(req.params.id), action, feedback, verdicts, target, message });
     } catch (e) {

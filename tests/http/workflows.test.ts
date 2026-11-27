@@ -86,3 +86,13 @@ describe("the start Run route", () => {
     expect(await res.json()).toEqual({ error: 'The review is solo or duo, not "trio".' });
   });
 });
+
+describe("the Gate decision route", () => {
+  it("answers 400 for a message that is not text", async () => {
+    const address = await serve({ async decideGate() { throw new Error("must not be reached"); } });
+
+    const res = await fetch(`${address}/api/gates/3/decision`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "answer", message: { not: "text" } }) });
+
+    expect(res.status).toBe(400);
+  });
+});
