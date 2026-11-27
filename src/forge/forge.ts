@@ -15,6 +15,7 @@ import { describeInvalid, resolveWorkflows, validateWorkflowText, type ResolvedW
 import { DEFAULT_REVIEW_MODE, REVIEW_MODES, type WorkflowDefinition, type WorkflowInput } from "./workflow-definition.js";
 import { publishPullRequest } from "./publish.js";
 import { realEvery, type Every } from "./clock.js";
+import { silentNotifier, type Notifier } from "./notifier.js";
 import { createQuotaKeeper } from "./quota.js";
 import { createRunRecords, toReview } from "./run-records.js";
 import { reviewStepType } from "./review.js";
@@ -170,6 +171,8 @@ export interface ForgeDeps {
   now?: () => Date;
   /** The timer, so tests can move time: runs a task every so many milliseconds. Default: the real one. */
   every?: Every;
+  /** Tells the human a Run needs them (Gate, Escalation, Quota Pause) or ended outside Forgequor. Default: a silent one. */
+  notifier?: Notifier;
 }
 
 const COLUMNS =
@@ -355,6 +358,17 @@ export function createForge(deps: ForgeDeps): Forge {
     }
   }
   const changed = (runId: number) => emit({ type: "changed", runId });
+  const notifier = deps.notifier ?? silentNotifier;
+  /** Notifies the human of what happened to a Run, naming it. Fire-and-forget: a failing Notifier never changes a Run. */
+  async function notifyRun(runId: number, what: string) {
+    try {
+      const { rows } = await pool.query("SELECT title FROM runs WHERE id = $1", [runId]);
+      if (!rows[0]) return;
+      await notifier.notify("Forgequor", `Run #${runId} "${rows[0].title}": ${what}`);
+    } catch (e: any) {
+      console.error(`Run ${runId}: could not notify:`, e?.message ?? e);
+    }
+  }
   /** Cancels what a Run is doing (its Workflow's Step or its Check) when the human abandons it. */
   const stoppers = new Map<number, AbortController>();
   /** The tail of the git setup queue of each repository, by path. */
@@ -381,12 +395,13 @@ export function createForge(deps: ForgeDeps): Forge {
 
   /** Opens a Gate and makes the Run Waiting, unless the Run was abandoned meanwhile. */
   async function openGate(runId: number, kind: GateKind, reason: string, evidence?: string, step?: string) {
-    await pool.query(
+    const opened = await pool.query(
       `WITH r AS (UPDATE runs SET state = 'waiting', updated_at = now() WHERE id = $1 AND state = 'running' RETURNING id, iteration)
        INSERT INTO gates (run_id, iteration, kind, reason, evidence, step) SELECT id, iteration, $2, $3, $4, $5 FROM r`,
       [runId, kind, reason, evidence ?? null, step ?? null],
     );
     changed(runId);
+    if (opened.rowCount) await notifyRun(runId, kind === "escalation" ? `Escalation: ${reason}` : `${kind} Gate open`);
   }
 
   /** False once the human abandoned the Run while it was being worked on. */
@@ -645,11 +660,15 @@ export function createForge(deps: ForgeDeps): Forge {
   /** The Runner's Quota ran out: the Run waits for the reset, keeping its slot. */
   async function pause(runId: number, resetsAt: Date | null) {
     const resumeAt = resetsAt ?? new Date(now().getTime() + QUOTA_RETRY_MS);
-    await pool.query("UPDATE runs SET state = 'paused', resume_at = $2, updated_at = now() WHERE id = $1 AND state = 'running'", [
+    const paused = await pool.query("UPDATE runs SET state = 'paused', resume_at = $2, updated_at = now() WHERE id = $1 AND state = 'running'", [
       runId,
       resumeAt,
     ]);
     changed(runId);
+    if (paused.rowCount) {
+      const until = resetsAt ? ` until ${resetsAt.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}` : "";
+      await notifyRun(runId, `paused on an exhausted Quota${until}`);
+    }
   }
 
   /** The Run's work is done and its pull request is open: Approved, unless it was abandoned meanwhile. Its slot is then free. */
@@ -1064,7 +1083,10 @@ export function createForge(deps: ForgeDeps): Forge {
       for (const r of rows) {
         try {
           const state = await deps.codeHost.pullRequestState({ owner: r.remote_owner, repo: r.remote_name, number: r.pr_number });
-          if (state !== "open" && (await settle(Number(r.id), state, ["approved"]))) await archive(Number(r.id));
+          if (state !== "open" && (await settle(Number(r.id), state, ["approved"]))) {
+            await notifyRun(Number(r.id), `pull request ${state}`);
+            await archive(Number(r.id));
+          }
         } catch (e: any) {
           console.error(`Run ${r.id}: could not read its pull request:`, e?.message ?? e);
         }

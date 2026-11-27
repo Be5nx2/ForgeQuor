@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createGhCodeHost } from "./codehost/gh.js";
 import { createForge } from "./forge/forge.js";
+import { notifierFromEnv } from "./forge/notifier.js";
 import { createClaudeRunner } from "./runner/claude.js";
 import { createCodexRunner } from "./runner/codex.js";
 import { createServer } from "./http/server.js";
@@ -53,6 +54,8 @@ const forge = createForge({
   runner: createClaudeRunner(),
   artistRunner: createCodexRunner(),
   codeHost: createGhCodeHost(),
+  // A macOS notification when a Run needs the human; FORGEQUOR_NOTIFICATIONS=off silences it.
+  notifier: notifierFromEnv(process.env),
   worktreesRoot: process.env.FORGEQUOR_WORKTREES ?? join(homedir(), ".forgequor", "worktrees"),
   // FORGEQUOR_<SEAT>_RUNNER and FORGEQUOR_<SEAT>_MODEL per Agent seat, such as FORGEQUOR_DEVELOPER_MODEL or FORGEQUOR_REVIEWER_B_RUNNER.
   seats: seatSettingsFromEnv(process.env),

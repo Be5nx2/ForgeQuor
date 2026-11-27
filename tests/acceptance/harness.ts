@@ -76,6 +76,7 @@ export async function startApp(): Promise<App> {
       FORGEQUOR_PORT: String(BA_PORT),
       FORGEQUOR_WORKTREES: worktrees,
       FORGEQUOR_PR_POLL_SECONDS: "5",
+      FORGEQUOR_NOTIFICATIONS: "off",
       ...claudeSeats(),
       FORGEQUOR_STEP_TIMEOUT_MINUTES: "15",
       FORGEQUOR_CHECK_TIMEOUT_MINUTES: "2",
