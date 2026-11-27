@@ -1159,3 +1159,93 @@ describe("an assets Run cut short", () => {
     expect(heard.filter((u) => u.type === "changed").length).toBeGreaterThanOrEqual(4);
   });
 });
+
+describe("what an assets Run tells the human (M2 review follow-ups)", () => {
+  const OLD = "assets/art/sprites/hero-idle.png";
+
+  it("lists each Asset's palette warnings in the Review Brief", async () => {
+    const { project } = await projectWithRemote({ artText: "# Art\n\n## Palette\n- #FF0000 red\n" });
+    artist.use((step) => drawing((x) => (x === 0 && targetOf(step).includes("hero") ? [1, 2, 3, 255] : [255, 0, 0, 255]))(step));
+    const waiting = await startAssets(project);
+
+    await judge(waiting);
+    await forge.whenIdle();
+
+    const [brief] = codeHost.pullRequests[0]!.comments;
+    expect(brief).toMatch(/Palette warnings/);
+    expect(brief).toMatch(/Hero Idle[^\n]*1 colour outside the palette: #010203/);
+    expect(brief).not.toMatch(/grass[^\n]*outside the palette/);
+  });
+
+  it("writes no palette warning section when no Asset has one", async () => {
+    const { project } = await projectWithRemote();
+    artist.use(drawing());
+    const waiting = await startAssets(project, [hero]);
+
+    await judge(waiting);
+    await forge.whenIdle();
+
+    expect(codeHost.pullRequests[0]!.comments[0]).not.toMatch(/Palette warnings/);
+  });
+
+  it("records each Gate's Iteration, and shows the verdicts' Feedback as the Feedback that started the next Iteration", async () => {
+    const { project } = await projectWithRemote();
+    artist.use(drawing());
+    const first = await startAssets(project);
+
+    await judge(first, { "Hero Idle": "Make the hero taller.", grass: "Greener." });
+    await forge.whenIdle();
+    const run = await forge.getRun(first.id);
+
+    expect(run.gates.map((g) => [g.kind, g.iteration])).toEqual([["asset", 1], ["asset", 2]]);
+    expect(run.iterations).toEqual([
+      { number: 1, feedback: null },
+      { number: 2, feedback: "Hero Idle: Make the hero taller.\ngrass: Greener." },
+    ]);
+  });
+
+  it("exposes each Artist attempt with what the Asset Checks found", async () => {
+    const { project } = await projectWithRemote();
+    artist.use((step) =>
+      artist.steps.length === 1 ? { status: "succeeded", summary: "Done!" } : artist.steps.length === 2 ? write(step, makePng(32, 32)) : drawing()(step),
+    );
+
+    const run = await startAssets(project, [hero]);
+
+    const attempts = run.assets[0]!.attempts;
+    expect(attempts.map((a) => [a.iteration, a.attempt, a.written])).toEqual([[1, 1, false], [1, 2, true], [1, 3, true]]);
+    expect(attempts[0]!.failures).toEqual([]);
+    expect(attempts[1]!.failures.join("\n")).toContain("expected exactly 16x16");
+    expect(attempts[2]!.failures).toEqual([]);
+    expect(attempts.every((a) => Array.isArray(a.warnings))).toBe(true);
+  });
+
+  it("keeps handing the Replaced Art to the Artist as a Style Reference in every Iteration", async () => {
+    const { project } = await projectWithRemote({ files: { [OLD]: "old art" } });
+    artist.use(drawing());
+    const first = await startAssets(project, [{ ...hero, replace: true }]);
+
+    for (const feedback of ["Taller.", "Bluer."]) {
+      await judge(first, { "Hero Idle": feedback });
+      await forge.whenIdle();
+    }
+
+    expect(artist.steps).toHaveLength(3);
+    for (const step of artist.steps) {
+      expect(step.prompt).toMatch(/replacing an existing Asset/);
+      expect((step.images ?? []).some((image) => image.endsWith(`replaced/${first.assets[0]!.id}.png`) && readFileSync(image, "utf8") === "old art")).toBe(true);
+    }
+  });
+
+  it("caps one Asset at 3 Artist Steps per Iteration, whatever went wrong with each", async () => {
+    const { project } = await projectWithRemote();
+    artist.use((step) => (artist.steps.length === 1 ? { status: "succeeded", summary: "Done!" } : write(step, makePng(8, 8))));
+
+    const run = await startAssets(project, [hero]);
+
+    expect(artist.steps).toHaveLength(3);
+    expect(run.gates).toMatchObject([{ kind: "escalation" }]);
+    expect(run.gates[0]!.reason).toContain("Hero Idle");
+    expect(run.gates[0]!.reason).toContain("3 attempts");
+  });
+});

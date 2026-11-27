@@ -101,6 +101,8 @@ export interface CheckResult {
 export interface Gate {
   id: number;
   runId: number;
+  /** The Iteration of its Run the Gate was opened in. */
+  iteration: number;
   kind: GateKind;
   reason: string;
   evidence: string | null;
@@ -360,6 +362,7 @@ function toGate(r: Record<string, any>): Gate {
   return {
     id: Number(r.id),
     runId: Number(r.run_id),
+    iteration: r.iteration,
     kind: r.kind,
     reason: r.reason,
     evidence: r.evidence,
@@ -424,8 +427,8 @@ export function createForge(deps: ForgeDeps): Forge {
   /** Opens a Gate and makes the Run Waiting, unless the Run was abandoned meanwhile. */
   async function openGate(runId: number, kind: GateKind, reason: string, evidence?: string) {
     await pool.query(
-      `WITH r AS (UPDATE runs SET state = 'waiting', updated_at = now() WHERE id = $1 AND state = 'running' RETURNING id)
-       INSERT INTO gates (run_id, kind, reason, evidence) SELECT id, $2, $3, $4 FROM r`,
+      `WITH r AS (UPDATE runs SET state = 'waiting', updated_at = now() WHERE id = $1 AND state = 'running' RETURNING id, iteration)
+       INSERT INTO gates (run_id, iteration, kind, reason, evidence) SELECT id, iteration, $2, $3, $4 FROM r`,
       [runId, kind, reason, evidence ?? null],
     );
     changed(runId);
@@ -800,12 +803,19 @@ export function createForge(deps: ForgeDeps): Forge {
       const attempts = await pool.query("SELECT * FROM step_attempts WHERE run_id = $1 ORDER BY id", [id]);
       const checks = await pool.query("SELECT * FROM check_results WHERE run_id = $1 ORDER BY id", [id]);
       const gates = await pool.query("SELECT * FROM gates WHERE run_id = $1 ORDER BY id", [id]);
-      const iterations: Iteration[] = [{ number: 1, feedback: null }];
-      for (const g of gates.rows.filter((g) => g.decision === "reject")) iterations.push({ number: iterations.length + 1, feedback: g.feedback });
       const verdicts = await loadGateVerdicts(pool, gates.rows.map((g) => Number(g.id)));
+      const assets = await loadAssets(pool, id);
+      // Each rejected Gate started the Iteration after its own. An Asset Gate's Feedback is that of its rejected verdicts.
+      const iterations: Iteration[] = [{ number: 1, feedback: null }];
+      for (const g of gates.rows.filter((g) => g.decision === "reject")) {
+        const perAsset = (verdicts.get(Number(g.id)) ?? [])
+          .filter((v) => v.verdict === "reject")
+          .map((v) => `${assets.find((a) => a.id === v.assetId)?.name ?? `Asset ${v.assetId}`}: ${v.feedback}`);
+        iterations.push({ number: g.iteration + 1, feedback: g.feedback ?? (perAsset.join("\n") || null) });
+      }
       return {
         ...toRun(rows[0]),
-        assets: await loadAssets(pool, id),
+        assets,
         iterations,
         attempts: attempts.rows.map(toAttempt),
         checks: checks.rows.map(toCheck),
