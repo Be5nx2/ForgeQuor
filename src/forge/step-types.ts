@@ -1,5 +1,7 @@
 import type { StepOutcome, StepTypeModule } from "./engine.js";
 import { describeFailure, passed, runChecks } from "./checks.js";
+import { reviewSection } from "./review.js";
+import { requireSeat, type SeatName } from "./seats.js";
 import { runAgentStep } from "./step.js";
 import type { GateKindModule } from "./gates.js";
 import type { GateKind } from "./types.js";
@@ -20,7 +22,7 @@ export interface AgentModule {
   /** The name a Workflow gives in `agent:`, and the Step's name in the Run's record. */
   name: string;
   /** Whose Runner and model it works through. */
-  seat: keyof WorkflowContext["agents"];
+  seat: SeatName;
   instructions: string;
   /** The inputs it produces for the Steps after it, which `when` can then test. */
   produces?: readonly WorkflowInput[];
@@ -54,11 +56,8 @@ export function agentStepType(agents: ReadonlyMap<string, AgentModule>): StepTyp
       if (step.type !== "agent") throw new Error(`Step "${step.id}" is not an Agent Step.`);
       const agent = agents.get(step.agent);
       if (!agent) throw new Error(`Step "${step.id}" names an unknown Agent "${step.agent}".`);
-      const seat = ctx.agents[agent.seat];
-      if (!seat) {
-        await ctx.openGate("escalation", `The ${capitalised(agent.name)} has no Runner, so nothing was generated.`);
-        return stop;
-      }
+      const seat = await requireSeat(ctx, agent.seat, capitalised(agent.name));
+      if (!seat) return stop;
       const attempt: AttemptInfo = { number: state.attempts + 1, sentBack: state.sentBack };
       if (agent.before && !(await agent.before(ctx, attempt))) return stop;
       const result = await runAgentStep(ctx, seat, {
@@ -110,7 +109,10 @@ export function publishStepType(publicationOf: (run: WorkflowContext["run"]) => 
       await ctx.openGate("escalation", "A commit adds Run Notes, so the branch was not pushed.", notes.join("\n"));
       return stop;
     }
-    const brief = publication ? await publication.brief(ctx) : (readReviewBrief(ctx.worktreePath) ?? "The Developer wrote no Review Brief for this pull request.");
+    const written = publication ? await publication.brief(ctx) : (readReviewBrief(ctx.worktreePath) ?? "The Developer wrote no Review Brief for this pull request.");
+    // A Run that was reviewed says what the Review found, after what the Developer wrote.
+    const section = reviewSection(await ctx.records.finalReview());
+    const brief = section ? `${written.trimEnd()}\n\n${section}` : written;
     const pr = await ctx.publishPullRequest(() => brief);
     return pr ? done : stop;
   },

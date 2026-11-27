@@ -23,13 +23,15 @@ export interface WorkflowKit {
 }
 
 const sameInputs = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((i) => b.includes(i));
+/** The review mode a Workflow offers, as the option carries it: absent for a Workflow without a review. */
+const reviewDefault = (d: WorkflowDefinition) => (d.review ? { reviewDefault: d.review } : {});
 const error = (path: string, message: string): DefinitionError => ({ path, message });
 
 /** What a parsed Project Workflow still needs to be launchable here, as errors. */
 function unsupported(definition: WorkflowDefinition, stem: string, kit: WorkflowKit): DefinitionError[] {
   const errors: DefinitionError[] = [];
   if (definition.name !== stem) errors.push(error("name", `The Workflow is called "${definition.name}" but its file is ${stem}.yaml: they must match.`));
-  if (!definition.inputs.length) errors.push(error("inputs", "A Workflow needs at least one launch input (task or assets), so that the Run form can ask for it."));
+  if (!definition.inputs.length) errors.push(error("inputs", "A Workflow needs at least one launch input (task, assets or review), so that the Run form can ask for it."));
   else if (!kit.builtIn.some((w) => sameInputs(w.inputs, definition.inputs))) {
     errors.push(error("inputs", `Forgequor has no way to launch a Run that takes exactly ${definition.inputs.join(" and ")}.`));
   }
@@ -49,7 +51,7 @@ function unsupported(definition: WorkflowDefinition, stem: string, kit: Workflow
 export async function resolveWorkflows(repoRoot: string, branch: string | null, kit: WorkflowKit): Promise<ResolvedWorkflow[]> {
   const resolved = new Map<string, ResolvedWorkflow>();
   for (const w of kit.builtIn) {
-    resolved.set(w.name, { option: { name: w.name, description: w.definition.description, inputs: [...w.inputs], origin: "built-in", errors: [], file: null }, workflow: w });
+    resolved.set(w.name, { option: { name: w.name, description: w.definition.description, inputs: [...w.inputs], ...reviewDefault(w.definition), origin: "built-in", errors: [], file: null }, workflow: w });
   }
   if (branch === null) return [...resolved.values()];
   const files = (await listInBranch(repoRoot, branch)).flatMap((path) => {
@@ -67,7 +69,7 @@ export async function resolveWorkflows(repoRoot: string, branch: string | null, 
     const { definition } = parsed;
     const template = kit.builtIn.find((w) => sameInputs(w.inputs, definition.inputs))!;
     const workflow: Workflow = { ...template, name: definition.name, inputs: definition.inputs, definition };
-    resolved.set(stem, { option: { name: stem, description: definition.description, inputs: definition.inputs, origin: "project", errors: [], file: path }, workflow });
+    resolved.set(stem, { option: { name: stem, description: definition.description, inputs: definition.inputs, ...reviewDefault(definition), origin: "project", errors: [], file: path }, workflow });
   }
   return [...resolved.values()];
 }

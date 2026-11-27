@@ -2,7 +2,8 @@ import type pg from "pg";
 import type { Runner } from "../runner/runner.js";
 import type { AssetRequest, GateKind, Project, Run, RunUpdate } from "./types.js";
 import type { RunRecords } from "./run-records.js";
-import type { WorkflowDefinition, WorkflowInput } from "./workflow-definition.js";
+import type { SeatName } from "./seats.js";
+import type { ReviewMode, WorkflowDefinition, WorkflowInput } from "./workflow-definition.js";
 
 /** The Runner an Agent works through, and the model it is set to. */
 export interface AgentSeat {
@@ -18,6 +19,8 @@ export interface RunInput {
   task?: string;
   title?: string;
   assets?: AssetRequest[];
+  /** How a Workflow with a `review` Step is reviewed; the Workflow's own default when omitted. */
+  review?: ReviewMode;
 }
 
 /** The repository a Run is being launched against, as its launch checks see it. */
@@ -54,8 +57,10 @@ export interface WorkflowContext {
   defaultBranch: string;
   /** Aborted when the human abandons the Run: whatever is running must stop. */
   stop: AbortSignal;
-  /** The Runner and model of each Agent. The Artist's is missing when Forgequor has no Runner for it. */
-  agents: { developer: AgentSeat; artist?: AgentSeat };
+  /** The Runner and model of each Agent seat. A seat is missing when it has no usable Runner (see `seatProblems`). */
+  agents: Partial<Record<SeatName, AgentSeat>>;
+  /** Why each missing seat has no Runner, as the Escalation tells the human. */
+  seatProblems?: Partial<Record<SeatName, string>>;
   stepTimeoutMs: number;
   checkTimeoutMs?: number;
   /** Tells subscribers the Run changed. */

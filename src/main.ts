@@ -8,6 +8,7 @@ import { createClaudeRunner } from "./runner/claude.js";
 import { createCodexRunner } from "./runner/codex.js";
 import { createServer } from "./http/server.js";
 import { killAllProcessGroups } from "./process-group.js";
+import { seatSettingsFromEnv } from "./forge/seats.js";
 import { loadEnvFile } from "./startup/env.js";
 import { checkTools } from "./startup/preflight.js";
 import { createPool, DEFAULT_DATABASE_URL, migrate } from "./store/db.js";
@@ -53,8 +54,8 @@ const forge = createForge({
   artistRunner: createCodexRunner(),
   codeHost: createGhCodeHost(),
   worktreesRoot: process.env.FORGEQUOR_WORKTREES ?? join(homedir(), ".forgequor", "worktrees"),
-  developerModel: process.env.FORGEQUOR_DEVELOPER_MODEL,
-  artistModel: process.env.FORGEQUOR_ARTIST_MODEL,
+  // FORGEQUOR_<SEAT>_RUNNER and FORGEQUOR_<SEAT>_MODEL per Agent seat, such as FORGEQUOR_DEVELOPER_MODEL or FORGEQUOR_REVIEWER_B_RUNNER.
+  seats: seatSettingsFromEnv(process.env),
   stepTimeoutMs: minutesAsMs("FORGEQUOR_STEP_TIMEOUT_MINUTES"),
   checkTimeoutMs: minutesAsMs("FORGEQUOR_CHECK_TIMEOUT_MINUTES"),
 });

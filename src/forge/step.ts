@@ -12,6 +12,8 @@ export interface AgentStep {
   assetId?: number;
   instructions: string;
   prompt: string;
+  /** The Step must not change the worktree: the Runner is asked to keep it read-only. */
+  readonly?: boolean;
   /** Images shown to the Agent with the prompt (absolute paths). */
   images?: string[];
 }
@@ -49,7 +51,7 @@ export async function runAgentStep(ctx: WorkflowContext, seat: AgentSeat, step: 
   let result: StepResult;
   try {
     result = await seat.runner.run(
-      { instructions: step.instructions, prompt: step.prompt, images: step.images, cwd: worktreePath, model: seat.model, signal: abort.signal },
+      { instructions: step.instructions, prompt: step.prompt, images: step.images, readonly: step.readonly, cwd: worktreePath, model: seat.model, signal: abort.signal },
       (e) => {
         if (e.raw) log.push(e.raw);
         ctx.emit({ type: "progress", runId: run.id, attemptId, kind: e.kind, summary: e.summary });

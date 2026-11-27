@@ -125,6 +125,17 @@ onUnmounted(() => stopFollowing?.());
       </li>
     </ul>
 
+    <template v-if="run.reviews.length">
+      <h3>Reviews</h3>
+      <ul>
+        <li v-for="r in run.reviews" :key="r.id">
+          <strong>{{ r.author }}</strong> · iteration {{ r.iteration }} · attempt {{ r.attempt }} ·
+          <span class="badge">{{ r.verdict }}</span><span v-if="r.final" class="badge">final</span>
+          <pre>{{ r.body }}</pre>
+        </li>
+      </ul>
+    </template>
+
     <h3>Checks</h3>
     <p v-if="!run.checks.length" class="muted">None ran.</p>
     <ul>

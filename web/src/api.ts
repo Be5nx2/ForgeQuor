@@ -10,6 +10,7 @@ export type ArtInfo = Json<Server.ArtInfo>;
 export type WorkflowOption = Json<Server.WorkflowOption>;
 export type WorkflowList = Json<Server.WorkflowList>;
 export type AssetKind = Server.AssetKind;
+export type ReviewMode = Server.ReviewMode;
 export type AssetStatus = Server.AssetStatus;
 export type AssetRequest = Json<Server.AssetRequest>;
 export type Asset = Json<Server.Asset>;

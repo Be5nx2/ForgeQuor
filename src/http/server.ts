@@ -12,6 +12,7 @@ import {
   type AssetRequest,
   type Forge,
   type GateAction,
+  type ReviewMode,
   type Verdict,
   type RunState,
 } from "../forge/forge.js";
@@ -109,14 +110,14 @@ export async function createServer(deps: {
       state: req.query.state || undefined,
     }),
   );
-  app.post<{ Body: { projectId?: number; task?: string; title?: string; trackerRef?: string; workflow?: string; assets?: AssetRequest[] } }>(
+  app.post<{ Body: { projectId?: number; task?: string; title?: string; trackerRef?: string; workflow?: string; assets?: AssetRequest[]; review?: ReviewMode } }>(
     "/api/runs",
     async (req, reply) => {
-      const { projectId, task, title, trackerRef, workflow, assets } = req.body ?? {};
+      const { projectId, task, title, trackerRef, workflow, assets, review } = req.body ?? {};
       // An `assets` Run takes Asset Requests instead of a task; the Forge core says what is wrong with them.
       if (!projectId || (!task?.trim() && !assets)) return reply.code(400).send({ error: "projectId and a task (or Asset Requests) are required." });
       try {
-        return reply.code(201).send(await deps.forge.startRun({ projectId, task, title, trackerRef, workflow, assets }));
+        return reply.code(201).send(await deps.forge.startRun({ projectId, task, title, trackerRef, workflow, assets, review }));
       } catch (e: any) {
         return reply.code(422).send({ error: e.message });
       }
