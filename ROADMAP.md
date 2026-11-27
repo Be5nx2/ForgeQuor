@@ -21,7 +21,7 @@ The engine behind every Workflow, with no change visible to the human: a deeper 
     - an Approved Run no longer counts against its Project's concurrency limit, and becoming Approved starts the next Queued Run;
     - "Waiting for you" gains a "Waiting for your merge" list: every Approved Run, all Projects, with its pull-request link, until merged or closed;
     - the Runs list shows every Run in every state (the human once could not find a Run there; check it by hand and fix what hides one).
-- [ ] `m3-00b` **M2 review follow-ups**: the small gaps the M2 branch review found (listed below under "M2 review follow-ups").
+- [x] `m3-00b` **M2 review follow-ups**: the small gaps the M2 branch review found (listed below under "M2 review follow-ups").
   - Spec: `docs/specs/m3a-workflow-engine.md`
   - Blocked by: `m3-00a`
 - [ ] `m3-01` **One Step executor, a small context**: how a Step's result becomes progress, an Escalation or a Pause is written once and used by both Workflows.
@@ -213,7 +213,7 @@ Griller with a **Conversation Gate** (it writes the Project's glossary and ADRs 
 - Produce a Run's Asset Requests in parallel instead of one after the other (image generation burns Quota 3-5x faster, so sequential first).
 - Animated preview of an Animation Strip in the gallery (frames played in a loop, larger than the 4x a 64 px strip gets today), to judge the motion (real strip test, m2-07).
 
-- M2 review follow-ups (2026-11-27), small, to fix in `m3-00b`:
+- M2 review follow-ups (2026-11-27), small, fixed in `m3-00b`:
   - the `assets` Review Brief omits palette warnings (spec story 46);
   - Gates do not record their Iteration, so an `assets` Iteration shows no Feedback in the Run detail;
   - a read Run does not expose each attempt's Asset Check failures;
