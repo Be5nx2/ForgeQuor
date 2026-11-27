@@ -1,6 +1,6 @@
 :root { color-scheme: dark; }
 body { margin: 0; font-family: Inter, system-ui, sans-serif; background: #080f19; color: #f0f5fa; }
-main { max-width: 52rem; margin: 0 auto; padding: 2rem 1rem; }
+main { max-width: 52rem; margin: 0 auto; padding: 2rem 1rem; overflow-wrap: anywhere; }
 h1 { letter-spacing: 0.15em; }
 h1 span { color: #ff8c24; }
 h2 { color: #a5e4ff; }
@@ -33,3 +33,5 @@ form.stack input:not([type="checkbox"]):not([type="number"]) { flex: none; width
 form.stack label.fill { flex-direction: row; align-items: center; }
 
 .compare { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; }
+form.filters { flex-wrap: wrap; }
+form.filters select { flex: 1 1 12rem; min-width: 0; max-width: 100%; }

@@ -396,6 +396,8 @@ export function createForge(deps: ForgeDeps): Forge {
       }
       if (state === "abandoned") {
         await client.query("UPDATE gates SET decided_at = now(), decision = 'abandon' WHERE run_id = $1 AND decided_at IS NULL", [runId]);
+        // What was running (a Step at work, a Gate waiting) did not finish.
+        await client.query("UPDATE step_states SET status = 'failed' WHERE run_id = $1 AND status = 'running'", [runId]);
       }
       await client.query("COMMIT");
       projectId = Number(moved.rows[0].project_id);
@@ -574,13 +576,15 @@ export function createForge(deps: ForgeDeps): Forge {
     if (!definition) return [];
     const { rows } = await pool.query("SELECT step, status, attempts FROM step_states WHERE run_id = $1 AND iteration = $2", [run.id, run.iteration]);
     const recorded = new Map(rows.map((r) => [r.step as string, r]));
+    // A Run from before M3a has no recorded Steps; once approved, merged or closed it went through all of them.
+    const wentThrough = !rows.length && ["approved", "merged", "closed"].includes(run.state);
     return definition.steps.map((s) => ({
       id: s.id,
       type: s.type,
       detail: s.type === "agent" ? s.agent : s.type === "gate" ? s.gate : null,
       needs: s.needs,
       iteration: run.iteration,
-      status: recorded.get(s.id)?.status ?? "waiting",
+      status: recorded.get(s.id)?.status ?? (wentThrough ? "done" : "waiting"),
       attempts: recorded.get(s.id)?.attempts ?? 0,
     }));
   }
