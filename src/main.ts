@@ -49,6 +49,18 @@ function minutesAsMs(name: string): number | undefined {
   return minutes * 60_000;
 }
 
+/** A setting in days; unset leaves the default, and a bad value is refused. */
+function archiveDays(): number | undefined {
+  const raw = process.env.FORGEQUOR_ARCHIVE_DAYS;
+  if (!raw) return undefined;
+  const days = Number(raw);
+  if (!Number.isFinite(days) || days <= 0) {
+    console.error(`FORGEQUOR_ARCHIVE_DAYS must be a positive number of days, got "${raw}".`);
+    process.exit(1);
+  }
+  return days;
+}
+
 const forge = createForge({
   pool,
   runner: createClaudeRunner(),
@@ -61,10 +73,14 @@ const forge = createForge({
   seats: seatSettingsFromEnv(process.env),
   stepTimeoutMs: minutesAsMs("FORGEQUOR_STEP_TIMEOUT_MINUTES"),
   checkTimeoutMs: minutesAsMs("FORGEQUOR_CHECK_TIMEOUT_MINUTES"),
+  // Archived Runs are deleted after FORGEQUOR_ARCHIVE_DAYS days (default 60).
+  archiveDays: archiveDays(),
 });
 const POLL_MS = Number(process.env.FORGEQUOR_PR_POLL_SECONDS ?? 60) * 1000;
 // Runs that were Running restart their Step, Queued Runs start, Approved Runs are followed again.
 forge.recoverAfterRestart().catch((e) => console.error("Recovery after restart failed:", e));
+// Archived Runs older than FORGEQUOR_ARCHIVE_DAYS are deleted now and every 24 hours.
+forge.startPurging().catch((e) => console.error("Purging the archived Runs failed:", e));
 // Claude's Quota is read now and every 5 minutes (and after each of its Steps), at no cost to it.
 forge.startQuotaReading().catch((e) => console.error("Reading the Quota failed:", e));
 setInterval(() => {

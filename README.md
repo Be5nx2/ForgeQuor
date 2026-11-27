@@ -94,6 +94,7 @@ All settings are optional environment variables. Set them in the shell that runs
 | `FORGEQUOR_<SEAT>_RUNNER` | per seat: Claude Code, except `REVIEWER_B` and `ARTIST` (Codex) | Runner (`claude` or `codex`) of an Agent seat. Seats: `GRILLER`, `SPEC_WRITER`, `ARCHITECT`, `DEVELOPER`, `REVIEWER_A`, `REVIEWER_B`, `CONSOLIDATOR`, `ARTIST`. A seat whose Runner cannot be started opens an Escalation naming it when a Step needs it |
 | `FORGEQUOR_<SEAT>_MODEL` | the Runner's default | Model of an Agent seat, such as `FORGEQUOR_DEVELOPER_MODEL` or `FORGEQUOR_ARTIST_MODEL` |
 | `FORGEQUOR_STEP_TIMEOUT_MINUTES` | `60` | An Agent's Step running longer is killed and escalated |
+| `FORGEQUOR_ARCHIVE_DAYS` | `60` | An archived Run is deleted, with everything that belongs to it, after this many days |
 | `FORGEQUOR_CHECK_TIMEOUT_MINUTES` | `10` | A Check command running longer is killed and counts as failed |
 
 ### Tests

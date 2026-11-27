@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
@@ -206,6 +206,29 @@ export async function removeRunWorktree(opts: { repoRoot: string; worktreePath: 
     }
   }
   return problems;
+}
+
+/**
+ * The Run folders (`run-<id>`) found two levels under the worktrees root, where Forgequor puts them
+ * (`<root>/<project>-<id>/run-<id>`): real folders only, never a link, and nothing else.
+ */
+export function runFoldersUnder(root: string): Array<{ runId: number; path: string; projectId: number | null }> {
+  const found: Array<{ runId: number; path: string; projectId: number | null }> = [];
+  const folders = (dir: string) => {
+    try {
+      return readdirSync(dir).filter((n) => lstatSync(join(dir, n)).isDirectory());
+    } catch {
+      return [];
+    }
+  };
+  for (const projectDir of folders(root)) {
+    const projectId = /-(\d+)$/.exec(projectDir)?.[1];
+    for (const name of folders(join(root, projectDir))) {
+      const m = /^run-(\d+)$/.exec(name);
+      if (m) found.push({ runId: Number(m[1]), path: join(root, projectDir, name), projectId: projectId ? Number(projectId) : null });
+    }
+  }
+  return found;
 }
 
 /** Pushes the Run's branch to `origin`. */

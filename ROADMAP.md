@@ -181,7 +181,7 @@ Griller with a **Conversation Gate** (it writes the Project's glossary and ADRs 
     - an Archived Run's detail still shows its Run Notes, reviews, Gates, transcripts and attempts, and "files removed, see the pull request" where it would read the worktree (Asset previews included);
     - the Runs tab hides Archived Runs by default, with a filter to show them;
     - Forge core tests with temp repos and bare remotes cover each outcome and a worktree already gone.
-- [ ] `m4-02` **Startup catch-up and purge**: old finished Runs are archived and, after the delay, deleted.
+- [x] `m4-02` **Startup catch-up and purge**: old finished Runs are archived and, after the delay, deleted.
   - Spec: `docs/specs/m4-comfort.md`
   - Blocked by: `m4-01`
   - Acceptance:
