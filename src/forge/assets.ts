@@ -8,7 +8,7 @@ import { runAgentStep } from "./step.js";
 import type { RunInput, RunPlan, Workflow, WorkflowContext } from "./workflow.js";
 import { commitPaths, RUN_NOTES_DIR, slugify } from "./workspace.js";
 
-export type AssetKind = "sprite" | "tile";
+export type AssetKind = "sprite" | "tile" | "animation";
 /** Where an Asset is: not drawn yet, being drawn, drawn and waiting for the human's verdict, approved, or rejected (to be redone in the next Iteration). */
 export type AssetStatus = "pending" | "generating" | "waiting" | "approved" | "rejected";
 
@@ -21,6 +21,8 @@ export interface AssetRequest {
   height: number;
   /** The Asset fills its whole square, fully opaque (a ground tile). Off by default; any transparent pixel then fails the Asset Checks. */
   fill?: boolean;
+  /** For an Animation Strip: how many frames of the chosen size sit side by side in the image. 1 for other kinds. */
+  frames?: number;
 }
 
 /** One version of an Asset that reached the human: the Artist's last passing attempt of an Iteration, and the Feedback it got. */
@@ -49,6 +51,7 @@ export interface GateVerdict {
 export interface Asset extends AssetRequest {
   id: number;
   fill: boolean;
+  frames: number;
   /** Order in which the Artist handles the Run's Assets, from 0. */
   position: number;
   /** Where the Artist writes the final Asset, relative to the Run's worktree. */
@@ -67,9 +70,15 @@ export class VerdictError extends Error {}
 export class AssetNotFoundError extends Error {}
 
 /** The kind subfolder of the art folder each kind of Asset goes to. */
-const KIND_FOLDERS: Record<AssetKind, string> = { sprite: "sprites", tile: "tiles" };
+const KIND_FOLDERS: Record<AssetKind, string> = { sprite: "sprites", tile: "tiles", animation: "animations" };
 
+/** A frame's (or a single Asset's) size, as 16x16. */
 const size = (a: { width: number; height: number }) => `${a.width}x${a.height}`;
+/** The whole image's size: an Animation Strip is its frames side by side. */
+const imageSize = (a: { width: number; height: number; frames?: number }) => `${a.width * (a.frames ?? 1)}x${a.height}`;
+/** The size as the human reads it: 16x16, or 16x16 × 4 frames for a strip. */
+const describeSize = (a: { width: number; height: number; kind: AssetKind; frames?: number }) =>
+  a.kind === "animation" ? `${size(a)} × ${a.frames} frames` : size(a);
 
 /** A repository-relative path, tidied: no leading or trailing slash. Throws when it is empty, absolute or climbs out of the repository. */
 export function repositoryPath(value: string): string {
@@ -93,7 +102,9 @@ export function validateAssetRequests(assets: unknown): AssetRequest[] {
     const name = typeof raw?.name === "string" ? raw.name.trim() : "";
     if (!name) throw new Error(`${at} needs a name.`);
     if (!slugify(name, 60)) throw new Error(`${at}: the name "${name}" has no letter or digit to make a file name from.`);
-    if (raw.kind !== "sprite" && raw.kind !== "tile") throw new Error(`${at} ("${name}") must be a sprite or a tile.`);
+    if (raw.kind !== "sprite" && raw.kind !== "tile" && raw.kind !== "animation") {
+      throw new Error(`${at} ("${name}") must be a sprite, a tile or an animation.`);
+    }
     const description = typeof raw.description === "string" ? raw.description.trim() : "";
     if (!description) throw new Error(`${at} ("${name}") needs a description of what it shows.`);
     const { width, height } = raw;
@@ -101,7 +112,10 @@ export function validateAssetRequests(assets: unknown): AssetRequest[] {
       throw new Error(`${at} ("${name}") needs a size of whole pixels, at least 1x1.`);
     }
     if (raw.fill !== undefined && typeof raw.fill !== "boolean") throw new Error(`${at} ("${name}"): fill must be yes or no.`);
-    return { name, kind: raw.kind, description, width, height, fill: raw.fill === true };
+    if (raw.kind === "animation" && (!Number.isInteger(raw.frames) || raw.frames < 2)) {
+      throw new Error(`${at} ("${name}") is an animation: it needs a whole number of frames, at least 2.`);
+    }
+    return { name, kind: raw.kind, description, width, height, fill: raw.fill === true, frames: raw.kind === "animation" ? raw.frames : 1 };
   });
 }
 
@@ -115,6 +129,7 @@ export function toAsset(r: Record<string, any>): Asset {
     width: r.width,
     height: r.height,
     fill: r.fill,
+    frames: r.frames,
     targetPath: r.target_path,
     status: r.status,
     warnings: r.warnings ?? [],
@@ -226,8 +241,8 @@ export const ARTIST_INSTRUCTIONS = `You are the Artist on a Forgequor Run. Work 
 - You are given one Asset to draw, with its Target path, size and description, and the project's Art Direction. Follow the Art Direction.
 - Use your image tool for exactly this one Asset.
 - Save the final Asset at the exact Target path you are given, and nowhere else in the worktree. Create the folders if needed.
-- Deliver pixel art at exactly the requested size. The image tool's output is much larger: scale it down yourself, keeping the pixels crisp (nearest neighbour).
-- When the Asset says "Fill: yes", fill the whole square edge to edge with no transparent pixel. Otherwise use a transparent background wherever the Asset does not need to cover it.
+- Deliver pixel art at exactly the requested image size. For an Animation Strip, lay its frames side by side horizontally in that one image, each frame at the requested frame size. The image tool's output is much larger: scale it down yourself, keeping the pixels crisp (nearest neighbour).
+- When the Asset says "Fill: yes", fill the whole square (every frame of an Animation Strip) edge to edge with no transparent pixel. Otherwise use a transparent background wherever the Asset does not need to cover it.
 - Do not commit anything.
 - When you are done, say in one or two sentences what you saved.`;
 
@@ -248,7 +263,10 @@ export function artistPrompt(asset: Asset, artDirectionPath: string, artDirectio
   const { redo, rejected } = extra;
   let prompt = `Asset to draw: ${asset.name}
 Kind: ${asset.kind}
-Size: ${size(asset)} pixels
+Size: ${size(asset)} pixels${asset.kind === "animation" ? " per frame" : ""}${
+    asset.kind === "animation" ? `\nFrames: ${asset.frames}, laid side by side horizontally in one image, in order, with no gap` : ""
+  }
+Image size: ${imageSize(asset)} pixels
 Fill: ${asset.fill ? "yes, every pixel opaque" : "no"}
 Target path: ${asset.targetPath}
 
@@ -277,7 +295,7 @@ function readArtDirection(worktreePath: string, path: string): string | null {
 
 /** The Review Brief of an `assets` Run: Forgequor writes it from what it stored, no Agent is involved. */
 function reviewBrief(assets: Asset[], feedbacks: Map<number, string[]>): string {
-  const rows = assets.map((a) => `| \`${a.targetPath}\` | ${a.name} | ${a.kind} | ${size(a)} |`);
+  const rows = assets.map((a) => `| \`${a.targetPath}\` | ${a.name} | ${a.kind} | ${describeSize(a)} |`);
   const lines = [
     "## Assets",
     "",
@@ -445,7 +463,7 @@ export const assetsWorkflow: Workflow = {
 
   plan(input: RunInput): RunPlan {
     const assets = validateAssetRequests(input.assets);
-    const lines = assets.map((a) => `- ${a.name}: ${a.kind} ${size(a)}. ${a.description}`);
+    const lines = assets.map((a) => `- ${a.name}: ${a.kind} ${describeSize(a)}. ${a.description}`);
     const names = assets.map((a) => a.name).join(", ");
     const title = names.length > 60 ? `Art: ${names.slice(0, 54).trimEnd()}...` : `Art: ${names}`;
     return {

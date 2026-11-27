@@ -72,6 +72,28 @@ describe("checking an Asset file", () => {
   });
 });
 
+describe("an Animation Strip", () => {
+  const strip = { ...request, frames: 4 };
+
+  it("expects a width of frame width × frame count", () => {
+    put(makePng(64, 16));
+    expect(checkAssetFile(root, strip, null)).toEqual({ written: true, failures: [], warnings: [] });
+
+    put(makePng(16, 16));
+    expect(checkAssetFile(root, strip, null).failures).toEqual([expect.stringMatching(/16x16.*64x16/)]);
+
+    put(makePng(64, 32));
+    expect(checkAssetFile(root, strip, null).failures).toEqual([expect.stringMatching(/64x32.*64x16/)]);
+  });
+
+  it("treats an Asset without frames as one frame", () => {
+    put(makePng(16, 16));
+
+    expect(checkAssetFile(root, { ...request, frames: 1 }, null).failures).toEqual([]);
+    expect(checkAssetFile(root, request, null).failures).toEqual([]);
+  });
+});
+
 describe("the fill flag", () => {
   const filling = { ...request, fill: true };
 

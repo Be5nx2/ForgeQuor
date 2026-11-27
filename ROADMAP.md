@@ -77,7 +77,7 @@ Codex **Runner**, **Artist**, an `assets` **Workflow** (Artist → asset **Gate*
     - approved Assets are kept as they are;
     - the gallery shows each Asset's past versions and Feedback;
     - the Review Brief lists the Feedback that led to each Asset.
-- [ ] `m2-07` **Animation Strips**: the human can order animations, frames side by side in one image.
+- [x] `m2-07` **Animation Strips**: the human can order animations, frames side by side in one image.
   - Spec: `docs/specs/m2-assets.md`
   - Blocked by: `m2-05`
   - Acceptance:

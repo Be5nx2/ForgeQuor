@@ -56,13 +56,13 @@ function countTransparent(png: PNG): number {
 
 /**
  * Validates the file at an Asset's target path inside the worktree: a readable PNG with an alpha channel, of the
- * requested size, really inside the worktree; with the fill flag, fully opaque. With a palette, opaque colours outside it
+ * requested size (frame width × frame count for an Animation Strip), really inside the worktree; with the fill flag, fully opaque. With a palette, opaque colours outside it
  * only warn. Never repairs anything. The file is decoded only once its header says it has the requested size, so a hostile
  * file cannot make Forgequor allocate a huge image.
  */
 export function checkAssetFile(
   worktreePath: string,
-  request: { targetPath: string; width: number; height: number; fill?: boolean },
+  request: { targetPath: string; width: number; height: number; frames?: number; fill?: boolean },
   palette: string[] | null,
 ): AssetCheckResult {
   const file = resolve(worktreePath, request.targetPath);
@@ -92,8 +92,10 @@ export function checkAssetFile(
   if (!hasAlpha(bytes)) failures.push("The PNG has no alpha channel: it needs a transparent background.");
   const width = bytes.readUInt32BE(16);
   const height = bytes.readUInt32BE(20);
-  if (width !== request.width || height !== request.height) {
-    failures.push(`The PNG is ${width}x${height}, expected exactly ${request.width}x${request.height}.`);
+  // An Animation Strip holds its frames side by side: frame width × frame count.
+  const expectedWidth = request.width * (request.frames ?? 1);
+  if (width !== expectedWidth || height !== request.height) {
+    failures.push(`The PNG is ${width}x${height}, expected exactly ${expectedWidth}x${request.height}.`);
     return { written: true, failures, warnings: [] };
   }
 

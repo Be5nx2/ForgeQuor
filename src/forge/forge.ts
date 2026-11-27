@@ -710,9 +710,9 @@ export function createForge(deps: ForgeDeps): Forge {
         runId = Number(rows[0].id);
         for (const [position, a] of plan.assets.entries()) {
           await client.query(
-            `INSERT INTO assets (run_id, position, name, kind, description, width, height, fill, target_path)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-            [runId, position, a.name, a.kind, a.description, a.width, a.height, a.fill === true, assetTargetPath(found[0].art_folder, a.kind, a.name)],
+            `INSERT INTO assets (run_id, position, name, kind, description, width, height, fill, frames, target_path)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+            [runId, position, a.name, a.kind, a.description, a.width, a.height, a.fill === true, a.frames ?? 1, assetTargetPath(found[0].art_folder, a.kind, a.name)],
           );
         }
         await client.query("COMMIT");

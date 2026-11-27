@@ -10,8 +10,10 @@ const UI_GREY = "#101d2d";
 const backdrop = ref(UI_GREY);
 
 const HAS_IMAGE = ["waiting", "approved", "rejected"];
+/** The whole image's width: an Animation Strip is its frames side by side. */
+const imageWidth = (a: Asset) => a.width * a.frames;
 /** Magnification that brings the longest side to about 256 screen pixels, in whole steps so pixels stay square. */
-const zoom = (a: Asset) => Math.min(16, Math.max(2, Math.floor(256 / Math.max(a.width, a.height))));
+const zoom = (a: Asset) => Math.min(16, Math.max(2, Math.floor(256 / Math.max(imageWidth(a), a.height))));
 const current = (a: Asset, i: number) => `/api/runs/${props.runId}/assets/${a.id}/image?i=${i}`;
 const version = (a: Asset, id: number) => `/api/runs/${props.runId}/assets/${a.id}/image?version=${id}`;
 /** The versions before the current one, with the Feedback that sent each back. While an Asset is being redone it has no current version yet. */
@@ -62,19 +64,21 @@ function approveAll() {
     <ul>
       <li v-for="a in assets" :key="a.id">
         <strong>{{ a.name }}</strong> <span class="badge">{{ a.status }}</span>
-        <div class="muted">{{ a.kind }} · {{ a.width }}x{{ a.height }}<span v-if="a.fill"> · fills its square</span> · <code>{{ a.targetPath }}</code></div>
+        <div class="muted">
+          {{ a.kind }} · {{ a.width }}x{{ a.height }}<span v-if="a.kind === 'animation'"> × {{ a.frames }} frames</span><span v-if="a.fill"> · fills its square</span> · <code>{{ a.targetPath }}</code></div>
         <ul v-if="a.warnings.length" class="warnings" aria-label="Palette warnings">
           <li v-for="w in a.warnings" :key="w" class="error">⚠ {{ w }}</li>
         </ul>
         <div v-if="HAS_IMAGE.includes(a.status)" class="previews" :style="{ background: backdrop }">
-          <img :src="current(a, iteration)" :width="a.width" :height="a.height" :alt="`${a.name} at real size`" class="pixels" />
-          <img :src="current(a, iteration)" :width="a.width * zoom(a)" :height="a.height * zoom(a)" :alt="`${a.name} magnified ${zoom(a)} times`" class="pixels" />
+          <img :src="current(a, iteration)" :width="imageWidth(a)" :height="a.height" :alt="`${a.name} at real size`" class="pixels" />
+          <img :src="current(a, iteration)" :width="imageWidth(a) * zoom(a)" :height="a.height * zoom(a)" :alt="`${a.name} magnified ${zoom(a)} times`" class="pixels" />
         </div>
         <details v-if="past(a).length" class="past">
           <summary>{{ past(a).length }} earlier {{ past(a).length === 1 ? "version" : "versions" }}</summary>
           <div v-for="v in past(a)" :key="v.id" class="earlier">
             <div class="previews" :style="{ background: backdrop }">
-              <img :src="version(a, v.id)" :width="a.width" :height="a.height" :alt="`${a.name}, iteration ${v.iteration}`" class="pixels" />
+              <img :src="version(a, v.id)" :width="imageWidth(a)" :height="a.height" :alt="`${a.name}, iteration ${v.iteration}`" class="pixels" />
+              <img :src="version(a, v.id)" :width="imageWidth(a) * zoom(a)" :height="a.height * zoom(a)" :alt="`${a.name}, iteration ${v.iteration}, magnified ${zoom(a)} times`" class="pixels" />
             </div>
             <div class="muted">Iteration {{ v.iteration }}</div>
             <pre v-if="v.feedback">{{ v.feedback }}</pre>

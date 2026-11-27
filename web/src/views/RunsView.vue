@@ -20,10 +20,11 @@ interface AssetDraft {
   description: string;
   size: string;
   fill: boolean;
+  frames: number;
   width: number;
   height: number;
 }
-const newAsset = (): AssetDraft => ({ name: "", kind: "sprite", description: "", size: "16x16", fill: false, width: 16, height: 16 });
+const newAsset = (): AssetDraft => ({ name: "", kind: "sprite", description: "", size: "16x16", fill: false, frames: 4, width: 16, height: 16 });
 const assets = ref<AssetDraft[]>([newAsset()]);
 const sizeOf = (a: AssetDraft) => (a.size === "custom" ? { width: a.width, height: a.height } : { width: Number(a.size.split("x")[0]), height: Number(a.size.split("x")[1]) });
 const error = ref("");
@@ -43,7 +44,7 @@ async function start() {
       projectId: Number(form.value.projectId),
       workflow: form.value.workflow,
       task: isAssets ? undefined : form.value.task,
-      assets: isAssets ? assets.value.map((a) => ({ name: a.name, kind: a.kind, description: a.description, fill: a.fill, ...sizeOf(a) })) : undefined,
+      assets: isAssets ? assets.value.map((a) => ({ name: a.name, kind: a.kind, description: a.description, fill: a.fill, frames: a.kind === "animation" ? a.frames : undefined, ...sizeOf(a) })) : undefined,
       title: form.value.title || undefined,
       trackerRef: form.value.trackerRef || undefined,
     });
@@ -89,7 +90,12 @@ watch([filterProject, filterState], load);
         <select v-model="a.kind" aria-label="Asset kind">
           <option value="sprite">sprite</option>
           <option value="tile">tile</option>
+          <option value="animation">animation strip</option>
         </select>
+        <label v-if="a.kind === 'animation'">
+          Frames (side by side, each of the size below)
+          <input v-model.number="a.frames" type="number" min="2" step="1" aria-label="Asset frames" />
+        </label>
         <textarea v-model="a.description" rows="2" placeholder="What it shows" aria-label="Asset description" required />
         <select v-model="a.size" aria-label="Asset size">
           <option v-for="size in SIZES" :key="size" :value="size">{{ size }}</option>

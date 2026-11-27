@@ -11,7 +11,7 @@ export interface Project {
   artDirectionPath: string;
   artFolder: string;
 }
-export type AssetKind = "sprite" | "tile";
+export type AssetKind = "sprite" | "tile" | "animation";
 export interface AssetRequest {
   name: string;
   kind: AssetKind;
@@ -19,10 +19,13 @@ export interface AssetRequest {
   width: number;
   height: number;
   fill?: boolean;
+  /** Frames of an Animation Strip, side by side in one image. */
+  frames?: number;
 }
 export interface Asset extends AssetRequest {
   id: number;
   fill: boolean;
+  frames: number;
   position: number;
   targetPath: string;
   status: "pending" | "generating" | "waiting" | "approved";

@@ -85,7 +85,7 @@ function drawing(pixel?: (x: number, y: number) => Pixel) {
   return (step: StepRequest) => write(step, makePng(...sizeOf(step), { pixel }));
 }
 const sizeOf = (step: StepRequest): [number, number] => {
-  const m = /Size: (\d+)x(\d+)/.exec(step.prompt)!;
+  const m = /Image size: (\d+)x(\d+)/.exec(step.prompt)!;
   return [Number(m[1]), Number(m[2])];
 };
 /** What the Artist saves at the target path. */
@@ -172,7 +172,7 @@ describe("starting an assets Run", () => {
       [{ name: "  " }, /name/],
       [{ name: "!!!" }, /name/],
       [{ description: " " }, /description/],
-      [{ kind: "boss" as any }, /sprite or a tile/],
+      [{ kind: "boss" as any }, /sprite, a tile or an animation/],
       [{ width: 0 }, /size/],
       [{ height: -4 }, /size/],
       [{ width: 16.5 }, /size/],
@@ -446,6 +446,60 @@ describe("the Asset Checks", () => {
     const run = await startAssets(project, [hero]);
 
     expect(run.assets[0]!.warnings).toEqual([]);
+  });
+});
+
+describe("Animation Strips", () => {
+  const walk: AssetRequest = { name: "Hero walk", kind: "animation", description: "The hero walking right.", width: 16, height: 16, frames: 4 };
+
+  it("go to the animations folder, with their frame count recorded; other Assets have one frame", async () => {
+    const { project } = await projectWithRemote();
+
+    const started = await forge.startRun({ projectId: project.id, workflow: "assets", assets: [walk, { ...hero, frames: 9 }] });
+    await forge.whenIdle();
+    const run = await forge.getRun(started.id);
+
+    expect(run.assets).toMatchObject([
+      { kind: "animation", width: 16, height: 16, frames: 4, targetPath: "assets/art/animations/hero-walk.png" },
+      { kind: "sprite", frames: 1, targetPath: "assets/art/sprites/hero-idle.png" },
+    ]);
+    expect(run.task).toContain("4 frames");
+  });
+
+  it("need a whole frame count of at least 2", async () => {
+    const { project } = await projectWithRemote();
+
+    for (const frames of [undefined, 0, 1, 2.5, "4" as any]) {
+      await expect(forge.startRun({ projectId: project.id, workflow: "assets", assets: [{ ...walk, frames }] })).rejects.toThrow(/frames/);
+    }
+  });
+
+  it("tell the Artist to lay the frames side by side, and check the whole strip's size", async () => {
+    const { project } = await projectWithRemote();
+    artist.use((step) => (artist.steps.length === 1 ? write(step, makePng(16, 16)) : drawing()(step)));
+
+    const run = await startAssets(project, [walk]);
+
+    expect(artist.steps[0]!.prompt).toContain("Frames: 4");
+    expect(artist.steps[0]!.prompt).toContain("side by side");
+    expect(artist.steps[0]!.prompt).toContain("Image size: 64x16");
+    expect(artist.steps[1]!.prompt).toContain("16x16, expected exactly 64x16");
+    expect(run.gates).toMatchObject([{ kind: "asset" }]);
+    expect(readFileSync(join(run.worktreePath!, "assets/art/animations/hero-walk.png"))).toEqual(makePng(64, 16));
+  });
+
+  it("appear in the Review Brief with their frame count", async () => {
+    const { project } = await projectWithRemote();
+    artist.use(drawing());
+    const waiting = await startAssets(project, [walk]);
+
+    await judge(waiting);
+    await forge.whenIdle();
+
+    const [brief] = codeHost.pullRequests[0]!.comments;
+    expect(brief).toContain("assets/art/animations/hero-walk.png");
+    expect(brief).toContain("animation");
+    expect(brief).toContain("16x16 × 4 frames");
   });
 });
 
