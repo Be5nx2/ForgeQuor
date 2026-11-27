@@ -77,7 +77,7 @@ describe("starting a Run", () => {
     expect(runner.steps[0]!.cwd).toBe(run.worktreePath);
     expect(runner.steps[0]!.prompt).toContain("Make the player jump.");
     expect(run.attempts).toMatchObject([{ step: "developer", attempt: 1, status: "succeeded" }]);
-    expect(run.gates).toMatchObject([{ kind: "final", actions: ["approve", "abandon"], decision: null }]);
+    expect(run.gates).toMatchObject([{ kind: "final", actions: ["approve", "reject", "abandon"], decision: null }]);
   });
 });
 
@@ -86,6 +86,33 @@ async function runToEnd(project: Project, input: { task?: string; title?: string
   await forge.whenIdle();
   return forge.getRun(started.id);
 }
+
+describe("the Run's Workflow", () => {
+  it("is the developer Workflow unless another is named, in the Run and in the Runs list", async () => {
+    const { project } = await projectWithRemote();
+
+    const run = await runToEnd(project);
+
+    expect(run.workflow).toBe("developer");
+    expect((await forge.listRuns({ projectId: project.id }))[0]).toMatchObject({ id: run.id, workflow: "developer" });
+  });
+
+  it("makes a Run created before Workflows existed a developer Run", async () => {
+    const { project } = await projectWithRemote();
+    const { rows } = await pool.query(
+      "INSERT INTO runs (project_id, title, task, state) VALUES ($1, 'Old', 'Old task', 'merged') RETURNING id",
+      [project.id],
+    );
+
+    expect((await forge.getRun(Number(rows[0].id))).workflow).toBe("developer");
+  });
+
+  it("refuses to start a Run of an unknown Workflow", async () => {
+    const { project } = await projectWithRemote();
+
+    await expect(forge.startRun({ projectId: project.id, task: "Draw.", workflow: "nope" })).rejects.toThrow(/Unknown Workflow/);
+  });
+});
 
 describe("the Run's starting point", () => {
   it("derives a title from the task and keeps the tracker reference", async () => {
@@ -404,6 +431,126 @@ describe("deciding a Gate", () => {
     await expect(forge.decideGate({ gateId: finished.gates[0]!.id, action: "abandon" })).rejects.toThrow(/already decided/);
     expect((await forge.getRun(escalated.id)).state).toBe("waiting");
     expect((await forge.getRun(finished.id)).state).toBe("approved");
+  });
+});
+
+describe("rejecting a developer Run with Feedback", () => {
+  /** A Developer that commits a new file per call, so each Iteration adds its own commit. */
+  function commitsEachTime(brief: (n: number) => string) {
+    let n = 0;
+    return (step: { cwd: string }) => {
+      n++;
+      writeFileSync(join(step.cwd, `work-${n}.txt`), `${n}\n`);
+      git(step.cwd, "add", ".");
+      git(step.cwd, "commit", "-q", "-m", `feat: work ${n}`);
+      writeFileSync(join(step.cwd, BRIEF), brief(n));
+    };
+  }
+
+  it("starts a new Iteration in the same worktree, then reopens the final Gate on the same pull request with a new Review Brief", async () => {
+    const { project, remote } = await projectWithRemote();
+    runner.use(commitsEachTime((n) => `Brief ${n}.\n`));
+    const first = await runToEnd(project, { task: "Make the player jump." });
+
+    await forge.decideGate({ gateId: first.gates[0]!.id, action: "reject", feedback: "  Jump higher.  " });
+    await forge.whenIdle();
+    const run = await forge.getRun(first.id);
+
+    expect(run.state).toBe("waiting");
+    expect(run.iteration).toBe(2);
+    expect(run.worktreePath).toBe(first.worktreePath);
+    expect(run.gates).toMatchObject([
+      { kind: "final", decision: "reject", feedback: "Jump higher." },
+      { kind: "final", decision: null, actions: ["approve", "reject", "abandon"] },
+    ]);
+    expect(run.iterations).toEqual([
+      { number: 1, feedback: null },
+      { number: 2, feedback: "Jump higher." },
+    ]);
+    expect(run.attempts.map((a) => [a.iteration, a.attempt])).toEqual([[1, 1], [2, 1]]);
+    expect(codeHost.pullRequests).toHaveLength(1);
+    expect(codeHost.pullRequests[0]!.comments).toEqual(["Brief 1.\n", "Brief 2.\n"]);
+    expect(git(remote.bare, "log", "--format=%s", run.branch!)).toContain("feat: work 2");
+  });
+
+  it("does not post the previous Iteration's Review Brief again when the Developer writes none", async () => {
+    const { project } = await projectWithRemote();
+    let n = 0;
+    runner.use((step) => {
+      if (++n === 1) developerCommits(step, "Brief 1.\n");
+      else {
+        writeFileSync(join(step.cwd, "more.txt"), "more\n");
+        git(step.cwd, "add", ".");
+        git(step.cwd, "commit", "-q", "-m", "feat: more");
+      }
+    });
+    const first = await runToEnd(project);
+
+    await forge.decideGate({ gateId: first.gates[0]!.id, action: "reject", feedback: "More." });
+    await forge.whenIdle();
+
+    expect(codeHost.pullRequests[0]!.comments).toEqual(["Brief 1.\n", expect.stringMatching(/no Review Brief/i)]);
+  });
+
+  it("gives the Developer the task, this Feedback and the earlier ones", async () => {
+    const { project } = await projectWithRemote();
+    const first = await runToEnd(project, { task: "Make the player jump." });
+    await forge.decideGate({ gateId: first.gates[0]!.id, action: "reject", feedback: "Jump higher." });
+    await forge.whenIdle();
+    const second = await forge.getRun(first.id);
+    await forge.decideGate({ gateId: second.gates[1]!.id, action: "reject", feedback: "Add a sound." });
+    await forge.whenIdle();
+
+    const prompt = runner.steps.at(-1)!.prompt;
+    expect(prompt).toContain("Make the player jump.");
+    expect(prompt).toContain("1. Jump higher.");
+    expect(prompt).toContain("2. Add a sound.");
+    expect((await forge.getRun(first.id)).iteration).toBe(3);
+  });
+
+  it("runs the Checks again with a fresh retry budget", async () => {
+    const { project } = await projectWithRemote();
+    await forge.setChecks(project.id, ["test -f ok.txt || { echo missing; exit 1; }"]);
+    let calls = 0;
+    runner.use((step) => {
+      calls++;
+      if (calls !== 1) writeFileSync(join(step.cwd, "ok.txt"), "ok\n");
+    });
+    const first = await runToEnd(project);
+    expect(first.attempts).toHaveLength(2);
+    runner.use(() => {});
+    const gate = first.gates.find((g) => g.kind === "final")!;
+
+    await forge.decideGate({ gateId: gate.id, action: "reject", feedback: "Again." });
+    await forge.whenIdle();
+    const run = await forge.getRun(first.id);
+
+    expect(run.state).toBe("waiting");
+    expect(run.checks.filter((c) => c.iteration === 2)).toMatchObject([{ attempt: 1, exitStatus: 0 }]);
+  });
+
+  it("requires a written Feedback and refuses to reject an Escalation", async () => {
+    const { project } = await projectWithRemote();
+    const finished = await runToEnd(project);
+    runner.use(() => ({ status: "failed", error: "claude crashed" }));
+    const escalated = await runToEnd(project);
+
+    await expect(forge.decideGate({ gateId: finished.gates[0]!.id, action: "reject", feedback: "   " })).rejects.toThrow(/Feedback/);
+    await expect(forge.decideGate({ gateId: escalated.gates[0]!.id, action: "reject", feedback: "No." })).rejects.toThrow(/only be abandoned/);
+    expect((await forge.getRun(finished.id)).state).toBe("waiting");
+    expect((await forge.getRun(escalated.id)).state).toBe("waiting");
+  });
+
+  it("can still be abandoned after a rejection", async () => {
+    const { project } = await projectWithRemote();
+    const first = await runToEnd(project);
+    await forge.decideGate({ gateId: first.gates[0]!.id, action: "reject", feedback: "Redo." });
+    await forge.whenIdle();
+    const second = await forge.getRun(first.id);
+
+    const run = await forge.decideGate({ gateId: second.gates[1]!.id, action: "abandon" });
+
+    expect(run.state).toBe("abandoned");
   });
 });
 
@@ -1126,5 +1273,120 @@ describe("a Project's setup commands", () => {
 
     expect((await forge.setSetup(project.id, ["npm ci", " ", "scripts/link-skills.sh"])).setup).toEqual(["npm ci", "scripts/link-skills.sh"]);
     expect((await forge.listProjects()).find((p) => p.id === project.id)?.setup).toEqual(["npm ci", "scripts/link-skills.sh"]);
+  });
+});
+
+describe("a developer Run cut short in the middle of a Feedback Iteration", () => {
+  /** A Developer that commits a new file per call, so each Iteration has something to commit. */
+  let commits = 0;
+  const commitsNewFile = (brief: string) => (step: { cwd: string }) => {
+    writeFileSync(join(step.cwd, `work-${++commits}.txt`), "x\n");
+    git(step.cwd, "add", ".");
+    git(step.cwd, "commit", "-q", "-m", "feat: work");
+    writeFileSync(join(step.cwd, BRIEF), brief);
+  };
+  /** A developer Run rejected once with Feedback; its Developer is about to work on Iteration 2. */
+  async function rejectedRun(project: Project) {
+    runner.use(commitsNewFile("Brief.\n"));
+    const first = await forge.startRun({ projectId: project.id, task: "Make the player jump." });
+    await forge.whenIdle();
+    const waiting = await forge.getRun(first.id);
+    return { id: first.id, gateId: waiting.gates[0]!.id };
+  }
+
+  it("resumes Iteration 2 after a Quota pause, with the Feedback, and reopens the final Gate", async () => {
+    const { project } = await projectWithRemote();
+    const { id, gateId } = await rejectedRun(project);
+    fakeNow = new Date("2030-01-01T10:00:00Z");
+    runner.use(() => ({ status: "quota_exhausted", resetsAt: new Date("2030-01-01T12:00:00Z") }));
+
+    await forge.decideGate({ gateId, action: "reject", feedback: "Jump higher." });
+    await forge.whenIdle();
+    const paused = await forge.getRun(id);
+    expect(paused).toMatchObject({ state: "paused", iteration: 2 });
+
+    fakeNow = new Date("2030-01-01T12:00:01Z");
+    runner.steps.length = 0;
+    runner.use(commitsNewFile("Brief 2.\n"));
+    await forge.resumePausedRuns();
+    await forge.whenIdle();
+
+    const run = await forge.getRun(id);
+    expect(run).toMatchObject({ state: "waiting", iteration: 2 });
+    expect(runner.steps).toHaveLength(1);
+    expect(runner.steps[0]!.prompt).toContain("Jump higher.");
+    expect(run.iterations).toHaveLength(2);
+    expect(run.attempts.filter((a) => a.iteration === 2).map((a) => a.status)).toEqual(["quota_exhausted", "succeeded"]);
+    expect(run.gates).toMatchObject([{ decision: "reject" }, { kind: "final", decision: null }]);
+    expect(codeHost.pullRequests).toHaveLength(1);
+    expect(codeHost.pullRequests[0]!.comments).toEqual(["Brief.\n", "Brief 2.\n"]);
+  });
+
+  it("resumes Iteration 2 after a restart of Forgequor, with the Feedback, on the same pull request", async () => {
+    const { project } = await projectWithRemote();
+    const { id, gateId } = await rejectedRun(project);
+    let release!: () => void;
+    const hold = new Promise<void>((r) => (release = r));
+    let inStep!: () => void;
+    const started = new Promise<void>((r) => (inStep = r));
+    runner.use(async () => {
+      inStep();
+      await hold;
+      return { status: "failed", error: "the old process is gone" };
+    });
+
+    await forge.decideGate({ gateId, action: "reject", feedback: "Jump higher." });
+    await started;
+    // The process dies here: a new Forgequor starts and recovers what was Running.
+    runner.steps.length = 0;
+    runner.use(commitsNewFile("Brief 2.\n"));
+    const restarted = forgeWith({});
+    await restarted.recoverAfterRestart();
+    await restarted.whenIdle();
+
+    const run = await restarted.getRun(id);
+    expect(run).toMatchObject({ state: "waiting", iteration: 2 });
+    expect(runner.steps).toHaveLength(1);
+    expect(runner.steps[0]!.prompt).toContain("Jump higher.");
+    expect(run.attempts.filter((a) => a.iteration === 2).map((a) => a.status)).toEqual(["failed", "succeeded"]);
+    expect(run.gates).toMatchObject([{ decision: "reject" }, { kind: "final", decision: null }]);
+    expect(codeHost.pullRequests).toHaveLength(1);
+    release();
+    await forge.whenIdle();
+  });
+});
+
+describe("a rejection racing an abandon", () => {
+  it.each([
+    ["the rejection first", true],
+    ["the abandon first", false],
+  ])("leaves the Run Abandoned, with nothing running and no Gate open, with %s", async (_name, rejectFirst) => {
+    const { project } = await projectWithRemote();
+    runner.use((step) => developerCommits(step, "Brief.\n"));
+    const first = await forge.startRun({ projectId: project.id, task: "Make the player jump." });
+    await forge.whenIdle();
+    const gateId = (await forge.getRun(first.id)).gates[0]!.id;
+    let signal: AbortSignal | undefined;
+    runner.use(async (step) => {
+      signal = step.signal;
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    const reject = () => forge.decideGate({ gateId, action: "reject", feedback: "Again." });
+    const abandon = () => forge.abandonRun(first.id);
+
+    const results = await Promise.allSettled(rejectFirst ? [reject(), abandon()] : [abandon(), reject()]);
+    await forge.whenIdle();
+
+    // Whichever loses is refused cleanly (a Gate error), never aborted by the database: the two lock the Run and Gate rows in the same order.
+    for (const r of results) {
+      if (r.status === "rejected") expect((r.reason as { code?: string }).code).toBeUndefined();
+    }
+
+    const run = await forge.getRun(first.id);
+    expect(run.state).toBe("abandoned");
+    expect((await forge.listOpenGates()).map((g) => g.runId)).not.toContain(first.id);
+    expect(codeHost.pullRequests[0]!.state).toBe("closed");
+    // Whatever Developer the rejection got to start was told to stop.
+    if (signal) expect(signal.aborted).toBe(true);
   });
 });

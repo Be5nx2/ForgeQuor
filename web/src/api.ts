@@ -8,9 +8,64 @@ export interface Project {
   checks: string[];
   setup: string[];
   maxConcurrentRuns: number;
+  artDirectionPath: string;
+  artFolder: string;
+}
+export type AssetKind = "sprite" | "tile" | "animation";
+export interface AssetRequest {
+  name: string;
+  kind: AssetKind;
+  description: string;
+  width: number;
+  height: number;
+  fill?: boolean;
+  /** Frames of an Animation Strip, side by side in one image. */
+  frames?: number;
+  /** Existing repository PNGs to match the style of. */
+  references?: string[];
+  /** Replaces the file already at the target path. */
+  replace?: boolean;
+}
+/** What the Run form needs about a Project's art, read from its default branch. */
+export interface ArtInfo {
+  present: boolean;
+  defaultSize: { width: number; height: number } | null;
+  references: string[];
+  images: string[];
+}
+export interface Asset extends AssetRequest {
+  id: number;
+  fill: boolean;
+  frames: number;
+  references: string[];
+  replace: boolean;
+  position: number;
+  targetPath: string;
+  status: "pending" | "generating" | "waiting" | "approved";
+  /** Colours outside the Art Direction's palette in the current version; a warning, never a failure. */
+  warnings: string[];
+  /** The versions the human saw, oldest first, each with the Feedback it got; the last is the current one. */
+  versions: AssetVersion[];
+}
+export interface AssetVersion {
+  id: number;
+  iteration: number;
+  attempt: number;
+  feedback: string | null;
+}
+export interface Verdict {
+  assetId: number;
+  action: "approve" | "reject";
+  feedback?: string;
+}
+export interface GateVerdict {
+  assetId: number;
+  verdict: "approve" | "reject";
+  feedback: string | null;
 }
 export interface CheckResult {
   id: number;
+  iteration: number;
   attempt: number;
   command: string;
   exitStatus: number | null;
@@ -19,6 +74,8 @@ export interface CheckResult {
 export interface Run {
   id: number;
   projectId: number;
+  workflow: string;
+  iteration: number;
   title: string;
   task: string;
   trackerRef: string | null;
@@ -32,10 +89,12 @@ export interface Run {
 }
 export interface StepAttempt {
   id: number;
+  iteration: number;
   step: string;
   attempt: number;
   runner: string;
   model: string | null;
+  assetId: number | null;
   status: string;
   startedAt: string;
   endedAt: string | null;
@@ -46,20 +105,28 @@ export interface StepAttempt {
 export interface Gate {
   id: number;
   runId: number;
-  kind: "final" | "escalation";
+  kind: "final" | "escalation" | "asset";
   reason: string;
   evidence: string | null;
   actions: GateAction[];
   decidedAt: string | null;
-  decision: GateAction | null;
+  decision: "approve" | "reject" | "abandon" | null;
+  feedback: string | null;
+  verdicts: GateVerdict[];
 }
-export type GateAction = "approve" | "abandon";
+export type GateAction = "approve" | "reject" | "abandon" | "judge";
 
 /** Records the human's decision at a Gate and returns the updated Run. */
-export function decideGate(gateId: number, action: GateAction): Promise<RunDetail> {
-  return postJson(`/api/gates/${gateId}/decision`, { action });
+export function decideGate(gateId: number, action: GateAction, feedback?: string, verdicts?: Verdict[]): Promise<RunDetail> {
+  return postJson(`/api/gates/${gateId}/decision`, { action, feedback, verdicts });
+}
+export interface Iteration {
+  number: number;
+  feedback: string | null;
 }
 export interface RunDetail extends Run {
+  assets: Asset[];
+  iterations: Iteration[];
   attempts: StepAttempt[];
   checks: CheckResult[];
   gates: Gate[];

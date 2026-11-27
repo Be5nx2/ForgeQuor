@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 export function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
@@ -73,6 +73,7 @@ export function createRepoWithBareRemote(opts: { remote: string }): { repo: Temp
       git(clone, "clone", "-q", "--branch", branch, bare, ".");
       git(clone, "config", "user.email", "other@example.com");
       git(clone, "config", "user.name", "Other");
+      mkdirSync(dirname(join(clone, file)), { recursive: true });
       writeFileSync(join(clone, file), content);
       git(clone, "add", ".");
       git(clone, "commit", "-q", "-m", message);

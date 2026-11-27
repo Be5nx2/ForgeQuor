@@ -13,6 +13,7 @@ Multi-Agent AI Game Development Orchestrator: a Node.js + Vue app with a Postgre
 - `git`.
 - The GitHub CLI, authenticated: `gh auth login`.
 - Claude Code, logged in with your subscription: run `claude` once.
+- Codex CLI (only for the `assets` Workflow, from M2), logged in with your ChatGPT subscription: `codex login`. `CODEX_HOME` is honoured.
 
 ### Install
 
@@ -35,7 +36,7 @@ This one command does five things, in order:
 1. Starts PostgreSQL in Docker on port 5433.
 2. Builds the UI.
 3. Applies the database migrations.
-4. Checks that `git`, `gh` and `claude` are installed and authenticated. A missing tool shows as a ✗ in the console and as a banner in the UI.
+4. Checks that `git`, `gh`, `claude` and `codex` are installed and authenticated. A missing tool shows as a ✗ in the console and as a banner in the UI.
 5. Serves the app at <http://127.0.0.1:4170>.
 
 Stop it with Ctrl+C. PostgreSQL keeps running in the background. To stop it:
@@ -50,9 +51,25 @@ docker compose down
 2. **Runs**: pick the Project, describe a task and press **Start Run**. Forgequor fetches the default branch and creates a worktree on a `forgequor/<id>-<title>` branch under `~/.forgequor/worktrees/`. A Developer Agent (Claude Code, headless) then does the task there and commits.
 3. **Waiting for you**: the Run stops at its final Gate. Approve or abandon it. If something went wrong, it stops at an Escalation instead, which you can only abandon.
 
+#### An `assets` Run
+
+For 2D pixel art, pick the **assets** Workflow in the Run form and list **Asset Requests** (name, sprite or tile, what it shows, size) instead of a task. The Artist (Codex, headless, sandboxed to the worktree) draws them one after the other, following the Project's **Art Direction**, and writes each at `<art folder>/<sprites|tiles>/<name>.png`. The Run then stops at an **Asset Gate**: a gallery shows each Asset at real size and magnified with crisp pixels, on a background colour you can change. Give a verdict on every Asset at once: approve it, or reject it with its own Feedback. The Artist then redoes only the rejected ones (with your Feedback and the rejected version as a reference), as many Iterations as you want; past versions stay in the gallery. Once everything is approved Forgequor commits the Assets in one commit, opens the pull request with a Review Brief it writes itself, and the Run is Approved. Setup commands and Checks are skipped.
+
+On the Projects screen, set where the Project keeps its **Art Direction** document (default `docs/ART_DIRECTION.md`) and its **art folder** (default `assets/art`). A Run stops at an Escalation, before generating anything, when the Art Direction is missing from the repository's default branch. The Runner's raw images are kept under `.forgequor/assets/` as a trace. An `assets` Run survives a used-up Codex Quota (it pauses, then resumes at the Asset it was on) and a restart of Forgequor (it picks up at the current Asset, keeping the ones already drawn); the Run page shows how many Assets are drawn and the Artist's live progress on the current one.
+
+##### The Art Direction contract
+
+The Art Direction is a Markdown document in the Project (default `docs/ART_DIRECTION.md`, read from the Run's worktree). Forgequor reads three things from it, none required:
+
+- **Palette**: every `#RRGGBB` code under a `Palette` heading (up to the next heading of the same or a higher level). Opaque colours outside it only show as a warning on the Asset. Without a palette there is no warning.
+- **Default size**: a `Default size: WxH` line (for example `Default size: 16x16`). The Run form presets new Assets to it. Without one, the form starts at 16x16.
+- **Reference images**: repository paths to PNG files mentioned anywhere in the document (for example `assets/art/ref/style.png`). Those that exist are always shown to the Artist, so every Asset follows the same look. An Art Direction without any works just as well. An Asset Request can add its own style references, picked from the repository's PNGs.
+
+An Asset Request never overwrites an existing file by accident: starting the Run is refused when its target file already exists, unless the request is marked as **replacing** it (the existing art is then shown to the Artist as a reference). Two requests that would produce the same file, or a reference that does not exist, are refused too.
+
 To inspect what the Developer did, open the Run's worktree. The path is shown in the Run detail. Its `.forgequor/` folder holds the Run Notes, including the Review Brief. Git ignores that folder.
 
-> M1 (walking skeleton) is done: a Developer Run goes from its own worktree to a pull request and your final Gate; M2 (Assets) is next. The Run page shows the Developer's progress live. On the Projects screen, declare a Project's **Setup** (shell commands run in each new worktree before the Developer, in order; a failing one opens an Escalation and the Developer never starts) and its **Checks** (run after the Developer, in order; without any, a Run goes straight to the pull request). See [ROADMAP.md](ROADMAP.md).
+> M1 (walking skeleton) and M2 (Assets) are done: a `developer` Run goes from its own worktree to a pull request and your final Gate, where you can approve, abandon or reject with Feedback; an `assets` Run has Codex draw sprites, tiles and Animation Strips that you judge one by one at the Asset Gate. M3 (full loop) is next. The Run page shows the Developer's progress live. On the Projects screen, declare a Project's **Setup** (shell commands run in each new worktree before the Developer, in order; a failing one opens an Escalation and the Developer never starts) and its **Checks** (run after the Developer, in order; without any, a Run goes straight to the pull request). See [ROADMAP.md](ROADMAP.md).
 
 #### Registering Forgequor itself
 
@@ -75,7 +92,8 @@ All settings are optional environment variables. Set them in the shell that runs
 | `FORGEQUOR_DATABASE_URL` | `postgres://forgequor:forgequor@localhost:5433/forgequor` | PostgreSQL connection |
 | `FORGEQUOR_WORKTREES` | `~/.forgequor/worktrees` | Where Run worktrees are created |
 | `FORGEQUOR_DEVELOPER_MODEL` | Claude Code's default | Model used by the Developer Agent |
-| `FORGEQUOR_STEP_TIMEOUT_MINUTES` | `60` | A Developer Step running longer is killed and escalated |
+| `FORGEQUOR_ARTIST_MODEL` | Codex's default | Model Codex uses for the Artist Agent |
+| `FORGEQUOR_STEP_TIMEOUT_MINUTES` | `60` | An Agent's Step running longer is killed and escalated |
 | `FORGEQUOR_CHECK_TIMEOUT_MINUTES` | `10` | A Check command running longer is killed and counts as failed |
 
 ### Tests
@@ -92,6 +110,12 @@ The tests use the Docker PostgreSQL, so `npm test` starts it if needed. Each tes
 
 ```bash
 npm run smoke:claude
+```
+
+The Codex Runner has its own opt-in smoke test, which generates one real 16x16 sprite (one image of your Codex Quota):
+
+```bash
+npm run smoke:codex
 ```
 
 Another opt-in smoke test opens, comments on and closes a real pull request on a throwaway GitHub repository you own, with a `main` branch (`gh` must be signed in). Name that repository once in your `.env` (see `.env.example`):

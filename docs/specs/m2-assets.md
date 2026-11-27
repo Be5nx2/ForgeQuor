@@ -59,6 +59,7 @@ The Asset Gate is that Run's final Gate.
 8. As the human, I want to give an Animation Strip its frame count, with frames of the chosen size laid side by side horizontally, so that the result drops straight into my engine.
 9. As the human, I want to point an Asset Request at Assets already in the repository as style references, so that new art matches what exists.
 10. As the human, I want to mark an Asset Request as replacing an existing file, so that I can redo an Asset on purpose.
+10b. As the human, I want to mark an Asset Request as filling its whole square (every pixel opaque, edge to edge, like a ground tile), and leave it unmarked when the Asset may use transparency (an item, a decoration on a tile), so that the Artist knows which one I want and Feedback handles the rest.
 11. As the human, I want starting a Run to be refused when an Asset Request would overwrite an existing file I did not mark for replacement, so that nothing is lost by accident.
 12. As the human, I want starting a Run to be refused when two Asset Requests in it would produce the same file, so that they cannot overwrite each other.
 13. As the human, I want Asset Request names turned into tidy file names, so that the repository stays consistent.
@@ -77,8 +78,8 @@ The Asset Gate is that Run's final Gate.
 20. As the human, I want the Artist to work through Codex on my own subscription, so that art does not need an extra account or key.
 21. As the human, I want the Artist to run in Codex's sandbox, writing only inside the Run's worktree, so that art generation cannot touch anything else on my machine (ADR 0006).
 22. As the human, I want the Artist to handle the Asset Requests one at a time, so that a batch does not burn through the Quota at once.
-23. As the human, I want Forgequor to collect each generated image itself, so that a forgetful Agent cannot lose or misplace an Asset.
-24. As the human, I want an Asset Request for which no image came back to be tried once more, then to open an Escalation with the Artist's last message, so that I know what went wrong.
+23. As the human, I want each Asset written by the Artist at its exact target path in the worktree, and Forgequor to validate that file, so that what I review is exactly what gets committed.
+24. As the human, I want an Asset Request for which nothing was written at its target path to be tried once more, then to open an Escalation with the Artist's last message, so that I know what went wrong.
 25. As the human, I want an exhausted Codex Quota to pause the Run when Forgequor can tell, and resume it later as in M1, so that a limit is not treated as a failure.
 26. As the human, I want to follow the Artist's progress live, Asset by Asset, so that I see how far the batch is.
 27. As the human, I want to choose the model Codex uses for the Artist through a setting, like the Developer's, so that I can trade quality for Quota.
@@ -88,6 +89,7 @@ The Asset Gate is that Run's final Gate.
 
 29. As the human, I want each Asset checked to be a PNG with transparency, so that it works in my engine as is.
 30. As the human, I want each Asset checked to have exactly the requested size (frame size × frame count for an Animation Strip), so that it fits the grid.
+30b. As the human, I want an Asset marked as filling its whole square to fail the checks when any pixel is transparent, so that it goes back to the Artist before I see it.
 31. As the human, I want each Asset checked to be where its Asset Request says, so that the repository layout stays clean.
 32. As the human, I want an Asset that fails these checks sent back to the Artist with the reason, up to twice, then escalated, so that broken files never reach me at the Asset Gate.
 33. As the human, I want colours outside the Art Direction's palette shown as a warning on that Asset, not a failure, so that I decide whether it matters.
@@ -139,7 +141,7 @@ The Asset Gate is that Run's final Gate.
 
 - **Starting a Run.**
   - A Run gains a Workflow name. Existing Runs are `developer` Runs.
-  - For `assets`, the input carries the Asset Requests instead of a free-text task. Each one has a name, a kind, a description, a size (width and height), a frame count for an Animation Strip, reference paths, and a replace flag.
+  - For `assets`, the input carries the Asset Requests instead of a free-text task. Each one has a name, a kind, a description, a size (width and height), a frame count for an Animation Strip, reference paths, a replace flag, and a fill flag (the Asset fills its whole square, fully opaque; off by default, for any kind).
   - Starting a Run validates everything up front and refuses with a clear error on any of these:
     - a missing field or a size below 1;
     - an existing file without the replace flag;
@@ -156,9 +158,9 @@ The Asset Gate is that Run's final Gate.
 
 **Sequence:**
 1. Read the Art Direction from the fresh worktree. If it is missing, open an Escalation and stop.
-2. For each Asset Request still pending, in order, run one Artist Step. Collect the image, place it at its target path and run the Asset Checks.
+2. For each Asset Request still pending, in order, run one Artist Step, giving it the Asset's exact target path. The Artist writes the final Asset there itself (the image tool's raw output is far larger, so Codex scales it down to the requested size). Forgequor then runs the Asset Checks on that file and keeps the Runner's raw images in the Run Notes as a trace.
    - When the Checks fail, the Artist redoes it with the failure, up to 2 extra attempts. After that, an Escalation opens.
-   - When no image comes back, the Artist gets one more try. After that, an Escalation opens with the Artist's last message.
+   - When nothing is written at the target path, the Artist gets one more try. After that, an Escalation opens with the Artist's last message.
 3. Open the Asset Gate.
 4. If anything is rejected, start a new Iteration on the rejected Assets only, each with its Feedback and its rejected version as a reference, and go back to step 2.
 5. When everything is approved:
@@ -181,8 +183,9 @@ None of these is required. Without a palette, the palette warning is skipped. Wi
 **The Artist's instructions** live in Forgequor, like the Developer's. They tell it to:
 - follow the Art Direction;
 - use Codex's image tool for exactly one Asset;
-- deliver pixel art at the exact size;
-- use a transparent background;
+- save the final Asset at the exact target path it is given, and nowhere else in the worktree;
+- deliver pixel art at the exact size, scaling the raw image down itself when needed;
+- when the Asset Request has the fill flag, fill the whole square edge to edge with no transparent pixel; otherwise use a transparent background wherever the Asset does not need to cover it;
 - for an Animation Strip, lay the frames side by side.
 
 **The Review Brief** is generated by Forgequor from what it stored. No Agent is involved.
@@ -194,7 +197,8 @@ None of these is required. Without a palette, the palette warning is skipped. Wi
   - not a readable PNG;
   - no alpha channel;
   - wrong width or height (frame width × frame count for an Animation Strip);
-  - not at the expected path.
+  - not at the expected path;
+  - any transparent pixel in an Asset whose Asset Request has the fill flag.
 - **Warning:** colours outside the Art Direction palette. Only opaque pixels are checked, and the warning reports the count and up to a few sample colours.
 - **Decoding** uses a small pure-JavaScript PNG library added as a dependency. No native modules.
 
@@ -214,8 +218,8 @@ None of these is required. Without a palette, the palette warning is skipped. Wi
 
 **Collecting images.**
 - The adapter reads the thread id from the event stream.
-- After the Step, it collects the images Codex wrote under its home folder for that thread.
-- Forgequor copies the last one to the target path.
+- After the Step, it collects the images Codex wrote under its home folder for that thread: the image tool's raw output, typically 1254×1254.
+- These raw images are a trace, not the Asset. Forgequor keeps them in the Run Notes (useful as a reference for a later Iteration). The Asset is the file the Artist wrote at its target path.
 
 **Progress.** Image generation does not appear in Codex's event stream. The adapter reports progress from the events that do appear, plus one event per collected image.
 
@@ -352,6 +356,6 @@ The Vue gallery, the background colour tool and the Run form stay thin by design
 ## Further Notes
 
 - Image generation uses the ChatGPT plan's limits 3 to 5 times faster than text. There may also be a separate image cap; that is reported but not officially confirmed. Sequential Asset Requests and the concurrency limit are the M2 answer. Watch real usage on the first game.
-- Codex writes images under its own home folder, not the worktree. Collecting by thread id is deliberate (ADR 0006): do not rely on the Agent copying files.
+- Codex's image tool writes a raw, much larger image under Codex's home folder; Codex then scales it down and saves the Asset in the worktree itself. The real smoke run on 2026-11-26 showed this: a 1254×1254 raw image and a clean 16×16 sprite written by the Agent. So the Asset is the file at the target path; the raw images are only a trace.
 - The human has had Codex produce exact-size pixel art and Animation Strips directly. M2 builds on that premise, and the Asset Checks catch the times it does not hold.
 - After merge, the engine may generate import files next to new Assets. Leave them to the next `developer` Run.

@@ -1,6 +1,4 @@
-import { existsSync } from "node:fs";
-import { spawn } from "node:child_process";
-import { forgetProcessGroup, killProcessGroup, trackProcessGroup } from "../process-group.js";
+import { runCli } from "./process.js";
 import type { Runner, RunnerEvent, StepRequest, StepResult } from "./runner.js";
 
 export interface ClaudeRunnerOptions {
@@ -58,75 +56,35 @@ function interpret(final: any, rateLimit: any, exit: { code: number | null; sign
 /** Drives `claude` headless (stream-json) in the Step's directory, on the user's subscription. */
 export function createClaudeRunner(options: ClaudeRunnerOptions = {}): Runner {
   return {
-    run(step: StepRequest, onEvent): Promise<StepResult> {
-      return new Promise((resolve) => {
-        if (!existsSync(step.cwd)) {
-          resolve({ status: "failed", error: `working directory does not exist: ${step.cwd}` });
-          return;
+    async run(step: StepRequest, onEvent): Promise<StepResult> {
+      // The Agent must edit files and run git unattended, so permission prompts are off.
+      // It is confined only by the Run's worktree (ADR 0005).
+      const args = [
+        "-p",
+        "--output-format", "stream-json",
+        "--verbose",
+        "--no-session-persistence",
+        "--permission-mode", "bypassPermissions",
+        // No human is there to answer: these tools would wait forever.
+        "--disallowedTools", HUMAN_WAIT_TOOLS.join(" "),
+        "--append-system-prompt", step.instructions,
+      ];
+      if (step.model) args.push("--model", step.model);
+
+      let final: any = null;
+      let rateLimit: any = null;
+      const outcome = await runCli({ command: "claude", args, cwd: step.cwd, env: options.env, stdin: step.prompt, signal: step.signal }, (text) => {
+        if (!text.trim()) return;
+        let msg: any = null;
+        try { msg = JSON.parse(text); } catch { /* kept as an unreadable-line event */ }
+        for (const e of toEvents(msg, text)) {
+          try { onEvent(e); } catch { /* a buggy listener must not break the Step */ }
         }
-        // The Agent must edit files and run git unattended, so permission prompts are off.
-        // It is confined only by the Run's worktree (ADR 0002: no sandbox in v1).
-        const args = [
-          "-p",
-          "--output-format", "stream-json",
-          "--verbose",
-          "--no-session-persistence",
-          "--permission-mode", "bypassPermissions",
-          // No human is there to answer: these tools would wait forever.
-          "--disallowedTools", HUMAN_WAIT_TOOLS.join(" "),
-          "--append-system-prompt", step.instructions,
-        ];
-        if (step.model) args.push("--model", step.model);
-
-        if (step.signal?.aborted) {
-          resolve({ status: "failed", error: "the Step was cancelled before it started" });
-          return;
-        }
-        // Its own process group, so a cancel can end claude and every tool it started in one go.
-        const child = spawn("claude", args, { cwd: step.cwd, env: options.env ?? process.env, detached: true });
-        trackProcessGroup(child.pid);
-        const cancel = () => killProcessGroup(child.pid);
-        step.signal?.addEventListener("abort", cancel, { once: true });
-        let buffer = "";
-        let final: any = null;
-        let rateLimit: any = null;
-        let stderr = "";
-        let settled = false;
-        const finish = (r: StepResult) => { if (!settled) { settled = true; resolve(r); } };
-
-        const handleLine = (text: string) => {
-          if (!text.trim()) return;
-          let msg: any = null;
-          try { msg = JSON.parse(text); } catch { /* kept as an unreadable-line event */ }
-          for (const e of toEvents(msg, text)) {
-            try { onEvent(e); } catch { /* a buggy listener must not break the Step */ }
-          }
-          if (msg?.type === "result") final = msg;
-          if (msg?.type === "rate_limit_event") rateLimit = msg.rate_limit_info;
-        };
-
-        child.stdout.setEncoding("utf8");
-        child.stdout.on("data", (chunk) => {
-          buffer += chunk;
-          let nl: number;
-          while ((nl = buffer.indexOf("\n")) >= 0) {
-            handleLine(buffer.slice(0, nl));
-            buffer = buffer.slice(nl + 1);
-          }
-        });
-        child.stderr.setEncoding("utf8");
-        child.stderr.on("data", (chunk) => { stderr += chunk; });
-        child.on("error", (e: NodeJS.ErrnoException) =>
-          finish({ status: "failed", error: e.code === "ENOENT" ? "claude CLI not found on PATH" : `could not start claude: ${e.message}` }));
-        child.on("close", (code, signal) => {
-          step.signal?.removeEventListener("abort", cancel);
-          forgetProcessGroup(child.pid);
-          handleLine(buffer);
-          finish(interpret(final, rateLimit, { code, signal, stderr }));
-        });
-        child.stdin.on("error", () => {});
-        child.stdin.end(step.prompt);
+        if (msg?.type === "result") final = msg;
+        if (msg?.type === "rate_limit_event") rateLimit = msg.rate_limit_info;
       });
+      if (!outcome.ran) return { status: "failed", error: outcome.error };
+      return interpret(final, rateLimit, outcome);
     },
   };
 }

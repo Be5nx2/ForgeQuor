@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { followRuns, getJson, postJson, type RunDetail } from "../api";
+import AssetGallery from "../components/AssetGallery.vue";
 import GateActions from "../components/GateActions.vue";
 
 const props = defineProps<{ id: number }>();
@@ -37,6 +38,10 @@ const live = ref<{ attemptId: number; kind: "text" | "tool" | "other"; summary: 
 const LIVE_LINES = 100;
 const runningAttempt = computed(() => run.value?.attempts.find((a) => a.status === "running"));
 const liveNow = computed(() => live.value.filter((l) => l.attemptId === runningAttempt.value?.id));
+/** For an `assets` Run: how far the batch is, and the Asset the Artist is drawing now. */
+const DRAWN = ["waiting", "approved"];
+const drawnCount = computed(() => run.value?.assets.filter((a) => DRAWN.includes(a.status)).length ?? 0);
+const drawing = computed(() => run.value?.assets.find((a) => a.id === runningAttempt.value?.assetId));
 
 let stopFollowing: () => void;
 onMounted(() => {
@@ -61,20 +66,47 @@ onUnmounted(() => stopFollowing?.());
     <p v-if="!OVER.includes(run.state)">
       <button type="button" class="secondary" :disabled="abandoning" @click="abandon">Abandon Run</button>
     </p>
+    <p class="muted">Workflow: {{ run.workflow }}</p>
     <p class="muted" v-if="run.trackerRef">Tracker: {{ run.trackerRef }}</p>
     <pre class="task">{{ run.task }}</pre>
     <p class="muted" v-if="run.branch">Branch <code>{{ run.branch }}</code><br />Worktree <code>{{ run.worktreePath }}</code></p>
 
     <p v-if="run.prUrl">Pull request <a :href="run.prUrl" target="_blank" rel="noopener">#{{ run.prNumber }}</a></p>
 
+    <template v-if="run.assets.length">
+      <h3>Assets</h3>
+      <p class="progress" aria-label="Progress">
+        {{ drawnCount }} of {{ run.assets.length }} drawn<span v-if="drawing"> · the Artist is drawing <strong>{{ drawing.name }}</strong> (Asset {{ drawing.position + 1 }}, attempt {{ runningAttempt?.attempt }})</span>
+      </p>
+      <p v-if="drawing" class="muted">The Artist's live events are listed under Steps.</p>
+      <AssetGallery
+        :run-id="run.id"
+        :iteration="run.iteration"
+        :assets="run.assets"
+        :gate="run.gates.find((g) => g.kind === 'asset' && !g.decidedAt)"
+        @decided="load"
+      />
+    </template>
+
+    <h3>Iterations</h3>
+    <ul>
+      <li v-for="i in run.iterations" :key="i.number">
+        <strong>Iteration {{ i.number }}</strong><span v-if="i.number === run.iteration" class="badge">current</span>
+        <pre v-if="i.feedback">{{ i.feedback }}</pre>
+        <span v-else-if="i.number === 1" class="muted"> · first pass</span>
+      </li>
+    </ul>
+
     <h3>Gates</h3>
     <p v-if="!run.gates.length" class="muted">None yet.</p>
     <ul>
       <li v-for="g in run.gates" :key="g.id">
-        <strong>{{ g.kind === "final" ? "Final Gate" : "Escalation" }}</strong>: {{ g.reason }}
+        <strong>{{ g.kind === "final" ? "Final Gate" : g.kind === "asset" ? "Asset Gate" : "Escalation" }}</strong>:
+        {{ g.kind === "asset" && g.decidedAt ? `${g.verdicts.length} ${g.verdicts.length === 1 ? "Asset" : "Assets"} judged.` : g.reason }}
         <pre v-if="g.evidence">{{ g.evidence }}</pre>
         <div v-if="g.decidedAt" class="muted">
-          {{ g.decision === "approve" ? "Approved" : "Abandoned" }} · {{ new Date(g.decidedAt).toLocaleString() }}
+          {{ g.decision === "approve" ? "Approved" : g.decision === "reject" ? "Rejected" : "Abandoned" }} · {{ new Date(g.decidedAt).toLocaleString() }}
+          <pre v-if="g.feedback">{{ g.feedback }}</pre>
         </div>
         <GateActions v-else :gate="g" @decided="load" />
       </li>
@@ -84,7 +116,7 @@ onUnmounted(() => stopFollowing?.());
     <p v-if="!run.checks.length" class="muted">None ran.</p>
     <ul>
       <li v-for="c in run.checks" :key="c.id">
-        <code>{{ c.command }}</code> · attempt {{ c.attempt }} ·
+        <code>{{ c.command }}</code> · iteration {{ c.iteration }} · attempt {{ c.attempt }} ·
         <span class="badge">{{ c.exitStatus === 0 ? "passed" : c.exitStatus === null ? "killed" : `exit ${c.exitStatus}` }}</span>
         <pre v-if="c.output.trim()">{{ c.output }}</pre>
       </li>
@@ -94,7 +126,7 @@ onUnmounted(() => stopFollowing?.());
     <p v-if="!run.attempts.length" class="muted">None yet.</p>
     <ul>
       <li v-for="a in run.attempts" :key="a.id">
-        <strong>{{ a.step }}</strong> · attempt {{ a.attempt }} · <span class="badge">{{ a.status }}</span>
+        <strong>{{ a.step }}</strong><span v-if="a.assetId"> · {{ run.assets.find((x) => x.id === a.assetId)?.name }}</span> · iteration {{ a.iteration }} · attempt {{ a.attempt }} · <span class="badge">{{ a.status }}</span>
         <div class="muted">
           {{ a.runner }}<span v-if="a.model"> ({{ a.model }})</span> · {{ new Date(a.startedAt).toLocaleString() }}
           <span v-if="a.endedAt"> → {{ new Date(a.endedAt).toLocaleTimeString() }}</span>

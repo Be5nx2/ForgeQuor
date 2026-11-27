@@ -25,3 +25,11 @@ select, textarea { padding: 0.5rem; background: #101d2d; color: inherit; border:
 pre { white-space: pre-wrap; background: #080f19; padding: 0.5rem; border-radius: 6px; margin: 0.5rem 0 0; }
 a { color: #a5e4ff; }
 .live { list-style: none; padding: 0; margin: 0.5rem 0 0; max-height: 14rem; overflow-y: auto; font-family: ui-monospace, monospace; font-size: 0.85rem; }
+fieldset.asset-request { display: flex; border: 1px solid #38bdf8; border-radius: 6px; gap: 0.5rem; margin: 0 0 0.5rem; }
+fieldset.asset-request legend { color: #a5e4ff; }
+fieldset.asset-request input[type="number"] { flex: none; width: 5rem; }
+form.stack label { display: flex; flex-direction: column; gap: 0.25rem; }
+form.stack input:not([type="checkbox"]):not([type="number"]) { flex: none; width: 100%; box-sizing: border-box; }
+form.stack label.fill { flex-direction: row; align-items: center; }
+
+.compare { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; }

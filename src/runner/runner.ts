@@ -7,6 +7,8 @@ export interface StepRequest {
   /** Directory the Agent works in (the Run's worktree). */
   cwd: string;
   model?: string;
+  /** Images to show the Agent with the prompt (absolute paths), for Runners that can take them (Codex); others ignore them. */
+  images?: string[];
   /** Aborting it kills the Runner's process and everything it started; the Step then ends as a failure. */
   signal?: AbortSignal;
 }
@@ -22,12 +24,13 @@ export interface RunnerEvent {
 }
 
 export type StepResult =
-  | { status: "succeeded"; summary: string }
+  /** `files` are the files the Runner itself produced outside the worktree (Codex's generated images), as absolute paths in creation order; empty for Runners that produce none. */
+  | { status: "succeeded"; summary: string; files?: string[] }
   | { status: "failed"; error: string }
   /** The Runner's Quota is used up; `resetsAt` is null when the Runner did not say when. */
   | { status: "quota_exhausted"; resetsAt: Date | null };
 
-/** The seam between Forge core and an AI tool (Claude Code, later Codex). */
+/** The seam between Forge core and an AI tool (Claude Code, Codex). */
 export interface Runner {
   /** Runs one Step in a fresh session, reporting progress as it goes. Never rejects: failures are results. */
   run(step: StepRequest, onEvent: (event: RunnerEvent) => void): Promise<StepResult>;

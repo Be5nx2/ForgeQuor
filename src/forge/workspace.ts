@@ -113,11 +113,49 @@ export async function createRunWorktree(opts: {
   mkdirSync(join(worktreePath, RUN_NOTES_DIR), { recursive: true });
 }
 
+/** Whether `path` exists on the remote's `branch` as last fetched. */
+export async function existsInBranch(repoRoot: string, branch: string, path: string): Promise<boolean> {
+  return (await git(repoRoot, "cat-file", "-e", `origin/${branch}:${path}`)) !== null;
+}
+
+/** Whether `path` is in the worktree's checked-out commit (what the Run started from, before it committed anything). */
+export async function existsAtHead(worktreePath: string, path: string): Promise<boolean> {
+  return (await git(worktreePath, "cat-file", "-e", `HEAD:${path}`)) !== null;
+}
+
+/** The text of `path` on the remote's `branch` as last fetched, or null when it is not there. */
+export async function readInBranch(repoRoot: string, branch: string, path: string): Promise<string | null> {
+  try {
+    return (await run("git", ["show", `origin/${branch}:${path}`], { cwd: repoRoot, maxBuffer: 16 * 1024 * 1024 })).stdout;
+  } catch {
+    return null;
+  }
+}
+
+/** Every file path of the remote's `branch` as last fetched, sorted. */
+export async function listInBranch(repoRoot: string, branch: string): Promise<string[]> {
+  try {
+    // NUL-separated so that names with special characters come back as they are; the buffer is large for big repositories.
+    const { stdout } = await run("git", ["ls-tree", "-r", "-z", "--name-only", `origin/${branch}`], { cwd: repoRoot, maxBuffer: 256 * 1024 * 1024 });
+    return stdout.split("\0").filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 /** Commits whatever the Developer left uncommitted. Returns true if a commit was made. */
 export async function commitLeftovers(worktreePath: string, message: string): Promise<boolean> {
   await gitOrThrow(worktreePath, "add", "-A");
   if (!(await gitOrThrow(worktreePath, "status", "--porcelain"))) return false;
   await gitOrThrow(worktreePath, "commit", "-q", "-m", message);
+  return true;
+}
+
+/** Commits exactly these paths (and whatever else is staged is left out). Returns true if a commit was made; false when they have no change to commit. */
+export async function commitPaths(worktreePath: string, paths: string[], message: string): Promise<boolean> {
+  await gitOrThrow(worktreePath, "add", "--", ...paths);
+  if (!(await gitOrThrow(worktreePath, "status", "--porcelain", "--", ...paths))) return false;
+  await gitOrThrow(worktreePath, "commit", "-q", "-m", message, "--", ...paths);
   return true;
 }
 
