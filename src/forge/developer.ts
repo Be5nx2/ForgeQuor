@@ -35,9 +35,10 @@ const MAX_DEVELOPER_ATTEMPTS = 3;
 /** The `developer` Workflow: setup, Developer, Checks (retrying the Developer), pull request, then the final Gate. */
 export const developerWorkflow: Workflow = {
   name: "developer",
+  inputs: ["task"],
   plan({ task, title }) {
     if (!task?.trim()) throw new Error("A Run needs a task.");
-    return { task: task.trim(), title: title?.trim() || deriveTitle(task), assets: [] };
+    return { task: task.trim(), title: title?.trim() || deriveTitle(task) };
   },
   async run(ctx) {
     const { run, project, worktreePath, defaultBranch, stop, records } = ctx;

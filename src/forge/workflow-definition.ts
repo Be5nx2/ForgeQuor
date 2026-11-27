@@ -1,4 +1,5 @@
 import { fileURLToPath } from "node:url";
+import type { GateKind } from "./types.js";
 import { isMap, isScalar, isSeq, LineCounter, parseDocument, type Node } from "yaml";
 
 /** Where Forgequor's own Workflow files live, one `<name>.yaml` per built-in Workflow. */
@@ -12,7 +13,7 @@ export type StepType = "agent" | "checks" | "gate" | "publish" | "artist";
 const STEP_TYPES: readonly StepType[] = ["agent", "checks", "gate", "publish", "artist"];
 
 /** The Gate kinds a Workflow can place; Escalations are opened by Forgequor, never declared. */
-export type WorkflowGateKind = "final" | "asset";
+export type WorkflowGateKind = Exclude<GateKind, "escalation">;
 const GATE_KINDS: readonly WorkflowGateKind[] = ["final", "asset"];
 
 /** Automatic loop-backs a Step allows when it does not say (1 try + 2 more). */

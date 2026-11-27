@@ -32,7 +32,7 @@ The engine behind every Workflow, with no change visible to the human: a deeper 
     - the copies in the `developer` and `assets` Workflows are gone;
     - the context handed to a Step holds the Run (Project, worktree, branch), the stop signal, the Agent seat it needs and a few operations, with no raw database pool;
     - every existing test passes unchanged.
-- [ ] `m3-02` **Assets out of the core**: the Forge core knows nothing about Assets.
+- [x] `m3-02` **Assets out of the core**: the Forge core knows nothing about Assets.
   - Spec: `docs/specs/m3a-workflow-engine.md`
   - Blocked by: `m3-01`
   - Acceptance:

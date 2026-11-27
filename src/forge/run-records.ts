@@ -1,6 +1,7 @@
 import type pg from "pg";
 import type { StepResult } from "../runner/runner.js";
 import type { CheckOutcome } from "./checks.js";
+import type { GateDecision, GateKind } from "./types.js";
 import { resumePoint, type ResumePoint } from "./resume.js";
 
 /** What a Step attempt is recorded with when it starts. */
@@ -29,6 +30,8 @@ export interface RunRecords {
   recordChecks(attempt: number, outcomes: CheckOutcome[]): Promise<void>;
   /** The Feedback of every rejection of this Run, oldest first. */
   earlierFeedbacks(): Promise<string[]>;
+  /** The decision of the Run's latest Gate of a kind, or null when there is none or it is still open. */
+  lastDecision(kind: GateKind): Promise<GateDecision | null>;
   /** Remembers the pull request opened for the Run. */
   recordPullRequest(number: number, url: string): Promise<void>;
   /** Whether the Review Brief was already posted on the pull request. */
@@ -79,6 +82,10 @@ export function createRunRecords(pool: pg.Pool, runId: number, iteration: number
     async earlierFeedbacks() {
       const { rows } = await pool.query("SELECT feedback FROM gates WHERE run_id = $1 AND decision = 'reject' ORDER BY id", [runId]);
       return rows.map((r) => r.feedback);
+    },
+    async lastDecision(kind) {
+      const { rows } = await pool.query("SELECT decision FROM gates WHERE run_id = $1 AND kind = $2 ORDER BY id DESC LIMIT 1", [runId, kind]);
+      return rows[0]?.decision ?? null;
     },
     async recordPullRequest(number, url) {
       await pool.query("UPDATE runs SET pr_number = $2, pr_url = $3 WHERE id = $1", [runId, number, url]);

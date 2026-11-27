@@ -5,28 +5,16 @@ import type { Runner } from "../runner/runner.js";
 import { developerWorkflow } from "./developer.js";
 import { publishPullRequest } from "./publish.js";
 import { createRunRecords } from "./run-records.js";
-import {
-  createAssetsWorkflow,
-  assetTargetPath,
-  AssetNotFoundError,
-  checkAgainstRepository,
-  replacedCopyPath,
-  checkVerdicts,
-  loadAssets,
-  loadGateVerdicts,
-  recordVerdicts,
-  repositoryPath,
-  servableAssetFile,
-  VerdictError,
-  verdictFeedback,
-} from "./assets.js";
-import type { AgentSeat, Workflow } from "./workflow.js";
+import { builtInExtensions } from "./builtin.js";
+import { AssetNotFoundError, GateError, InvalidInputError, RunNotFoundError, RunStateError } from "./errors.js";
+import type { Extension } from "./extension.js";
+import { escalationGate, finalGate, refusal, type GateKindModule, type GateOutcome } from "./gates.js";
+import type { AgentSeat, RunInput, Workflow } from "./workflow.js";
 import type { CodeHost } from "../codehost/codehost.js";
 import { parseDefaultSize, parseReferences } from "./art-direction.js";
 import type {
   ApprovedRun,
   ArtInfo,
-  AssetRequest,
   CheckResult,
   Gate,
   GateAction,
@@ -41,22 +29,10 @@ import type {
   StepAttempt,
   Verdict,
 } from "./types.js";
-import { createRunWorktree, existsInBranch, inspectRepository, listInBranch, readInBranch, RegistrationError, refreshDefaultBranch, slugify } from "./workspace.js";
+import { createRunWorktree, existsInBranch, inspectRepository, listInBranch, readInBranch, RegistrationError, refreshDefaultBranch, repositoryPath, slugify } from "./workspace.js";
 
-export { RegistrationError, AssetNotFoundError };
+export { RegistrationError, AssetNotFoundError, GateError, InvalidInputError, RunNotFoundError, RunStateError };
 export type * from "./types.js";
-
-/** A Gate decision that cannot be made: unknown Gate, already decided, or a choice it does not offer. */
-export class GateError extends Error {}
-
-/** An operation the Run's current state does not allow, such as abandoning a Run that is already over. */
-export class RunStateError extends Error {}
-
-/** Something the human gave is no good (an empty Feedback, a path outside the repository). */
-export class InvalidInputError extends Error {}
-
-/** No such Run. */
-export class RunNotFoundError extends Error {}
 
 export interface Forge {
   /** Hears every RunUpdate from now on. Returns the function that stops it. A throwing listener never disturbs a Run. */
@@ -81,7 +57,7 @@ export interface Forge {
    * its Asset Requests; the input is refused with an error saying what is wrong before anything starts. A Project already at its concurrent Runs
    * limit leaves the new Run Queued; it starts by itself, in creation order, when a slot frees up.
    */
-  startRun(input: { projectId: number; task?: string; title?: string; trackerRef?: string; workflow?: string; assets?: AssetRequest[] }): Promise<Run>;
+  startRun(input: RunInput & { projectId: number; trackerRef?: string; workflow?: string }): Promise<Run>;
   getRun(id: number): Promise<RunDetail>;
   listRuns(filter?: { projectId?: number; state?: RunState }): Promise<Run[]>;
   /** Every Gate still waiting for the human, across all Projects. */
@@ -139,6 +115,8 @@ export interface ForgeDeps {
   stepTimeoutMs?: number;
   /** A Check command running longer than this is killed, which fails the Check. Default: 10 minutes. */
   checkTimeoutMs?: number;
+  /** The Step types, Gate kinds and Workflows built on the core besides the Developer's. Default: the built-in ones (Assets). */
+  extensions?: Extension[];
   /** The clock, so tests can move time. */
   now?: () => Date;
 }
@@ -225,21 +203,7 @@ const ACTIVE: RunState[] = ["queued", "running", "waiting", "paused", "approved"
  */
 const HOLDING_A_SLOT: RunState[] = ["running", "waiting", "paused"];
 
-/** What the human can do at each kind of Gate. */
-const GATE_ACTIONS: Record<GateKind, GateAction[]> = {
-  final: ["approve", "reject", "abandon"],
-  asset: ["judge", "abandon"],
-  escalation: ["abandon"],
-};
-const GATE_NAMES: Record<GateKind, string> = { final: "A final Gate", asset: "An Asset Gate", escalation: "An Escalation" };
-
-/** Why a Gate does not offer `action`. */
-function refusal(kind: GateKind, action: GateAction): string {
-  const past: Record<GateAction, string> = { approve: "approved", reject: "rejected", abandon: "abandoned", judge: "judged" };
-  return `${GATE_NAMES[kind]} cannot be ${past[action]}; it can only be ${GATE_ACTIONS[kind].map((a) => past[a]).join(" or ")}.`;
-}
-
-function toGate(r: Record<string, any>): Gate {
+function toGate(r: Record<string, any>, actions: GateAction[]): Gate {
   return {
     id: Number(r.id),
     runId: Number(r.run_id),
@@ -247,7 +211,7 @@ function toGate(r: Record<string, any>): Gate {
     kind: r.kind,
     reason: r.reason,
     evidence: r.evidence,
-    actions: GATE_ACTIONS[r.kind as GateKind],
+    actions,
     feedback: r.feedback,
     verdicts: [],
     openedAt: r.opened_at,
@@ -263,7 +227,11 @@ const RUN_COLUMNS_OF_R = RUN_COLUMNS.split(", ").map((c) => `r.${c}`).join(", ")
 export function createForge(deps: ForgeDeps): Forge {
   const { pool } = deps;
   /** The Workflows a Run can follow, by name. */
-  const workflows = new Map<string, Workflow>([developerWorkflow, createAssetsWorkflow(pool)].map((w) => [w.name, w]));
+  const extensions = deps.extensions ?? builtInExtensions(pool);
+  const workflows = new Map<string, Workflow>([developerWorkflow, ...extensions.flatMap((e) => e.workflows)].map((w) => [w.name, w]));
+  /** The Gate kinds, by kind: each decides its own Gates. */
+  const gateKinds = new Map<GateKind, GateKindModule>([finalGate, escalationGate, ...extensions.flatMap((e) => e.gateKinds)].map((k) => [k.kind, k]));
+  const gateOf = (r: Record<string, any>): Gate => toGate(r, gateKinds.get(r.kind)?.actions ?? []);
   /** Each Agent's Runner: the Developer works through Claude Code, the Artist through Codex. */
   const agents: { developer: AgentSeat; artist?: AgentSeat } = {
     developer: { runner: deps.runner, runnerName: "claude", model: deps.developerModel },
@@ -413,7 +381,7 @@ export function createForge(deps: ForgeDeps): Forge {
    */
   async function decideAndContinue(
     gate: Gate,
-    decision: { action: "approve" | "reject"; feedback?: string; nextIteration: boolean; record?: (client: pg.PoolClient) => Promise<void> },
+    decision: Extract<GateOutcome, { next: "continue" }>,
   ): Promise<RunDetail> {
     const client = await pool.connect();
     let run: Run;
@@ -429,7 +397,7 @@ export function createForge(deps: ForgeDeps): Forge {
       const decided = moved.rowCount
         ? await client.query(
             "UPDATE gates SET decided_at = now(), decision = $2, feedback = $3 WHERE id = $1 AND decided_at IS NULL RETURNING run_id",
-            [gate.id, decision.action, decision.feedback ?? null],
+            [gate.id, decision.decision, decision.feedback ?? null],
           )
         : null;
       if (!decided?.rowCount) {
@@ -637,16 +605,20 @@ export function createForge(deps: ForgeDeps): Forge {
       return () => void listeners.delete(listener);
     },
 
-    async startRun({ projectId, task, title, trackerRef, workflow = "developer", assets }) {
+    async startRun({ projectId, trackerRef, workflow = "developer", ...input }) {
       const flow = workflows.get(workflow);
       if (!flow) throw new Error(`Unknown Workflow "${workflow}".`);
-      const { rows: found } = await pool.query(`SELECT art_folder, local_path, default_branch FROM projects WHERE id = $1`, [projectId]);
+      const { rows: found } = await pool.query(`SELECT ${COLUMNS} FROM projects WHERE id = $1`, [projectId]);
       if (!found[0]) throw new Error(`No Project ${projectId}.`);
-      const plan = flow.plan({ task, title, assets });
-      // What is checked below is what the Run will start from: the default branch as it is on the remote now.
-      const branch = plan.assets.length ? await freshDefaultBranch(projectId, found[0].local_path) : found[0].default_branch;
-      // Refused now, not after a Quota-costly generation: what the Asset Requests would overwrite or lean on must be right.
-      await checkAgainstRepository(plan.assets, found[0].art_folder, (path) => existsInBranch(found[0].local_path, branch, path));
+      const project = toProject(found[0]);
+      const plan = flow.plan(input);
+      // Refused now, not after a Quota-costly generation. What is checked is what the Run will start from: the default
+      // branch as it is on the remote now, fetched once and only when a check asks.
+      let fresh: Promise<string> | undefined;
+      await plan.check?.({
+        project,
+        exists: async (path) => existsInBranch(project.localPath, await (fresh ??= freshDefaultBranch(projectId, project.localPath)), path),
+      });
       const client = await pool.connect();
       let runId: number;
       try {
@@ -657,13 +629,7 @@ export function createForge(deps: ForgeDeps): Forge {
           [projectId, workflow, plan.title, plan.task, trackerRef?.trim() || null],
         );
         runId = Number(rows[0].id);
-        for (const [position, a] of plan.assets.entries()) {
-          await client.query(
-            `INSERT INTO assets (run_id, position, name, kind, description, width, height, fill, frames, style_references, replace, target_path)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-            [runId, position, a.name, a.kind, a.description, a.width, a.height, a.fill === true, a.frames ?? 1, JSON.stringify(a.references ?? []), a.replace === true, assetTargetPath(found[0].art_folder, a.kind, a.name)],
-          );
-        }
+        await plan.store?.(client, runId, project);
         await client.query("COMMIT");
       } catch (e) {
         await client.query("ROLLBACK").catch(() => {});
@@ -691,12 +657,13 @@ export function createForge(deps: ForgeDeps): Forge {
       const attempts = await pool.query("SELECT * FROM step_attempts WHERE run_id = $1 ORDER BY id", [id]);
       const checks = await pool.query("SELECT * FROM check_results WHERE run_id = $1 ORDER BY id", [id]);
       const gates = await pool.query("SELECT * FROM gates WHERE run_id = $1 ORDER BY id", [id]);
-      const verdicts = await loadGateVerdicts(pool, gates.rows.map((g) => Number(g.id)));
-      const assets = await loadAssets(pool, id);
-      // Each rejected Gate started the Iteration after its own. An Asset Gate's Feedback is that of its rejected verdicts.
+      const parts = await Promise.all(extensions.map((e) => e.detail(id, gates.rows.map((g) => Number(g.id)))));
+      const assets = parts.flatMap((p) => p.assets);
+      const verdictsOf = (gateId: number) => parts.flatMap((p) => p.gates.get(gateId)?.verdicts ?? []);
+      // Each rejected Gate started the Iteration after its own. When it holds no Feedback of its own, its kind's is used.
       const iterations: Iteration[] = [{ number: 1, feedback: null }];
       for (const g of gates.rows.filter((g) => g.decision === "reject")) {
-        iterations.push({ number: g.iteration + 1, feedback: g.feedback ?? verdictFeedback(verdicts.get(Number(g.id)) ?? [], assets) });
+        iterations.push({ number: g.iteration + 1, feedback: g.feedback ?? parts.map((p) => p.gates.get(Number(g.id))?.feedback ?? null).find(Boolean) ?? null });
       }
       return {
         ...toRun(rows[0]),
@@ -704,7 +671,7 @@ export function createForge(deps: ForgeDeps): Forge {
         iterations,
         attempts: attempts.rows.map(toAttempt),
         checks: checks.rows.map(toCheck),
-        gates: gates.rows.map((g) => ({ ...toGate(g), verdicts: verdicts.get(Number(g.id)) ?? [] })),
+        gates: gates.rows.map((g) => ({ ...gateOf(g), verdicts: verdictsOf(Number(g.id)) })),
       };
     },
 
@@ -724,7 +691,7 @@ export function createForge(deps: ForgeDeps): Forge {
          FROM gates g JOIN runs r ON r.id = g.run_id JOIN projects p ON p.id = r.project_id
          WHERE g.decided_at IS NULL ORDER BY g.id`,
       );
-      return rows.map((r) => ({ ...toGate(r), runTitle: r.run_title, projectName: r.project_name }));
+      return rows.map((r) => ({ ...gateOf(r), runTitle: r.run_title, projectName: r.project_name }));
     },
 
     async listApprovedRuns() {
@@ -739,31 +706,14 @@ export function createForge(deps: ForgeDeps): Forge {
     async decideGate({ gateId, action, feedback, verdicts }) {
       const { rows } = await pool.query("SELECT * FROM gates WHERE id = $1", [gateId]);
       if (!rows[0]) throw new GateError(`No Gate ${gateId}.`);
-      const gate = toGate(rows[0]);
+      const gate = gateOf(rows[0]);
       if (gate.decidedAt) throw new GateError(`Gate ${gateId} is already decided.`);
-      if (!gate.actions.includes(action)) throw new GateError(refusal(gate.kind, action));
-      if (action === "reject") {
-        const reason = feedback?.trim();
-        if (!reason) throw new InvalidInputError("Rejecting a Gate needs a Feedback saying what to change.");
-        return decideAndContinue(gate, { action: "reject", feedback: reason, nextIteration: true });
-      }
-      if (action === "judge") {
-        let given: Verdict[];
-        try {
-          given = await checkVerdicts(pool, gate.runId, verdicts);
-        } catch (e) {
-          throw e instanceof VerdictError ? new InvalidInputError(e.message) : e;
-        }
-        // The Asset Gate is not the end of its Run: approved Assets are still to be committed and sent as a pull request.
-        const rejected = given.some((v) => v.action === "reject");
-        return decideAndContinue(gate, {
-          action: rejected ? "reject" : "approve",
-          nextIteration: rejected,
-          record: (client) => recordVerdicts(client, gate.id, given),
-        });
-      }
-
-      if (action === "abandon") {
+      const kind = gateKinds.get(gate.kind)!;
+      if (!kind.actions.includes(action)) throw new GateError(refusal(kind, action));
+      // The kind validates the decision and says where the Run goes; the core carries it out.
+      const outcome = await kind.decide(gate, { action, feedback, verdicts });
+      if (outcome.next === "continue") return decideAndContinue(gate, outcome);
+      if (outcome.next === "abandon") {
         try {
           return await abandon(gate.runId);
         } catch (e) {
@@ -782,7 +732,7 @@ export function createForge(deps: ForgeDeps): Forge {
           [gate.runId],
         );
         const decided = moved.rowCount
-          ? await client.query("UPDATE gates SET decided_at = now(), decision = $2 WHERE id = $1 AND decided_at IS NULL RETURNING run_id", [gateId, action])
+          ? await client.query("UPDATE gates SET decided_at = now(), decision = 'approve' WHERE id = $1 AND decided_at IS NULL RETURNING run_id", [gateId])
           : null;
         if (!decided?.rowCount) {
           await client.query("ROLLBACK");
@@ -846,25 +796,15 @@ export function createForge(deps: ForgeDeps): Forge {
     },
 
     async assetImage(runId, assetId, which) {
-      const versionId = which === "replaced" ? undefined : which;
-      const { rows } = which === "replaced"
-        ? await pool.query(
-            "SELECT $3::text AS path, r.worktree_path FROM assets a JOIN runs r ON r.id = a.run_id WHERE a.id = $1 AND a.run_id = $2 AND a.replace",
-            [assetId, runId, replacedCopyPath(assetId)],
-          )
-        : versionId === undefined
-        ? await pool.query(
-            "SELECT a.target_path AS path, r.worktree_path FROM assets a JOIN runs r ON r.id = a.run_id WHERE a.id = $1 AND a.run_id = $2",
-            [assetId, runId],
-          )
-        : await pool.query(
-            `SELECT v.image_path AS path, r.worktree_path FROM asset_versions v JOIN assets a ON a.id = v.asset_id JOIN runs r ON r.id = a.run_id
-             WHERE v.id = $3 AND a.id = $1 AND a.run_id = $2`,
-            [assetId, runId, versionId],
-          );
-      const file = rows[0]?.path && rows[0].worktree_path && servableAssetFile(rows[0].worktree_path, rows[0].path);
-      if (!file) throw new AssetNotFoundError(`No such Asset ${assetId} in Run ${runId}, or it has no image yet.`);
-      return file;
+      // Each extension answers for what it holds; the first that has the file serves it.
+      for (const e of extensions) {
+        try {
+          return await e.assetImage(runId, assetId, which);
+        } catch (err) {
+          if (!(err instanceof AssetNotFoundError)) throw err;
+        }
+      }
+      throw new AssetNotFoundError(`No such Asset ${assetId} in Run ${runId}, or it has no image yet.`);
     },
 
     async whenIdle() {

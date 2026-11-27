@@ -179,3 +179,12 @@ export function readReviewBrief(worktreePath: string): string | null {
   const text = readFileSync(file, "utf8");
   return text.trim() ? text : null;
 }
+
+/** A repository-relative path, tidied: no leading or trailing slash. Throws when it is empty, absolute or climbs out of the repository. */
+export function repositoryPath(value: string): string {
+  const path = value.trim().replace(/\/+$/, "");
+  if (!path || path.startsWith("/") || path.includes("\\") || path.split("/").some((part) => part === ".." || part === "." || part === "")) {
+    throw new Error(`"${value.trim()}" is not a path inside the repository.`);
+  }
+  return path;
+}
