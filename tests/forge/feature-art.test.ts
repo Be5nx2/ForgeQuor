@@ -28,7 +28,8 @@ const passing: StepResult = { status: "succeeded", summary: "Summary: Fine.\n\nF
 const isGriller = (s: StepRequest) => s.instructions.includes("You are the Griller");
 const isReviewer = (s: StepRequest) => s.instructions.includes("You are the Reviewer") || s.instructions.includes("You are the Consolidator");
 const grillers = () => claude.steps.filter(isGriller);
-const developers = () => claude.steps.filter((s) => !isGriller(s) && !isReviewer(s));
+const isSpecWriter = (s: StepRequest) => s.instructions.includes("You are the Spec Writer");
+const developers = () => claude.steps.filter((s) => !isGriller(s) && !isSpecWriter(s) && !isReviewer(s));
 const artists = () => codex.steps.filter((s) => s.instructions.includes("You are the Artist"));
 
 const REQUESTS = join(".forgequor", "asset-requests.json");
@@ -43,6 +44,11 @@ function griller(turns: { say: string; requests?: unknown }[]) {
   let n = 0;
   return (step: StepRequest): StepResult | void => {
     if (isReviewer(step)) return passing;
+    if (isSpecWriter(step)) {
+      mkdirSync(join(step.cwd, "docs", "specs"), { recursive: true });
+      writeFileSync(join(step.cwd, "docs", "specs", "let-the-player-jump-twice.md"), "# Double jump\n");
+      return;
+    }
     if (!isGriller(step)) {
       writeFileSync(join(step.cwd, "jump.txt"), `jump ${claude.steps.length}\n`);
       writeFileSync(join(step.cwd, ".forgequor", "review-brief.md"), "What the Developer did.\n");
@@ -110,7 +116,11 @@ async function decide(r: RunDetail, input: Parameters<Forge["decideGate"]>[0] ex
   await forge.whenIdle();
   return forge.getRun(r.id);
 }
-const confirm = (r: RunDetail) => decide(r, { action: "confirm" });
+/** Confirms the Griller's summary and, when the Run then stops at the spec Gate, approves the spec. */
+async function confirm(r: RunDetail): Promise<RunDetail> {
+  const confirmed = await decide(r, { action: "confirm" });
+  return open(confirmed)?.kind === "spec" ? decide(confirmed, { action: "approve" }) : confirmed;
+}
 async function judge(r: RunDetail, feedback?: string): Promise<RunDetail> {
   const verdicts = r.assets.filter((a) => a.status === "waiting").map((a) => (feedback ? { assetId: a.id, action: "reject" as const, feedback } : { assetId: a.id, action: "approve" as const }));
   return decide(r, { action: "judge", verdicts });
@@ -129,7 +139,7 @@ describe("art inside feature", () => {
     run = await confirm(run);
 
     // The Artist drew the Asset and the human is asked for a verdict; nothing of the code started yet.
-    expect(stepsOf(run).slice(0, 4)).toEqual(["griller:done", "artist:done", "asset-gate:running", "developer:waiting"]);
+    expect(stepsOf(run).slice(0, 5)).toEqual(["griller:done", "spec-writer:done", "spec:done", "artist:done", "asset-gate:running"]);
     expect(open(run)).toMatchObject({ kind: "asset", stepId: "asset-gate" });
     expect(run.assets.map((a) => [a.name, a.targetPath, a.status])).toEqual([["Hero Idle", HERO_PATH, "waiting"]]);
     expect(artists()).toHaveLength(1);
@@ -143,11 +153,12 @@ describe("art inside feature", () => {
 
     run = await judge(run);
     expect(run.state).toBe("waiting");
-    expect(stepsOf(run)).toEqual(["griller:done", "artist:done", "asset-gate:done", "developer:done", "checks:done", "review:done", "publish:done", "final:running"]);
+    expect(stepsOf(run)).toEqual(["griller:done", "spec-writer:done", "spec:done", "artist:done", "asset-gate:done", "developer:done", "checks:done", "review:done", "publish:done", "final:running"]);
     // The Developer is given the approved Assets' paths, and the Assets are already in the branch.
     expect(developers()).toHaveLength(1);
     expect(developers()[0]!.prompt).toContain(HERO_PATH);
     expect(developers()[0]!.prompt).toContain("Build a double jump");
+    expect(developers()[0]!.prompt).toContain("docs/specs/let-the-player-jump-twice.md");
 
     // One pull request, opened at the end, with the Developer's Review Brief; it holds the Assets and the code.
     expect(codeHost.pullRequests).toHaveLength(1);
@@ -165,8 +176,8 @@ describe("art inside feature", () => {
     let run = await feature(p.id);
     run = await confirm(run);
 
-    expect(stepsOf(run)).toEqual(["griller:done", "artist:skipped", "asset-gate:skipped", "developer:done", "checks:done", "review:done", "publish:done", "final:running"]);
-    expect(run.gates.map((g) => g.kind)).toEqual(["conversation", "final"]);
+    expect(stepsOf(run)).toEqual(["griller:done", "spec-writer:done", "spec:done", "artist:skipped", "asset-gate:skipped", "developer:done", "checks:done", "review:done", "publish:done", "final:running"]);
+    expect(run.gates.map((g) => g.kind)).toEqual(["conversation", "spec", "final"]);
     expect(artists()).toHaveLength(0);
     expect(developers()[0]!.prompt).not.toContain("Assets");
   });
