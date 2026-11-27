@@ -169,6 +169,30 @@ describe("Quota readings", () => {
     ]);
   });
 
+  it("records an exhausted reading with its reset time when a Runner pauses a Run for Quota", async () => {
+    const codex = createFakeRunner(() => ({ status: "quota_exhausted", resetsAt: new Date("2026-11-27T15:30:00Z") }));
+    const forge = forgeWith(askable(null), { artistRunner: codex, seats: { developer: { runner: "codex" } } });
+
+    await developerStep(forge);
+
+    const [run] = await forge.listRuns();
+    expect(run!.state).toBe("paused");
+    const codexReading = (await forge.quota())[1]!.reading!;
+    expect(codexReading.exhausted).toBe(true);
+    expect(codexReading.fiveHour.resetsAt).toEqual(new Date("2026-11-27T15:30:00Z"));
+  });
+
+  it("keeps the percents last read when a pause records exhaustion", async () => {
+    let calls = 0;
+    const codex = createFakeRunner(() => (++calls === 1 ? { status: "succeeded", summary: "done", quota: reading(80) } : { status: "quota_exhausted", resetsAt: null }));
+    const forge = forgeWith(askable(null), { artistRunner: codex, seats: { developer: { runner: "codex" } } });
+
+    await developerStep(forge);
+    await developerStep(forge);
+
+    expect((await forge.quota())[1]!.reading).toMatchObject({ exhausted: true, fiveHour: { percentUsed: 80 }, weekly: { percentUsed: 40 } });
+  });
+
   it("does not let a Runner that fails to answer disturb a Step", async () => {
     const claude = askable(new Error("claude is gone"));
     const forge = forgeWith(claude);

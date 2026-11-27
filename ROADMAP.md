@@ -209,7 +209,7 @@ Griller with a **Conversation Gate** (it writes the Project's glossary and ADRs 
     - `GET /api/quota` returns both vendors with the reading's age;
     - a compact bar per vendor at the top of every tab, greyed "unknown" without a reading, with its age;
     - Runner contract tests against a fake CLI replaying the real `/usage` text and an unparseable one; the Claude smoke test makes one real `readQuota()` call.
-- [ ] `m4-05` **Codex Quota bar and Quota pauses**: Codex's bar fills in, and a paused Run's bar reads exhausted.
+- [x] `m4-05` **Codex Quota bar and Quota pauses**: Codex's bar fills in, and a paused Run's bar reads exhausted.
   - Spec: `docs/specs/m4-comfort.md`
   - Blocked by: `m4-04`
   - Acceptance:
