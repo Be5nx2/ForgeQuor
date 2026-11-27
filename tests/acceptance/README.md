@@ -12,6 +12,8 @@ Never part of `npm test`: it starts the real app, talks to GitHub and runs real 
 | `forgequor.ba.ts` §3 | Project Workflows: `forgequor/workflows/*.yaml` pushed to the sandbox are listed (added, overriding `developer`, invalid with errors); an invalid one is refused at launch; a Run keeps its frozen definition after the YAML changes. |
 | `forgequor.ba.ts` §4 | Escalations with choices: retry re-runs only the failed Step with a fresh budget; go back is refused without Feedback or to a later/unknown Step; go back to the Developer replays it and what follows, files kept; a passing retry reaches the final Gate; abandon still works. |
 | `forgequor.ba.ts` §5 | Opt-in (`BA_ASSETS=1`, uses Codex): an `assets` Run drawn, rejected with Feedback, redrawn, approved, published. |
+| `team.ba.ts` `bugfix` | A buggy script pushed to the sandbox, a bug description, solo review: the Developer fixes it, the Check passes, the Reviewer passes it, the PR holds only the fix and its Review Brief has the Review. |
+| `team.ba.ts` `feature` | A subject; the suite answers the Griller's rounds in the Conversation Gate and confirms its summary, approves the spec at the spec Gate; the Architect plans, the Developer builds, duo review (Reviewers + Consolidator); the PR holds the code and the spec, no Skills or Run Notes; abandon closes it. |
 
 ## Running it
 
@@ -28,12 +30,13 @@ Settings (environment):
 
 - `BA_MODEL` (default `haiku`): the Developer's model. Quality does not matter here.
 - `BA_ASSETS=1`: also run the `assets` scenario (Codex quota).
+- `BA_CODEX=1`: keep the second Reviewer on Codex (its default); otherwise the BA moves it to Claude. Every Claude seat runs on `BA_MODEL`.
 - `BA_DATABASE` (default `forgequor_ba`), `BA_PORT` (default `4180`): the app under test. The database is dropped and
   recreated at each run, then left in place so the UI can be inspected afterwards
   (`FORGEQUOR_DATABASE_URL=postgres://forgequor:forgequor@localhost:5433/forgequor_ba FORGEQUOR_PORT=4180 npm start`).
 - `BA_SHOW_LOG=1`: print the app's log at the end.
 
-A full run takes roughly 15–30 minutes, mostly Agent time.
+A full run takes roughly 10–30 minutes, mostly Agent time. An Escalation fails the scenario at once with its reason.
 
 ## What it leaves behind
 

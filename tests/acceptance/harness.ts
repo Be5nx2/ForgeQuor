@@ -47,6 +47,22 @@ export interface App {
   stop(): Promise<void>;
 }
 
+/**
+ * Every Claude seat on the cheap model (BA_MODEL, default haiku). The second Reviewer defaults to Codex; unless BA_CODEX=1
+ * the BA moves it to Claude too, so a run costs no Codex Quota. The Artist stays on Codex (it is only used with BA_ASSETS).
+ */
+function claudeSeats(): Record<string, string> {
+  const model = process.env.BA_MODEL ?? "haiku";
+  const seats = ["griller", "spec-writer", "architect", "developer", "reviewer-a", "consolidator"];
+  const env: Record<string, string> = {};
+  for (const seat of seats) env[`FORGEQUOR_${seat.toUpperCase().replace(/-/g, "_")}_MODEL`] = model;
+  if (!process.env.BA_CODEX) {
+    env.FORGEQUOR_REVIEWER_B_RUNNER = "claude";
+    env.FORGEQUOR_REVIEWER_B_MODEL = model;
+  }
+  return env;
+}
+
 /** Starts Forgequor (`src/main.ts`, unchanged) with the BA settings and waits until its API answers. */
 export async function startApp(): Promise<App> {
   const worktrees = mkdtempSync(join(tmpdir(), "forgequor-ba-worktrees-"));
@@ -60,7 +76,7 @@ export async function startApp(): Promise<App> {
       FORGEQUOR_PORT: String(BA_PORT),
       FORGEQUOR_WORKTREES: worktrees,
       FORGEQUOR_PR_POLL_SECONDS: "5",
-      FORGEQUOR_DEVELOPER_MODEL: process.env.BA_MODEL ?? "haiku",
+      ...claudeSeats(),
       FORGEQUOR_STEP_TIMEOUT_MINUTES: "15",
       FORGEQUOR_CHECK_TIMEOUT_MINUTES: "2",
     },
@@ -138,7 +154,8 @@ export async function waitForState(id: number, state: RunDetail["state"], timeou
   });
 }
 
-class FatalWait extends Error {}
+/** Thrown from a `waitFor` probe to stop waiting at once (an Escalation, a Run that ended elsewhere). */
+export class FatalWait extends Error {}
 
 export function openGate(run: RunDetail): Gate | undefined {
   return run.gates.find((g) => !g.decidedAt);
