@@ -1,10 +1,28 @@
 import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
+import { parseUsage, unknownReading } from "./claude-usage.js";
 import { runCli } from "./process.js";
-import type { Runner, RunnerEvent, StepRequest, StepResult } from "./runner.js";
+import type { QuotaReading, QuotaWindow, Runner, RunnerEvent, StepRequest, StepResult } from "./runner.js";
 
 export interface ClaudeRunnerOptions {
   /** Environment for the subprocess (defaults to the current one). */
   env?: NodeJS.ProcessEnv;
+  /** The clock that stamps a Quota Reading. Default: the real time. */
+  now?: () => Date;
+}
+
+/** How long `/usage` may take before it is given up on (it answers without calling a model). */
+const USAGE_TIMEOUT_MS = 30_000;
+
+/**
+ * What the stream's `rate_limit_event`s said about the Quota: the five-hour and weekly windows' reset times they named,
+ * and whether any was rejected. Null when there were none.
+ */
+function partialReading(infos: Map<string, any>, readAt: Date): QuotaReading | null {
+  if (infos.size === 0) return null;
+  const window = (info: any): QuotaWindow => ({ percentUsed: null, resetsAt: fromEpochSeconds(info?.resetsAt) });
+  const weekly = [...infos].find(([type]) => /^seven_day/.test(type))?.[1];
+  return { fiveHour: window(infos.get("five_hour")), weekly: window(weekly), exhausted: [...infos.values()].some((i) => i?.status === "rejected"), readAt };
 }
 
 /** Claude Code tools that block on a human, which a headless Step cannot have. */
@@ -63,7 +81,28 @@ function interpret(final: any, rateLimit: any, exit: { code: number | null; sign
 
 /** Drives `claude` headless (stream-json) in the Step's directory, on the user's subscription. */
 export function createClaudeRunner(options: ClaudeRunnerOptions = {}): Runner {
+  const now = options.now ?? (() => new Date());
   return {
+    async readQuota() {
+      // `/usage` is answered by the CLI itself: no model is called, so it costs no Quota.
+      const abort = new AbortController();
+      const timer = setTimeout(() => abort.abort(), USAGE_TIMEOUT_MS);
+      const lines: string[] = [];
+      try {
+        const outcome = await runCli({ command: "claude", args: ["-p", "/usage", "--output-format", "json"], cwd: tmpdir(), env: options.env, stdin: "", signal: abort.signal }, (l) => lines.push(l));
+        if (!outcome.ran) return null;
+      } finally {
+        clearTimeout(timer);
+      }
+      const readAt = now();
+      try {
+        const text = JSON.parse(lines.join("\n")).result;
+        return typeof text === "string" ? parseUsage(text, readAt) : unknownReading(readAt);
+      } catch {
+        return unknownReading(readAt);
+      }
+    },
+
     async run(step: StepRequest, onEvent): Promise<StepResult> {
       // The Agent must edit files and run git unattended, so permission prompts are off.
       // It is confined only by the Run's worktree (ADR 0005).
@@ -84,6 +123,7 @@ export function createClaudeRunner(options: ClaudeRunnerOptions = {}): Runner {
 
       let final: any = null;
       let rateLimit: any = null;
+      const rateLimits = new Map<string, any>();
       const outcome = await runCli({ command: "claude", args, cwd: step.cwd, env: options.env, stdin: step.prompt, signal: step.signal }, (text) => {
         if (!text.trim()) return;
         let msg: any = null;
@@ -92,10 +132,15 @@ export function createClaudeRunner(options: ClaudeRunnerOptions = {}): Runner {
           try { onEvent(e); } catch { /* a buggy listener must not break the Step */ }
         }
         if (msg?.type === "result") final = msg;
-        if (msg?.type === "rate_limit_event") rateLimit = msg.rate_limit_info;
+        if (msg?.type === "rate_limit_event") {
+          rateLimit = msg.rate_limit_info;
+          if (typeof rateLimit?.rateLimitType === "string") rateLimits.set(rateLimit.rateLimitType, rateLimit);
+        }
       });
       if (!outcome.ran) return { status: "failed", error: outcome.error };
-      return interpret(final, rateLimit, outcome, session);
+      const result = interpret(final, rateLimit, outcome, session);
+      const quota = partialReading(rateLimits, now());
+      return quota ? { ...result, quota } : result;
     },
   };
 }

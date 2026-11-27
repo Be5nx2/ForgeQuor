@@ -40,4 +40,12 @@ describe.skipIf(!process.env.FORGEQUOR_SMOKE_CLAUDE)("real claude (smoke)", () =
     const lost = await runner.run({ ...base, prompt: "hi", session: { resume: "00000000-0000-4000-8000-000000000000" } }, () => {});
     expect(lost).toMatchObject({ status: "failed", sessionLost: true });
   }, 240_000);
+
+  it("reads the Quota with /usage, which costs none", async () => {
+    const reading = await createClaudeRunner().readQuota!();
+    expect(reading).not.toBeNull();
+    // A real subscription answers with both percentages; an unknown reading means the screen's wording changed.
+    expect(reading!.fiveHour.percentUsed).toBeTypeOf("number");
+    expect(reading!.weekly.percentUsed).toBeTypeOf("number");
+  }, 60_000);
 });
