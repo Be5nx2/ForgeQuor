@@ -36,12 +36,17 @@ export interface WorkflowError {
   message: string;
 }
 
+/** How a Run's change is reviewed: by one Reviewer (solo), or by two whose Reviews a Consolidator merges (duo). */
+export type ReviewMode = "solo" | "duo";
+
 /** A Workflow a Run form can offer, from Forgequor or from the Project's own `forgequor/workflows/` folder. */
 export interface WorkflowOption {
   name: string;
   description: string;
   /** What the human gives at launch: the Run form asks for each. Empty for an invalid Workflow. */
-  inputs: ("task" | "assets")[];
+  inputs: ("task" | "assets" | "review")[];
+  /** The review mode the Run form preselects, when the Workflow takes the `review` input. */
+  reviewDefault?: ReviewMode | null;
   origin: "built-in" | "project";
   /** Why the Workflow cannot be launched; empty when it can. */
   errors: WorkflowError[];
@@ -72,6 +77,8 @@ export interface Run {
   title: string;
   task: string;
   trackerRef: string | null;
+  /** How the Run is reviewed; null when its Workflow has no review. */
+  review: ReviewMode | null;
   state: RunState;
   branch: string | null;
   worktreePath: string | null;
@@ -164,7 +171,7 @@ export type StepStatus = "waiting" | "running" | "done" | "skipped" | "failed";
 export interface StepState {
   /** The Step's id in the Workflow. */
   id: string;
-  type: "agent" | "checks" | "gate" | "publish" | "artist";
+  type: "agent" | "checks" | "gate" | "publish" | "artist" | "review";
   /** The Agent's name for an Agent Step, the Gate kind for a Gate; null for the others. */
   detail: string | null;
   /** The ids of the Steps that must be done or skipped before this one starts. */
@@ -175,12 +182,35 @@ export interface StepState {
   attempts: number;
 }
 
+/** A Review's verdict: the change passes, or the Developer must rework it. */
+export type ReviewVerdict = "pass" | "changes requested";
+
+/** One Review written during a Run, as kept in its Run Notes. */
+export interface Review {
+  id: number;
+  iteration: number;
+  /** The `review` Step that asked for it. */
+  stepId: string;
+  /** The attempt of that Step. */
+  attempt: number;
+  /** Who wrote it: the seat of the Reviewer ("reviewer-a"). */
+  author: string;
+  verdict: ReviewVerdict;
+  /** The Review's text, without its verdict line. */
+  body: string;
+  /** The Review the Run acts on, as opposed to one that only went into it. */
+  final: boolean;
+  createdAt: Date;
+}
+
 export interface RunDetail extends Run {
   /** The Run's Steps in Workflow order, as they stand in its current Iteration. */
   steps: StepState[];
   /** The Asset Requests of an `assets` Run and where each stands; empty for other Workflows. */
   assets: Asset[];
   iterations: Iteration[];
+  /** Every Review of the Run, oldest first. */
+  reviews: Review[];
   attempts: StepAttempt[];
   checks: CheckResult[];
   gates: Gate[];

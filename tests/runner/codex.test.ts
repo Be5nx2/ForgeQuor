@@ -71,6 +71,16 @@ describe("Codex Runner", () => {
     expect(args.at(-1)).toBe("-");
   });
 
+  it("runs a read-only Step in Codex's read-only sandbox", async () => {
+    const s = setup({ stdout: [started, message("Reviewed."), completed] });
+    const result = await createCodexRunner({ env: s.env }).run({ ...step(), readonly: true }, () => {});
+
+    expect(result).toMatchObject({ status: "succeeded", summary: "Reviewed." });
+    const args = s.fake.lastInvocation().args;
+    expect(args[args.indexOf("-s") + 1]).toBe("read-only");
+    expect(args).toContain('approval_policy="never"');
+  });
+
   it("hands the Agent's instructions and the model to Codex", async () => {
     const { fake } = await runStep({ stdout: [started, message("ok"), completed] });
     const args = fake.lastInvocation().args;

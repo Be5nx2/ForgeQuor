@@ -141,7 +141,7 @@ steps:
 `);
 
     expect(errors.map((e) => [e.path, e.message])).toEqual([
-      ["steps[0].type", 'Step "a" has an unknown type "script"; it must be one of agent, checks, gate, publish, artist.'],
+      ["steps[0].type", 'Step "a" has an unknown type "script"; it must be one of agent, checks, gate, publish, artist, review.'],
       ["steps[1].agent", 'Step "b" names an unknown Agent "wizard"; it must be one of developer.'],
       ["steps[2].gate", 'Step "c" has an unknown Gate kind "vote"; it must be one of final, asset.'],
     ]);
@@ -322,6 +322,79 @@ describe("the built-in Workflows", () => {
         { id: "artist", type: "artist", needs: [] },
         { id: "review", type: "gate", gate: "asset", needs: ["artist"], onReject: "artist" },
         { id: "publish", type: "publish", needs: ["review"] },
+      ],
+    });
+  });
+});
+
+describe("a Workflow with a review", () => {
+  const reviewed = (extra = "", inputs = "[task, review]", step = "") => `
+name: careful
+inputs: ${inputs}
+${extra}
+steps:
+  - id: developer
+    type: agent
+    agent: developer
+  - id: review
+    type: review
+    needs: [developer]
+    on_reject: developer
+${step}`;
+
+  it("takes the review input, defaults to solo, and its review Step is always read-only", () => {
+    const parsed = parseWorkflow(reviewed());
+
+    expect(parsed.ok && parsed.definition).toMatchObject({
+      inputs: ["task", "review"],
+      review: "solo",
+      steps: [{ id: "developer" }, { id: "review", type: "review", readonly: true, onReject: "developer", maxAttempts: 3 }],
+    });
+  });
+
+  it("declares its own default mode", () => {
+    const parsed = parseWorkflow(reviewed("review: duo"));
+
+    expect(parsed.ok && parsed.definition.review).toBe("duo");
+  });
+
+  it("has no mode when it does not take the review input", () => {
+    const parsed = parseWorkflow(simple);
+
+    expect(parsed.ok && "review" in parsed.definition).toBe(false);
+  });
+
+  it("refuses a mode that is not solo or duo, a mode without the input, and a review Step without it", () => {
+    expect(errorsOf(reviewed("review: trio")).map((e) => [e.path, e.message])).toEqual([["review", "review is the default review mode, solo, duo."]]);
+    expect(errorsOf(reviewed("review: duo", "[task]")).map((e) => e.path)).toEqual(["review", "steps[1].type"]);
+    expect(errorsOf(reviewed("", "[task]"))[0]!.message).toContain("must take the review input");
+  });
+
+  it("refuses a review Step that names no Step to rework the change", () => {
+    const errors = errorsOf(reviewed().replace("    on_reject: developer\n", ""));
+
+    expect(errors.map((e) => [e.path, e.message])).toEqual([["steps[1].on_reject", expect.stringContaining("needs an on_reject")]]);
+  });
+
+  it("refuses a review Step marked as not read-only", () => {
+    const errors = errorsOf(reviewed("", "[task, review]", "    readonly: false\n"));
+
+    expect(errors.map((e) => [e.path, e.message])).toEqual([["steps[1].readonly", 'Step "review" is a review, which is always read-only.']]);
+  });
+
+  it("bugfix: the Developer in bug-fixing mode, Checks, review looping back to the Developer, Publish, the final Gate", () => {
+    const parsed = parseWorkflow(readFileSync(join(BUILT_IN_WORKFLOWS_DIR, "bugfix.yaml"), "utf8"), { agents: { bugfixer: { produces: [] } } });
+
+    expect(parsed.ok && parsed.definition).toMatchObject({
+      name: "bugfix",
+      inputs: ["task", "review"],
+      review: "solo",
+      steps: [
+        { id: "developer", type: "agent", agent: "bugfixer" },
+        { id: "checks", type: "checks", needs: ["developer"], onReject: "developer" },
+        { id: "review", type: "review", needs: ["checks"], onReject: "developer", maxAttempts: 3, readonly: true },
+        { id: "publish", type: "publish", needs: ["review"] },
+        { id: "final", type: "gate", gate: "final", needs: ["publish"], onReject: "developer" },
       ],
     });
   });

@@ -9,6 +9,11 @@ export interface StepRequest {
   model?: string;
   /** Images to show the Agent with the prompt (absolute paths), for Runners that can take them (Codex); others ignore them. */
   images?: string[];
+  /**
+   * The Step must not change the worktree. Codex then runs in its read-only sandbox; Claude Code keeps its permissions
+   * (ADR 0005), so for it the engine's after-Step check is what enforces it.
+   */
+  readonly?: boolean;
   /** Aborting it kills the Runner's process and everything it started; the Step then ends as a failure. */
   signal?: AbortSignal;
 }

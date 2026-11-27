@@ -297,7 +297,10 @@ const MAX_UNWRITTEN_ATTEMPTS = 2;
 async function drawAsset(store: AssetStore, ctx: WorkflowContext, asset: Asset, artDirection: string, artReferences: string[], palette: string[] | null, retriedAt: Date | null): Promise<boolean> {
   const { run, project, worktreePath } = ctx;
   const seat = ctx.agents.artist;
-  if (!seat) throw new Error("Forgequor has no Runner for the Artist.");
+  if (!seat) {
+    const why = ctx.seatProblems?.artist;
+    throw new Error(`The Artist has no usable Runner on seat "artist"${why ? ` (${why})` : ""}: set FORGEQUOR_ARTIST_RUNNER to claude or codex, and make sure that tool is installed.`);
+  }
   for (;;) {
     const versions = await store.attemptsIn(asset.id, run.iteration);
     const last = versions.at(-1);

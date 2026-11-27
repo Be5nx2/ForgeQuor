@@ -1,25 +1,32 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { GateKind } from "./types.js";
+import type { GateKind, ReviewMode } from "./types.js";
+export type { ReviewMode };
 import { isMap, isScalar, isSeq, LineCounter, parseDocument, type Node } from "yaml";
 
 /** Where Forgequor's own Workflow files live, one `<name>.yaml` per built-in Workflow. */
 export const BUILT_IN_WORKFLOWS_DIR = fileURLToPath(new URL("./workflows/", import.meta.url));
 
 /** The definition of a built-in Workflow, from its YAML file; a built-in file that does not validate is a bug, so it throws. */
-export function loadBuiltInWorkflow(name: string): WorkflowDefinition {
-  const parsed = parseWorkflow(readFileSync(join(BUILT_IN_WORKFLOWS_DIR, `${name}.yaml`), "utf8"));
+export function loadBuiltInWorkflow(name: string, catalogue: StepCatalogue = DEFAULT_CATALOGUE): WorkflowDefinition {
+  const parsed = parseWorkflow(readFileSync(join(BUILT_IN_WORKFLOWS_DIR, `${name}.yaml`), "utf8"), catalogue);
   if (!parsed.ok) throw new Error(`The built-in Workflow ${name} is invalid:\n${parsed.errors.map((e) => `  ${e.path}: ${e.message}`).join("\n")}`);
   return parsed.definition;
 }
 
 /** What a Run can be given: by the human at launch, or by a Step that produces it. */
-export type WorkflowInput = "task" | "assets";
-const INPUTS: readonly WorkflowInput[] = ["task", "assets"];
+export type WorkflowInput = "task" | "assets" | "review";
+const INPUTS: readonly WorkflowInput[] = ["task", "assets", "review"];
+/** The inputs a Step's `when` can test: those a Run may or may not have. The review mode is always there. */
+const WHEN_INPUTS: readonly WorkflowInput[] = ["task", "assets"];
 
-export type StepType = "agent" | "checks" | "gate" | "publish" | "artist";
-const STEP_TYPES: readonly StepType[] = ["agent", "checks", "gate", "publish", "artist"];
+export const REVIEW_MODES: readonly ReviewMode[] = ["solo", "duo"];
+/** The mode a Workflow that takes the `review` input defaults to when it does not say. */
+export const DEFAULT_REVIEW_MODE: ReviewMode = "solo";
+
+export type StepType = "agent" | "checks" | "gate" | "publish" | "artist" | "review";
+const STEP_TYPES: readonly StepType[] = ["agent", "checks", "gate", "publish", "artist", "review"];
 
 /** The Gate kinds a Workflow can place; Escalations are opened by Forgequor, never declared. */
 export type WorkflowGateKind = Exclude<GateKind, "escalation">;
@@ -49,6 +56,7 @@ export type StepDefinition = StepCommon &
     | { type: "checks" }
     | { type: "publish" }
     | { type: "artist" }
+    | { type: "review" }
   );
 
 /** A validated Workflow: what a Run freezes and the engine schedules. */
@@ -57,6 +65,8 @@ export interface WorkflowDefinition {
   description: string;
   /** What the human gives at launch. */
   inputs: WorkflowInput[];
+  /** The review mode the Run form preselects: present when, and only when, the Workflow takes the `review` input. */
+  review?: ReviewMode;
   /** In Workflow order. */
   steps: StepDefinition[];
 }
@@ -81,7 +91,7 @@ export const DEFAULT_CATALOGUE: StepCatalogue = { agents: { developer: { produce
 
 type Segment = string | number;
 
-const TOP_KEYS = ["name", "description", "inputs", "steps"];
+const TOP_KEYS = ["name", "description", "inputs", "review", "steps"];
 const STEP_KEYS = ["id", "type", "agent", "gate", "needs", "readonly", "on_reject", "max_attempts", "when"];
 const NAME = /^[a-z0-9][a-z0-9-]*$/;
 
@@ -168,6 +178,13 @@ export function parseWorkflow(text: string, catalogue: StepCatalogue = DEFAULT_C
     }
   }
 
+  let review: ReviewMode | undefined;
+  if (root.review !== undefined && !inputs.includes("review")) {
+    fail(["review"], "A Workflow has a default review mode only when it takes the review input; add review to its inputs.", true);
+  } else if (root.review !== undefined && !REVIEW_MODES.includes(root.review as ReviewMode)) {
+    fail(["review"], `review is the default review mode, ${list(REVIEW_MODES)}.`);
+  } else if (inputs.includes("review")) review = (root.review as ReviewMode | undefined) ?? DEFAULT_REVIEW_MODE;
+
   const rawSteps = root.steps;
   if (!Array.isArray(rawSteps) || rawSteps.length === 0) {
     fail(["steps"], "A Workflow needs at least one Step, as a list under steps.");
@@ -229,6 +246,9 @@ export function parseWorkflow(text: string, catalogue: StepCatalogue = DEFAULT_C
 
     const readonly = raw.readonly ?? false;
     if (typeof readonly !== "boolean") fail(at("readonly"), `${label}: readonly is true or false.`);
+    if (type === "review" && readonly === false && raw.readonly !== undefined) fail(at("readonly"), `${label} is a review, which is always read-only.`);
+    if (type === "review" && raw.on_reject === undefined) fail(at("on_reject"), `${label} is a review, so it needs an on_reject: the Step that reworks the change when changes are requested.`);
+    if (type === "review" && !inputs.includes("review")) fail(at("type"), `${label} is a review, so the Workflow must take the review input (inputs: [task, review]).`);
 
     let onReject: string | undefined;
     if (raw.on_reject !== undefined) {
@@ -243,8 +263,8 @@ export function parseWorkflow(text: string, catalogue: StepCatalogue = DEFAULT_C
 
     let when: WorkflowInput | undefined;
     if (raw.when !== undefined) {
-      if (!INPUTS.includes(raw.when as WorkflowInput)) {
-        fail(at("when"), `${label} runs when ${JSON.stringify(raw.when)} is given, which is not an input; it must be one of ${list(INPUTS)}.`);
+      if (!WHEN_INPUTS.includes(raw.when as WorkflowInput)) {
+        fail(at("when"), `${label} runs when ${JSON.stringify(raw.when)} is given, which is not an input; it must be one of ${list(WHEN_INPUTS)}.`);
       } else when = raw.when as WorkflowInput;
     }
 
@@ -254,7 +274,8 @@ export function parseWorkflow(text: string, catalogue: StepCatalogue = DEFAULT_C
       ...(type === "agent" ? { agent: raw.agent } : {}),
       ...(type === "gate" ? { gate: raw.gate } : {}),
       needs,
-      readonly: readonly === true,
+      // A review reads the change and never edits it.
+      readonly: readonly === true || type === "review",
       ...(onReject !== undefined ? { onReject } : {}),
       maxAttempts: maxAttempts as number,
       ...(when !== undefined ? { when } : {}),
@@ -282,7 +303,7 @@ export function parseWorkflow(text: string, catalogue: StepCatalogue = DEFAULT_C
     errors.sort((a, b) => a.offset - b.offset);
     return { ok: false, errors: errors.map(({ offset: _, ...e }) => e) };
   }
-  return { ok: true, definition: { name: name as string, description: description as string, inputs, steps } };
+  return { ok: true, definition: { name: name as string, description: description as string, inputs, ...(review ? { review } : {}), steps } };
 }
 
 /** The rules on the needs graph: no cycle, parallel Steps read-only, `on_reject` backwards, `when` inputs available. */

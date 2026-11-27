@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import { getJson, postJson, type ArtInfo, type AssetKind, type Project, type Run, type WorkflowList, type WorkflowOption } from "../api";
+import { getJson, postJson, type ArtInfo, type AssetKind, type Project, type ReviewMode, type Run, type WorkflowList, type WorkflowOption } from "../api";
 
 const emit = defineEmits<{ open: [id: number] }>();
 
 const projects = ref<Project[]>([]);
-const form = ref({ projectId: "", workflow: "developer", task: "", title: "", trackerRef: "" });
+const form = ref({ projectId: "", workflow: "developer", task: "", title: "", trackerRef: "", review: "solo" as ReviewMode });
 /** The chosen Project's Workflows (built-in and its own), and why its own could not be read. */
 const workflows = ref<WorkflowOption[]>([]);
 const workflowsProblem = ref("");
@@ -13,7 +13,11 @@ const workflowsProblem = ref("");
 const workflowsLoading = ref(false);
 const chosen = computed(() => workflows.value.find((w) => w.name === form.value.workflow));
 /** The form asks for what the chosen Workflow takes at launch. */
-const asks = (input: "task" | "assets") => chosen.value?.inputs.includes(input) ?? false;
+const asks = (input: "task" | "assets" | "review") => chosen.value?.inputs.includes(input) ?? false;
+/** The review mode starts at the chosen Workflow's own default (solo for bugfix), and the human may change it. */
+watch(chosen, (w) => {
+  form.value.review = w?.reviewDefault ?? "solo";
+});
 const launchable = computed(() => !!chosen.value && !chosen.value.errors.length);
 const originLabel = (w: WorkflowOption) => (w.origin === "project" ? "Project" : "built-in");
 
@@ -75,6 +79,7 @@ async function start() {
       workflow: form.value.workflow,
       task: asks("task") ? form.value.task : undefined,
       assets: asks("assets") ? assets.value.map((a) => ({ name: a.name, kind: a.kind, description: a.description, fill: a.fill, replace: a.replace, references: a.references, frames: a.kind === "animation" ? a.frames : undefined, ...sizeOf(a) })) : undefined,
+      review: asks("review") ? form.value.review : undefined,
       title: form.value.title || undefined,
       trackerRef: form.value.trackerRef || undefined,
     });
@@ -137,7 +142,12 @@ watch(
         <li v-for="(e, i) in chosen.errors" :key="i">{{ e.line ? `line ${e.line}: ` : e.path ? `${e.path}: ` : "" }}{{ e.message }}</li>
       </ul>
     </div>
-    <textarea v-if="asks('task')" v-model="form.task" rows="4" placeholder="Task" aria-label="Task" required />
+    <textarea v-if="asks('task')" v-model="form.task" rows="4" placeholder="Task or bug description" aria-label="Task" required />
+    <fieldset v-if="asks('review')" class="review-choice">
+      <legend>Review</legend>
+      <label><input v-model="form.review" type="radio" value="solo" aria-label="Solo review" /> Solo: one Reviewer</label>
+      <label><input v-model="form.review" type="radio" value="duo" aria-label="Duo review" /> Duo: two Reviewers, one consolidated Review (Consolidator arrives in m3-12, runs solo for now)</label>
+    </fieldset>
     <template v-if="asks('assets')">
       <fieldset v-for="(a, i) in assets" :key="i" class="stack asset-request">
         <legend>Asset Request {{ i + 1 }}</legend>

@@ -114,7 +114,7 @@ Griller with a **Conversation Gate** (it writes the Project's glossary and ADRs 
     - at a Run's start Forgequor places its `shared` Skill Pack in the worktree, for Claude and for Codex, never committed;
     - a skill the Project already has wins over the pack's;
     - tested with a Project that has none of the skills and one that overrides one.
-- [ ] `m3-11` **`bugfix` with a solo Reviewer**: a bug goes from description to reviewed pull request.
+- [x] `m3-11` **`bugfix` with a solo Reviewer**: a bug goes from description to reviewed pull request.
   - Spec: `docs/specs/m3b-the-team.md`
   - Blocked by: `m3-04`, `m3-10`
   - Acceptance:

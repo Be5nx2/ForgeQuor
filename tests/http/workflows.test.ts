@@ -48,3 +48,41 @@ describe("the Project Workflows route", () => {
     expect(await res.json()).toEqual({ error: "No Project 9." });
   });
 });
+
+describe("the start Run route", () => {
+  it("hands the chosen review mode to the Forge core", async () => {
+    const started: unknown[] = [];
+    const address = await serve({
+      async startRun(input) {
+        started.push(input);
+        return { id: 1 } as any;
+      },
+    });
+
+    const res = await fetch(`${address}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ projectId: 2, workflow: "bugfix", task: "The jump fails.", review: "duo" }),
+    });
+
+    expect(res.status).toBe(201);
+    expect(started).toMatchObject([{ projectId: 2, workflow: "bugfix", task: "The jump fails.", review: "duo" }]);
+  });
+
+  it("answers 422 with the reason when the Forge core refuses the review mode", async () => {
+    const address = await serve({
+      async startRun() {
+        throw new Error('The review is solo or duo, not "trio".');
+      },
+    });
+
+    const res = await fetch(`${address}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ projectId: 2, task: "A bug.", review: "trio" }),
+    });
+
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: 'The review is solo or duo, not "trio".' });
+  });
+});

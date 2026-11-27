@@ -3,19 +3,21 @@ import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import type pg from "pg";
 import type { Runner } from "../runner/runner.js";
-import { developerAgent, developerWorkflow } from "./developer.js";
+import { bugfixAgent, bugfixWorkflow, developerAgent, developerWorkflow } from "./developer.js";
 import { runEngine, type StepTypeModule } from "./engine.js";
 import { agentStepType, catalogueOf, checksStepType, gateStepType, publishStepType, type AgentModule } from "./step-types.js";
 import { describeInvalid, resolveWorkflows, type ResolvedWorkflow } from "./project-workflows.js";
-import type { WorkflowDefinition } from "./workflow-definition.js";
+import { DEFAULT_REVIEW_MODE, REVIEW_MODES, type WorkflowDefinition } from "./workflow-definition.js";
 import { publishPullRequest } from "./publish.js";
-import { createRunRecords } from "./run-records.js";
+import { createRunRecords, toReview } from "./run-records.js";
+import { reviewStepType } from "./review.js";
+import { buildSeats, type RunnerName, type SeatSettings } from "./seats.js";
 import { builtInExtensions } from "./builtin.js";
 import { AssetNotFoundError, GateError, InvalidInputError, RunNotFoundError, RunStateError } from "./errors.js";
 import type { Extension } from "./extension.js";
 import { allows, escalationGate, finalGate, refusal, type GateKindModule, type GateOutcome } from "./gates.js";
 import { goBackChoices, redoFailedSteps, redoSteps, redoSet, type StepRow } from "./step-states.js";
-import type { AgentSeat, Publication, RunInput, Workflow, WorkflowContext } from "./workflow.js";
+import type { Publication, RunInput, Workflow, WorkflowContext } from "./workflow.js";
 import type { CodeHost } from "../codehost/codehost.js";
 import { parseDefaultSize, parseReferences } from "./art-direction.js";
 import type {
@@ -32,6 +34,7 @@ import type {
   RunDetail,
   RunState,
   RunUpdate,
+  ReviewMode,
   StepAttempt,
   StepState,
   Verdict,
@@ -116,16 +119,22 @@ export interface Forge {
 
 export interface ForgeDeps {
   pool: pg.Pool;
-  /** The Developer's Runner (Claude Code). */
+  /** The Claude Code Runner, which the seats of the Griller, Spec Writer, Architect, Developer, first Reviewer and Consolidator work through unless set otherwise. */
   runner: Runner;
-  /** The Artist's Runner (Codex). Without one, an `assets` Run opens an Escalation when it reaches the Artist. */
+  /** The Codex Runner, which the second Reviewer's and the Artist's seats work through unless set otherwise. Without one, a Step that needs a Codex seat opens an Escalation naming it. */
   artistRunner?: Runner;
+  /**
+   * What the human set per Agent seat (`FORGEQUOR_<SEAT>_RUNNER` and `FORGEQUOR_<SEAT>_MODEL`, see `seatSettingsFromEnv`):
+   * which Runner (`claude` or `codex`) and which model. A seat with a Runner Forgequor cannot start opens an Escalation
+   * naming it when a Step needs it, not at startup.
+   */
+  seats?: SeatSettings;
   codeHost: CodeHost;
   /** Folder under which each Run's worktree is created, outside the Projects' checkouts. */
   worktreesRoot: string;
-  /** Model the Developer's Runner is set to; the Runner's default when omitted. */
+  /** Model of the `developer` seat; the setting in `seats` wins. The Runner's default when omitted. */
   developerModel?: string;
-  /** Model the Artist's Runner is set to; the Runner's default when omitted. */
+  /** Model of the `artist` seat; the setting in `seats` wins. The Runner's default when omitted. */
   artistModel?: string;
   /** A Step running longer than this is killed and escalated. Default: 60 minutes. */
   stepTimeoutMs?: number;
@@ -167,6 +176,7 @@ function toRun(r: Record<string, any>): Run {
     title: r.title,
     task: r.task,
     trackerRef: r.tracker_ref,
+    review: r.review_mode,
     state: r.state,
     branch: r.branch,
     worktreePath: r.worktree_path,
@@ -241,15 +251,29 @@ function toGate(r: Record<string, any>, actions: GateAction[]): Gate {
   };
 }
 
-const RUN_COLUMNS = "id, project_id, workflow, iteration, title, task, tracker_ref, state, branch, worktree_path, pr_number, pr_url, resume_at, created_at";
+const RUN_COLUMNS = "id, project_id, workflow, iteration, title, task, tracker_ref, review_mode, state, branch, worktree_path, pr_number, pr_url, resume_at, created_at";
 /** The same columns, read through the alias `r` in a query that joins another table. */
 const RUN_COLUMNS_OF_R = RUN_COLUMNS.split(", ").map((c) => `r.${c}`).join(", ");
+
+/**
+ * How a new Run is reviewed: the mode the human chose, else the Workflow's own default; null for a Workflow that does not
+ * take the `review` input. Refuses a mode that does not exist, or one given to a Workflow that has no review.
+ */
+function reviewModeOf(flow: Workflow, chosen: string | undefined): ReviewMode | null {
+  if (!flow.definition.inputs.includes("review")) {
+    if (chosen !== undefined) throw new InvalidInputError(`The ${flow.name} Workflow has no review to choose a mode for.`);
+    return null;
+  }
+  if (chosen === undefined || chosen === "") return flow.definition.review ?? DEFAULT_REVIEW_MODE;
+  if (!REVIEW_MODES.includes(chosen as ReviewMode)) throw new InvalidInputError(`The review is ${REVIEW_MODES.join(" or ")}, not "${chosen}".`);
+  return chosen as ReviewMode;
+}
 
 export function createForge(deps: ForgeDeps): Forge {
   const { pool } = deps;
   /** The Workflows a Run can follow, by name. */
   const extensions = deps.extensions ?? builtInExtensions(pool);
-  const workflows = new Map<string, Workflow>([developerWorkflow, ...extensions.flatMap((e) => e.workflows)].map((w) => [w.name, w]));
+  const workflows = new Map<string, Workflow>([developerWorkflow, bugfixWorkflow, ...extensions.flatMap((e) => e.workflows)].map((w) => [w.name, w]));
   /** How each built-in Workflow's pull request is made, when it is not the default. */
   const publications = new Map<string, Publication>([...workflows.values()].flatMap((w) => (w.publication ? [[w.name, w.publication] as const] : [])));
   /**
@@ -267,16 +291,18 @@ export function createForge(deps: ForgeDeps): Forge {
   const gateKinds = new Map<GateKind, GateKindModule>([finalGate, escalationGate, ...extensions.flatMap((e) => e.gateKinds)].map((k) => [k.kind, k]));
   const gateOf = (r: Record<string, any>): Gate => toGate(r, gateKinds.get(r.kind)?.actions ?? []);
   /** The Agents a Workflow's Agent Step can name. */
-  const agentModules = new Map<string, AgentModule>([developerAgent, ...extensions.flatMap((e) => e.agents ?? [])].map((a) => [a.name, a]));
+  const agentModules = new Map<string, AgentModule>([developerAgent, bugfixAgent, ...extensions.flatMap((e) => e.agents ?? [])].map((a) => [a.name, a]));
   /** What the engine runs, by Step type. */
   const stepTypes = new Map<StepTypeModule["type"], StepTypeModule>(
-    [agentStepType(agentModules), checksStepType, publishStepType(publicationOf), gateStepType(gateKinds), ...extensions.flatMap((e) => e.stepTypes ?? [])].map((t) => [t.type, t]),
+    [agentStepType(agentModules), checksStepType, publishStepType(publicationOf), gateStepType(gateKinds), reviewStepType, ...extensions.flatMap((e) => e.stepTypes ?? [])].map((t) => [t.type, t]),
   );
-  /** Each Agent's Runner: the Developer works through Claude Code, the Artist through Codex. */
-  const agents: { developer: AgentSeat; artist?: AgentSeat } = {
-    developer: { runner: deps.runner, runnerName: "claude", model: deps.developerModel },
-    artist: deps.artistRunner && { runner: deps.artistRunner, runnerName: "codex", model: deps.artistModel },
-  };
+  /** Each Agent seat's Runner and model: its setting, else its default (Claude Code for most, Codex for the second Reviewer and the Artist). */
+  const runners: Partial<Record<RunnerName, Runner>> = { claude: deps.runner, codex: deps.artistRunner };
+  const settings: SeatSettings = { ...deps.seats };
+  for (const [seat, model] of [["developer", deps.developerModel], ["artist", deps.artistModel]] as const) {
+    if (model && !settings[seat]?.model) settings[seat] = { ...settings[seat], model };
+  }
+  const { agents, problems: seatProblems } = buildSeats(runners, settings);
   const now = deps.now ?? (() => new Date());
   const stepTimeoutMs = deps.stepTimeoutMs ?? DEFAULT_STEP_TIMEOUT_MS;
   const inFlight = new Set<Promise<void>>();
@@ -655,6 +681,7 @@ export function createForge(deps: ForgeDeps): Forge {
         defaultBranch,
         stop,
         agents,
+        seatProblems,
         records,
         publishPullRequest: (brief) =>
           publishPullRequest(
@@ -759,7 +786,7 @@ export function createForge(deps: ForgeDeps): Forge {
         const resolved = await projectWorkflows(project);
         return { workflows: resolved.map((r) => r.option), problem: null };
       } catch (e: any) {
-        const options = [...workflows.values()].map((w) => ({ name: w.name, description: w.definition.description, inputs: [...w.inputs], origin: "built-in" as const, errors: [], file: null }));
+        const options = [...workflows.values()].map((w) => ({ name: w.name, description: w.definition.description, inputs: [...w.inputs], ...(w.definition.review ? { reviewDefault: w.definition.review } : {}), origin: "built-in" as const, errors: [], file: null }));
         return { workflows: options, problem: `The Project's own Workflows could not be read: ${e?.message ?? e}` };
       }
     },
@@ -783,6 +810,7 @@ export function createForge(deps: ForgeDeps): Forge {
       if (!chosen.workflow) throw new Error(describeInvalid(chosen.option));
       const flow = chosen.workflow;
       const plan = flow.plan(input);
+      const review = reviewModeOf(flow, input.review);
       // Refused now, not after a Quota-costly generation.
       await plan.check?.({ project, exists: async (path) => existsInBranch(project.localPath, await freshBranch(), path) });
       const client = await pool.connect();
@@ -790,9 +818,9 @@ export function createForge(deps: ForgeDeps): Forge {
       try {
         await client.query("BEGIN");
         const { rows } = await client.query(
-          `INSERT INTO runs (project_id, workflow, title, task, tracker_ref, state, definition, inputs)
-           VALUES ($1, $2, $3, $4, $5, 'queued', $6, $7) RETURNING id`,
-          [projectId, workflow, plan.title, plan.task, trackerRef?.trim() || null, JSON.stringify(flow.definition), JSON.stringify(plan.given ?? flow.inputs)],
+          `INSERT INTO runs (project_id, workflow, title, task, tracker_ref, state, definition, inputs, review_mode)
+           VALUES ($1, $2, $3, $4, $5, 'queued', $6, $7, $8) RETURNING id`,
+          [projectId, workflow, plan.title, plan.task, trackerRef?.trim() || null, JSON.stringify(flow.definition), JSON.stringify(plan.given ?? flow.inputs), review],
         );
         runId = Number(rows[0].id);
         await plan.store?.(client, runId, project);
@@ -838,6 +866,7 @@ export function createForge(deps: ForgeDeps): Forge {
         iterations,
         attempts: attempts.rows.map(toAttempt),
         checks: checks.rows.map(toCheck),
+        reviews: (await pool.query("SELECT * FROM reviews WHERE run_id = $1 ORDER BY id", [id])).rows.map(toReview),
         gates: await Promise.all(gates.rows.map((g) => withRedo({ ...gateOf(g), verdicts: verdictsOf(Number(g.id)) }))),
       };
     },

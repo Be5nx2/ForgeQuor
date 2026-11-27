@@ -1,7 +1,7 @@
 import type pg from "pg";
 import type { StepResult } from "../runner/runner.js";
 import type { CheckOutcome } from "./checks.js";
-import type { GateDecision } from "./types.js";
+import type { GateDecision, Review, ReviewMode, ReviewVerdict } from "./types.js";
 import { createStepStates, type StepStates } from "./step-states.js";
 import type { WorkflowInput } from "./workflow-definition.js";
 
@@ -16,6 +16,16 @@ export interface AttemptStart {
   assetId?: number;
   /** The Workflow Step the attempt belongs to. */
   stepId?: string;
+}
+
+/** A Review as a Step records it; the Run, Iteration and time are the records'. */
+export interface NewReview {
+  stepId: string;
+  attempt: number;
+  author: string;
+  verdict: ReviewVerdict;
+  body: string;
+  final: boolean;
 }
 
 /** The Run's own records, and the only way a Workflow reads or writes them: no Workflow holds the database pool. */
@@ -35,6 +45,12 @@ export interface RunRecords {
   giveInput(input: WorkflowInput, stepId: string): Promise<void>;
   /** The decision of the latest Gate the Step opened in the current Iteration: null when it is still open, undefined when it opened none. */
   gateDecision(stepId: string): Promise<GateDecision | null | undefined>;
+  /** How the Run is reviewed; solo for a Run that was not given a mode. */
+  reviewMode(): Promise<ReviewMode>;
+  /** Keeps a Review in the Run's records, where the Run detail shows it. */
+  recordReview(review: NewReview): Promise<void>;
+  /** The Review the Run last acted on, or null when it had none: the Review Brief summarises it. */
+  finalReview(): Promise<Review | null>;
   /** Forgets the Check results of a Developer attempt, such as those an interrupted run of the Checks left. */
   clearChecks(attempt: number): Promise<void>;
   /** Records the outcome of every Check of a Developer attempt. */
@@ -46,6 +62,20 @@ export interface RunRecords {
   /** Whether the Review Brief was already posted on the pull request. */
   briefPosted(): Promise<boolean>;
   markBriefPosted(): Promise<void>;
+}
+
+export function toReview(r: Record<string, any>): Review {
+  return {
+    id: Number(r.id),
+    iteration: r.iteration,
+    stepId: r.step_id,
+    attempt: r.attempt,
+    author: r.author,
+    verdict: r.verdict,
+    body: r.body,
+    final: r.final,
+    createdAt: r.created_at,
+  };
 }
 
 export function createRunRecords(pool: pg.Pool, runId: number, iteration: number): RunRecords {
@@ -100,6 +130,22 @@ export function createRunRecords(pool: pg.Pool, runId: number, iteration: number
         [runId, iteration, stepId],
       );
       return rows[0] ? rows[0].decision : undefined;
+    },
+    async reviewMode() {
+      const { rows } = await pool.query("SELECT review_mode FROM runs WHERE id = $1", [runId]);
+      return rows[0].review_mode ?? "solo";
+    },
+    async recordReview(r) {
+      await pool.query(
+        `INSERT INTO reviews (run_id, iteration, step_id, attempt, author, verdict, body, final) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT (run_id, iteration, step_id, attempt, author)
+         DO UPDATE SET verdict = EXCLUDED.verdict, body = EXCLUDED.body, final = EXCLUDED.final, created_at = now()`,
+        [runId, iteration, r.stepId, r.attempt, r.author, r.verdict, r.body, r.final],
+      );
+    },
+    async finalReview() {
+      const { rows } = await pool.query("SELECT * FROM reviews WHERE run_id = $1 AND final ORDER BY id DESC LIMIT 1", [runId]);
+      return rows[0] ? toReview(rows[0]) : null;
     },
     async clearChecks(attempt) {
       await pool.query("DELETE FROM check_results WHERE run_id = $1 AND iteration = $2 AND attempt = $3", [runId, iteration, attempt]);
