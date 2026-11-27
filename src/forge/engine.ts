@@ -82,7 +82,15 @@ async function runStep(ctx: WorkflowContext, definition: WorkflowDefinition, typ
       await ctx.openGate(kind, reason, evidence, step.id);
     },
   };
-  const outcome = await module.execute({ ctx: forStep, step, state });
+  let outcome: StepOutcome;
+  try {
+    outcome = await module.execute({ ctx: forStep, step, state });
+  } catch (e: any) {
+    // A Step that throws fails, and its Escalation names it, so the Run detail shows which Step broke.
+    await steps.set(step.id, { status: "failed" });
+    await ctx.openGate("escalation", "The Run could not continue.", String(e?.message ?? e), step.id);
+    return "stop";
+  }
 
   if (outcome.next === "done") {
     await steps.set(step.id, { status: "done", attempts: state.attempts + 1, sentBack: null });

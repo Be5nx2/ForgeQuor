@@ -774,6 +774,11 @@ export function createForge(deps: ForgeDeps): Forge {
           await client.query("ROLLBACK");
           throw new GateError(`Gate ${gateId} is already decided.`);
         }
+        // The Gate Step is done with its Gate approved: the Run is over, no engine will mark it.
+        await client.query(
+          "UPDATE step_states SET status = 'done', attempts = attempts + 1 WHERE run_id = $1 AND iteration = $2 AND step = $3 AND status = 'running'",
+          [gate.runId, gate.iteration, gate.stepId],
+        );
         await client.query("COMMIT");
         projectId = Number(moved.rows[0].project_id);
       } catch (e) {

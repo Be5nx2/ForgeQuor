@@ -7,6 +7,7 @@ import { createForge, type Forge, type ForgeDeps, type Project, type RunDetail }
 import { developerAgent } from "../../src/forge/developer.js";
 import { AssetNotFoundError } from "../../src/forge/errors.js";
 import type { Extension } from "../../src/forge/extension.js";
+import type { GateKindModule } from "../../src/forge/gates.js";
 import { catalogueOf, type AgentModule } from "../../src/forge/step-types.js";
 import { parseWorkflow } from "../../src/forge/workflow-definition.js";
 import type { Workflow } from "../../src/forge/workflow.js";
@@ -33,6 +34,7 @@ const scribe: AgentModule = {
   },
   async harvest(ctx) {
     const text = readFileSync(join(ctx.worktreePath, PRODUCED), "utf8");
+    if (text.includes("explode")) throw new Error("The Scribe's notes could not be read.");
     if (text.includes("bad")) return { invalid: "The produced Asset Requests have no names." };
     return { produced: text.includes("assets") ? ["assets"] : [] };
   },
@@ -96,9 +98,55 @@ steps:
     max_attempts: 1
 `);
 
+const REPLAYING = workflowOf(`
+name: replaying
+inputs: [task]
+steps:
+  - id: notes
+    type: agent
+    agent: scribe
+  - id: draw
+    type: agent
+    agent: developer
+    needs: [notes]
+    when: assets
+  - id: verify
+    type: checks
+    needs: [draw]
+    on_reject: notes
+`);
+
+/** A Gate kind that goes on when approved, so the Run keeps working after it. */
+const checkpoint: GateKindModule = {
+  kind: "asset",
+  label: "A checkpoint",
+  actions: ["approve", "abandon"],
+  reason: "Look before the Checks.",
+  async decide(_gate, { action }) {
+    return action === "abandon" ? { next: "abandon" } : { next: "continue", decision: "approve", nextIteration: false };
+  },
+};
+
+const CHECKPOINTED = workflowOf(`
+name: checkpointed
+inputs: [task]
+steps:
+  - id: draft
+    type: agent
+    agent: developer
+  - id: look
+    type: gate
+    gate: asset
+    needs: [draft]
+  - id: verify
+    type: checks
+    needs: [look]
+    on_reject: draft
+`);
+
 const TEAM: Extension = {
-  workflows: [SKIPPING, LOOPING],
-  gateKinds: [],
+  workflows: [SKIPPING, LOOPING, REPLAYING, CHECKPOINTED],
+  gateKinds: [checkpoint],
   agents: [scribe],
   async detail() {
     return { assets: [], gates: new Map() };
@@ -368,5 +416,85 @@ describe("restarting a Run", () => {
     const r = await forge.getRun(started.id);
     expect(runner.steps).toHaveLength(1);
     expect(stepsOf(r)).toEqual(["draft:done:1", "refine:done:1", "verify:done:1", "review:running:0"]);
+  });
+});
+
+describe("a Step that throws", () => {
+  it("fails, and its Escalation names it", async () => {
+    const project = await projectWithRemote();
+    runner.use(scribeWrites("explode"));
+
+    const r = await run(project, "skipping");
+
+    expect(stepsOf(r)).toEqual(["notes:failed:0", "draw:waiting:0", "verify:waiting:0", "review:waiting:0"]);
+    expect(r.gates).toMatchObject([{ kind: "escalation", stepId: "notes", reason: "The Run could not continue.", evidence: "The Scribe's notes could not be read." }]);
+  });
+});
+
+describe("a Gate Step once the Run is over", () => {
+  it("is done when its Gate is approved", async () => {
+    const project = await projectWithRemote();
+    runner.use(scribeWrites("assets"));
+    const waiting = await run(project, "skipping");
+
+    const approved = await forge.decideGate({ gateId: waiting.gates[0]!.id, action: "approve" });
+
+    expect(approved.state).toBe("approved");
+    expect(stepsOf(approved)).toEqual(["notes:done:1", "draw:done:1", "verify:done:1", "review:done:1"]);
+  });
+});
+
+describe("a Gate Step that is replayed", () => {
+  it("asks again instead of taking the decision of its earlier pass", async () => {
+    const project = await projectWithRemote(["test -f fixed.txt || { echo missing; exit 1; }"]);
+    runner.use((step) => {
+      if (runner.steps.length === 2) writeFileSync(join(step.cwd, "fixed.txt"), "ok\n");
+    });
+    const first = await run(project, "checkpointed");
+    expect(first.gates).toMatchObject([{ kind: "asset", stepId: "look", decision: null }]);
+
+    // Approved, the Run goes on; its Check fails and sends the Run back to the draft, so the Gate Step replays.
+    await forge.decideGate({ gateId: first.gates[0]!.id, action: "approve" });
+    await forge.whenIdle();
+
+    const r = await forge.getRun(first.id);
+    expect(r.state).toBe("waiting");
+    expect(r.gates.map((g) => [g.kind, g.decision])).toEqual([["asset", "approve"], ["asset", null]]);
+    expect(stepsOf(r)).toEqual(["draft:done:2", "look:running:1", "verify:waiting:1"]);
+  });
+});
+
+describe("an input a Step produced", () => {
+  it("is dropped when that Step is sent back, so a condition on it is not answered by the old pass", async () => {
+    const project = await projectWithRemote(["test -f ok.txt || { echo missing; exit 1; }"]);
+    let scribed = 0;
+    runner.use((step) => {
+      if (!isScribe(step)) return;
+      scribeWrites(++scribed === 1 ? "assets" : "nothing")(step);
+      if (scribed === 2) writeFileSync(join(step.cwd, "ok.txt"), "ok\n");
+    });
+
+    const r = await run(project, "replaying");
+
+    // The first pass drew, failed its Check and went back to the notes; the second produced nothing, so nothing is drawn.
+    expect(runner.steps.map((st) => isScribe(st))).toEqual([true, false, true]);
+    expect(stepsOf(r)).toEqual(["notes:done:2", "draw:skipped:1", "verify:done:2"]);
+    expect(r.state).toBe("approved");
+  });
+
+  it("is dropped when a rejection starts a new Iteration with that Step again", async () => {
+    const project = await projectWithRemote();
+    let scribed = 0;
+    runner.use((step) => {
+      if (isScribe(step)) scribeWrites(++scribed === 1 ? "assets" : "nothing")(step);
+    });
+    const first = await run(project, "skipping");
+
+    await forge.decideGate({ gateId: first.gates[0]!.id, action: "reject", feedback: "Again." });
+    await forge.whenIdle();
+
+    const r = await forge.getRun(first.id);
+    expect(runner.steps.map((st) => isScribe(st))).toEqual([true, false, true]);
+    expect(stepsOf(r)).toEqual(["notes:done:1", "draw:skipped:0", "verify:done:1", "review:running:0"]);
   });
 });

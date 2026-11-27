@@ -73,7 +73,7 @@ export function agentStepType(agents: ReadonlyMap<string, AgentModule>): StepTyp
       if (agent.harvest) {
         const harvest = await agent.harvest(ctx);
         if ("invalid" in harvest) return { next: "reject", reason: harvest.invalid, to: step.id };
-        for (const input of harvest.produced) await ctx.records.giveInput(input);
+        for (const input of harvest.produced) await ctx.records.giveInput(input, step.id);
       }
       return done;
     },

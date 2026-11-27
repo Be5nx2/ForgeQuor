@@ -31,7 +31,8 @@ export interface RunRecords {
   steps: StepStates;
   /** The inputs the Run has: given at launch, or produced by a Step. */
   inputs(): Promise<WorkflowInput[]>;
-  giveInput(input: WorkflowInput): Promise<void>;
+  /** Adds an input the Step `stepId` produced; it goes again when that Step is replayed. */
+  giveInput(input: WorkflowInput, stepId: string): Promise<void>;
   /** The decision of the latest Gate the Step opened in the current Iteration: null when it is still open, undefined when it opened none. */
   gateDecision(stepId: string): Promise<GateDecision | null | undefined>;
   /** Forgets the Check results of a Developer attempt, such as those an interrupted run of the Checks left. */
@@ -85,12 +86,19 @@ export function createRunRecords(pool: pg.Pool, runId: number, iteration: number
       const { rows } = await pool.query("SELECT inputs FROM runs WHERE id = $1", [runId]);
       return rows[0].inputs;
     },
-    async giveInput(input) {
-      await pool.query("UPDATE runs SET inputs = CASE WHEN inputs ? $2 THEN inputs ELSE inputs || to_jsonb($2::text) END WHERE id = $1", [runId, input]);
+    async giveInput(input, stepId) {
+      const added = await pool.query("UPDATE runs SET inputs = inputs || to_jsonb($2::text) WHERE id = $1 AND NOT inputs ? $2", [runId, input]);
+      if (!added.rowCount) return;
+      await pool.query(
+        "UPDATE step_states SET produced = produced || to_jsonb($4::text) WHERE run_id = $1 AND iteration = $2 AND step = $3",
+        [runId, iteration, stepId, input],
+      );
     },
     async gateDecision(stepId) {
       const { rows } = await pool.query(
-        "SELECT decision FROM gates WHERE run_id = $1 AND iteration = $2 AND step = $3 ORDER BY id DESC LIMIT 1",
+        `SELECT decision FROM gates WHERE run_id = $1 AND iteration = $2 AND step = $3
+           AND id > COALESCE((SELECT since_gate FROM step_states WHERE run_id = $1 AND iteration = $2 AND step = $3), 0)
+         ORDER BY id DESC LIMIT 1`,
         [runId, iteration, stepId],
       );
       return rows[0] ? rows[0].decision : undefined;

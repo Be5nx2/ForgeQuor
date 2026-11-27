@@ -1,4 +1,5 @@
 -- A Run freezes the Workflow definition it started with, and the inputs it was given (at launch, or by a Step later).
+-- Nullable on purpose: a Run inserted without one (by older code or a test) follows its Workflow's current definition.
 ALTER TABLE runs ADD COLUMN definition JSONB;
 ALTER TABLE runs ADD COLUMN inputs JSONB NOT NULL DEFAULT '[]';
 
@@ -16,6 +17,10 @@ CREATE TABLE step_states (
   status     TEXT NOT NULL,
   attempts   INTEGER NOT NULL DEFAULT 0,
   sent_back  TEXT,
+  -- The inputs this Step produced, dropped again when the Step is replayed.
+  produced   JSONB NOT NULL DEFAULT '[]',
+  -- Gates up to this id belong to an earlier pass of the Step and are ignored.
+  since_gate BIGINT NOT NULL DEFAULT 0,
   PRIMARY KEY (run_id, iteration, step)
 );
 
