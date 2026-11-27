@@ -228,7 +228,7 @@ Griller with a **Conversation Gate** (it writes the Project's glossary and ADRs 
     - `GET /api/team` gives each seat's effective Runner and model, where each comes from, and the variable name when locked; `PUT /api/team/:seat` refuses an unknown seat or Runner and a seat locked by the environment;
     - a Team tab with a short model list per Runner plus a free identifier, locked seats read-only with their variable named;
     - a seat with a Runner Forgequor cannot start still opens an Escalation naming it.
-- [ ] `m4-07` **Seats per Run**: one Run can use other seats than the default, and shows what it used.
+- [x] `m4-07` **Seats per Run**: one Run can use other seats than the default, and shows what it used.
   - Spec: `docs/specs/m4-comfort.md`
   - Blocked by: `m4-06`, `m4-05`
   - Acceptance:

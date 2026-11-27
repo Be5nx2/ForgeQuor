@@ -20,9 +20,9 @@ import { createQuotaKeeper } from "./quota.js";
 import { createRunRecords, toReview } from "./run-records.js";
 import { reviewStepType } from "./review.js";
 import { buildSeats, type RunnerName, type SeatSettings } from "./seats.js";
-import { createTeamStore, settingsOf, type Team, type TeamChange } from "./team.js";
+import { createTeamStore, parseSeatOverrides, settingsOf, withOverrides, type Team, type TeamChange } from "./team.js";
 import { builtInExtensions } from "./builtin.js";
-import { AssetNotFoundError, GateError, InvalidInputError, RunNotFoundError, RunStateError, SeatLockedError } from "./errors.js";
+import { AssetNotFoundError, GateError, InvalidInputError, InvalidSeatError, RunNotFoundError, RunStateError, SeatLockedError } from "./errors.js";
 import type { Extension, InputProducer } from "./extension.js";
 import { allows, escalationGate, finalGate, offered, refusal, reviewGate, type GateKindModule, type GateOutcome } from "./gates.js";
 import { goBackChoices, redoFailedSteps, redoSteps, redoSet, type StepRow } from "./step-states.js";
@@ -54,7 +54,8 @@ import type {
 import { offeredSkillPacks, placeSkillPacks, SHARED_SKILL_PACK, SKILLS_ROOT } from "./skill-pack.js";
 import { createRunWorktree, existsInBranch, inspectRepository, listInBranch, readInBranch, RegistrationError, refreshDefaultBranch, remoteHasBranch, removeRunWorktree, repositoryPath, runFoldersUnder, slugify } from "./workspace.js";
 
-export { RegistrationError, AssetNotFoundError, GateError, InvalidInputError, RunNotFoundError, RunStateError, SeatLockedError };
+export type { SeatSettings };
+export { RegistrationError, AssetNotFoundError, GateError, InvalidInputError, InvalidSeatError, RunNotFoundError, RunStateError, SeatLockedError };
 export type * from "./types.js";
 
 export interface Forge {
@@ -94,9 +95,11 @@ export interface Forge {
   /**
    * Creates a Run of the given Workflow (`developer` when omitted; an unknown name or an invalid Project Workflow is refused, the Project's Workflows being read from its freshly fetched default branch) and starts it in the background; follow it with `getRun`. A `developer` Run takes a task, an `assets` Run
    * its Asset Requests; the input is refused with an error saying what is wrong before anything starts. A Project already at its concurrent Runs
-   * limit leaves the new Run Queued; it starts by itself, in creation order, when a slot frees up.
+   * limit leaves the new Run Queued; it starts by itself, in creation order, when a slot frees up. `seats` overrides
+   * seats for this Run only, checked like the Team page (an InvalidSeatError for an unknown seat or Runner, a
+   * SeatLockedError for a field the environment holds); the Run freezes its effective seats when it first starts.
    */
-  startRun(input: RunInput & { projectId: number; trackerRef?: string; workflow?: string }): Promise<Run>;
+  startRun(input: RunInput & { projectId: number; trackerRef?: string; workflow?: string; seats?: SeatSettings }): Promise<Run>;
   getRun(id: number): Promise<RunDetail>;
   listRuns(filter?: { projectId?: number; state?: RunState }): Promise<Run[]>;
   /** Every Gate still waiting for the human, across all Projects. */
@@ -366,8 +369,22 @@ export function createForge(deps: ForgeDeps): Forge {
     if (model && !envSettings[seat]?.model) envSettings[seat] = { ...envSettings[seat], model };
   }
   const teamStore = createTeamStore(pool, envSettings);
-  /** Read each time a Run's work starts, so a Team change applies to the next Runs without a restart. */
-  const currentSeats = async () => buildSeats(runners, settingsOf(await teamStore.effective()));
+  /**
+   * The seats a Run works through: its frozen ones, else (its first start) the Team's as they are now with the Run's
+   * overrides laid over them, frozen from then on. So a Team change applies to the next Runs without a restart, and not
+   * to a Run in progress or restarted.
+   */
+  async function seatsOfRun(runId: number) {
+    const { rows } = await pool.query("SELECT seats, seat_overrides FROM runs WHERE id = $1", [runId]);
+    let frozen: SeatSettings | null = rows[0]?.seats ?? null;
+    if (!frozen) {
+      const settings = withOverrides(settingsOf(await teamStore.effective()), (rows[0]?.seat_overrides as SeatSettings | null) ?? {});
+      // Several starts at once keep the first freeze.
+      const { rows: kept } = await pool.query("UPDATE runs SET seats = COALESCE(seats, $2) WHERE id = $1 RETURNING seats", [runId, JSON.stringify(settings)]);
+      frozen = kept[0]?.seats ?? settings;
+    }
+    return buildSeats(runners, frozen ?? {});
+  }
   const stepTimeoutMs = deps.stepTimeoutMs ?? DEFAULT_STEP_TIMEOUT_MS;
   const inFlight = new Set<Promise<void>>();
   /** What each Run is being worked on by right now, so that archiving waits for it to let go. */
@@ -851,7 +868,7 @@ export function createForge(deps: ForgeDeps): Forge {
       const { rows: frozen } = await pool.query("SELECT definition FROM runs WHERE id = $1", [run.id]);
       const definition: WorkflowDefinition | undefined = frozen[0]?.definition ?? workflows.get(run.workflow)?.definition;
       if (!definition) throw new Error(`Unknown Workflow "${run.workflow}".`);
-      const { agents, problems: seatProblems } = await currentSeats();
+      const { agents, problems: seatProblems } = await seatsOfRun(run.id);
       const context: WorkflowContext = {
         run,
         project,
@@ -978,7 +995,9 @@ export function createForge(deps: ForgeDeps): Forge {
       return validateWorkflowText(yaml, workflowKit());
     },
 
-    async startRun({ projectId, trackerRef, workflow = "developer", ...input }) {
+    async startRun({ projectId, trackerRef, workflow = "developer", seats, ...input }) {
+      // Refused before anything else, as the Team page refuses a bad change.
+      const seatOverrides = parseSeatOverrides(envSettings, seats);
       const { rows: found } = await pool.query(`SELECT ${COLUMNS} FROM projects WHERE id = $1`, [projectId]);
       if (!found[0]) throw new Error(`No Project ${projectId}.`);
       const project = toProject(found[0]);
@@ -1005,9 +1024,9 @@ export function createForge(deps: ForgeDeps): Forge {
       try {
         await client.query("BEGIN");
         const { rows } = await client.query(
-          `INSERT INTO runs (project_id, workflow, title, task, tracker_ref, state, definition, inputs, review_mode)
-           VALUES ($1, $2, $3, $4, $5, 'queued', $6, $7, $8) RETURNING id`,
-          [projectId, workflow, plan.title, plan.task, trackerRef?.trim() || null, JSON.stringify(flow.definition), JSON.stringify(plan.given ?? flow.inputs), review],
+          `INSERT INTO runs (project_id, workflow, title, task, tracker_ref, state, definition, inputs, review_mode, seat_overrides)
+           VALUES ($1, $2, $3, $4, $5, 'queued', $6, $7, $8, $9) RETURNING id`,
+          [projectId, workflow, plan.title, plan.task, trackerRef?.trim() || null, JSON.stringify(flow.definition), JSON.stringify(plan.given ?? flow.inputs), review, Object.keys(seatOverrides).length ? JSON.stringify(seatOverrides) : null],
         );
         runId = Number(rows[0].id);
         await plan.store?.(client, runId, project);

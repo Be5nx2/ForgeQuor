@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import { getJson, postJson, type ArtInfo, type AssetKind, type Project, type ReviewMode, type Run, type WorkflowList, type WorkflowOption } from "../api";
+import { getJson, postJson, type ArtInfo, type AssetKind, type Project, type QuotaStatus, type ReviewMode, type Run, type Team, type TeamSeat, type WorkflowList, type WorkflowOption } from "../api";
 
 const emit = defineEmits<{ open: [id: number] }>();
 
@@ -58,6 +58,44 @@ const assets = ref<AssetDraft[]>([newAsset()]);
 const sizeOf = (a: AssetDraft) => (a.size === "custom" ? { width: a.width, height: a.height } : { width: Number(a.size.split("x")[0]), height: Number(a.size.split("x")[1]) });
 const error = ref("");
 
+/** The Team as it is now: the "Seats" section starts from it, and a Run overrides only what the human changes here. */
+const team = ref<Team | null>(null);
+const seatDrafts = ref<Record<string, { runner: string; model: string }>>({});
+/** Each vendor's latest Quota Reading, to warn next to a seat whose Runner is exhausted. */
+const quota = ref<QuotaStatus[]>([]);
+
+async function loadSeats() {
+  const [t, q] = await Promise.all([getJson<Team>("/api/team").catch(() => null), getJson<QuotaStatus[]>("/api/quota").catch((): QuotaStatus[] => [])]);
+  quota.value = q;
+  team.value = t;
+  seatDrafts.value = Object.fromEntries((t?.seats ?? []).map((s) => [s.seat, { runner: s.runner.value ?? "", model: s.model.value ?? "" }]));
+}
+
+const offeredModels = (s: TeamSeat) => team.value?.models[seatDrafts.value[s.seat]!.runner] ?? [];
+const lockedBy = (s: TeamSeat) => [s.runner.variable, s.model.variable].filter(Boolean).join(", ");
+
+function exhaustion(s: TeamSeat): string {
+  const runner = seatDrafts.value[s.seat]!.runner;
+  const reading = quota.value.find((q) => q.vendor === runner)?.reading;
+  if (!reading?.exhausted) return "";
+  const used = (w: { percentUsed: number | null }) => w.percentUsed !== null && w.percentUsed >= 100;
+  const window = used(reading.fiveHour) ? reading.fiveHour : used(reading.weekly) ? reading.weekly : reading.fiveHour.resetsAt ? reading.fiveHour : reading.weekly;
+  return window.resetsAt ? `${runner}'s Quota is used up, it resets ${new Date(window.resetsAt).toLocaleString()}.` : `${runner}'s Quota is used up (reset time unknown).`;
+}
+
+/** Only the fields the human changed, and never one the environment holds. */
+function seatOverrides(): Record<string, { runner?: string; model?: string }> | undefined {
+  const out: Record<string, { runner?: string; model?: string }> = {};
+  for (const s of team.value?.seats ?? []) {
+    const draft = seatDrafts.value[s.seat]!;
+    const change: { runner?: string; model?: string } = {};
+    if (s.runner.source !== "env" && draft.runner && draft.runner !== (s.runner.value ?? "")) change.runner = draft.runner;
+    if (s.model.source !== "env" && draft.model && draft.model !== (s.model.value ?? "")) change.model = draft.model;
+    if (Object.keys(change).length) out[s.seat] = change;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 /** False until the Projects arrive, so the page never says "Register a Project first" while loading or after a failure. */
 const projectsLoaded = ref(false);
 const projectsError = ref("");
@@ -84,9 +122,11 @@ async function start() {
       review: asks("review") ? form.value.review : undefined,
       title: form.value.title || undefined,
       trackerRef: form.value.trackerRef || undefined,
+      seats: seatOverrides(),
     });
     form.value = { ...form.value, task: "", title: "", trackerRef: "" };
     assets.value = [newAsset()];
+    void loadSeats();
     emit("open", run.id);
   } catch (e: any) {
     error.value = e.message;
@@ -97,6 +137,7 @@ async function start() {
 const projectLabel = (p: Project) => `${p.name} (${p.localPath})`;
 
 onMounted(loadProjects);
+onMounted(loadSeats);
 // The Art Direction's default size presets the Assets not yet filled in; a Project without images or Art Direction offers nothing.
 watch(
   () => form.value.projectId,
@@ -181,6 +222,28 @@ watch(
       </fieldset>
       <button type="button" class="secondary" @click="assets.push(newAsset())">Add an Asset</button>
     </template>
+    <details v-if="team" class="seats">
+      <summary>Seats</summary>
+      <p class="muted">Each seat's Runner and model for this Run only; the Team page keeps the defaults. Left as they are, the Run uses the Team's settings as they are when it starts.</p>
+      <div v-for="s in team.seats" :key="s.seat" class="stack seat">
+        <strong>{{ s.seat }}</strong>
+        <label>
+          Runner
+          <select v-model="seatDrafts[s.seat]!.runner" :disabled="s.runner.source === 'env'" :aria-label="`Runner of ${s.seat} for this Run`">
+            <option v-for="r in Object.keys(team.models)" :key="r" :value="r">{{ r }}</option>
+          </select>
+        </label>
+        <label>
+          Model
+          <input v-model="seatDrafts[s.seat]!.model" :list="`run-models-${s.seat}`" :disabled="s.model.source === 'env'" placeholder="the Runner's own default" :aria-label="`Model of ${s.seat} for this Run`" />
+          <datalist :id="`run-models-${s.seat}`">
+            <option v-for="m in offeredModels(s)" :key="m" :value="m" />
+          </datalist>
+        </label>
+        <span v-if="lockedBy(s)" class="muted">locked by {{ lockedBy(s) }}</span>
+        <span v-if="exhaustion(s)" class="error" role="status">{{ exhaustion(s) }}</span>
+      </div>
+    </details>
     <input v-model="form.title" placeholder="Title (derived from the task or Assets if empty)" aria-label="Title" />
     <input v-model="form.trackerRef" placeholder="Tracker reference (optional, e.g. $12a)" aria-label="Tracker reference" />
     <button type="submit" :disabled="workflowsLoading || !launchable">Start Run</button>
