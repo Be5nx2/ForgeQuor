@@ -3,8 +3,10 @@ import { join } from "node:path";
 import type pg from "pg";
 import type { Runner } from "../runner/runner.js";
 import { developerWorkflow } from "./developer.js";
+import { publishPullRequest } from "./publish.js";
+import { createRunRecords } from "./run-records.js";
 import {
-  assetsWorkflow,
+  createAssetsWorkflow,
   assetTargetPath,
   AssetNotFoundError,
   checkAgainstRepository,
@@ -214,9 +216,6 @@ function toCheck(r: Record<string, any>): CheckResult {
 const QUOTA_RETRY_MS = 15 * 60 * 1000;
 const DEFAULT_STEP_TIMEOUT_MS = 60 * 60 * 1000;
 
-/** The Workflows a Run can follow, by name. */
-const workflows = new Map<string, Workflow>([developerWorkflow, assetsWorkflow].map((w) => [w.name, w]));
-
 /** States a Run cannot leave. A Run in one of them no longer holds its Project's slot. */
 const OVER: RunState[] = ["merged", "closed", "abandoned"];
 const ACTIVE: RunState[] = ["queued", "running", "waiting", "paused", "approved"];
@@ -263,6 +262,8 @@ const RUN_COLUMNS_OF_R = RUN_COLUMNS.split(", ").map((c) => `r.${c}`).join(", ")
 
 export function createForge(deps: ForgeDeps): Forge {
   const { pool } = deps;
+  /** The Workflows a Run can follow, by name. */
+  const workflows = new Map<string, Workflow>([developerWorkflow, createAssetsWorkflow(pool)].map((w) => [w.name, w]));
   /** Each Agent's Runner: the Developer works through Claude Code, the Artist through Codex. */
   const agents: { developer: AgentSeat; artist?: AgentSeat } = {
     developer: { runner: deps.runner, runnerName: "claude", model: deps.developerModel },
@@ -532,6 +533,7 @@ export function createForge(deps: ForgeDeps): Forge {
       if (!(await stillRunning(run.id))) return;
       const workflow = workflows.get(run.workflow);
       if (!workflow) throw new Error(`Unknown Workflow "${run.workflow}".`);
+      const records = createRunRecords(pool, run.id, run.iteration);
       await workflow.run({
         run,
         project,
@@ -539,9 +541,13 @@ export function createForge(deps: ForgeDeps): Forge {
         worktreePath,
         defaultBranch,
         stop,
-        pool,
         agents,
-        codeHost: deps.codeHost,
+        records,
+        publishPullRequest: (brief) =>
+          publishPullRequest(
+            { run, project, worktreePath, branch, defaultBranch, records, changed: () => changed(run.id), stillRunning: () => stillRunning(run.id), codeHost: deps.codeHost },
+            brief,
+          ),
         stepTimeoutMs,
         checkTimeoutMs: deps.checkTimeoutMs,
         changed: () => changed(run.id),

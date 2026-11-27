@@ -1,10 +1,8 @@
 import { copyFileSync, existsSync, mkdirSync, rmSync, openSync, readFileSync, readSync, closeSync, realpathSync, statSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import type pg from "pg";
-import { describeDuration } from "../duration.js";
 import { checkAssetFile, parsePalette, type AssetCheckResult } from "./asset-checks.js";
 import { parseReferences } from "./art-direction.js";
-import { publishPullRequest } from "./publish.js";
 import { runAgentStep } from "./step.js";
 import type { RunInput, RunPlan, Workflow, WorkflowContext } from "./workflow.js";
 import type { Asset, AssetKind, AssetRequest, GateVerdict, Verdict } from "./types.js";
@@ -369,7 +367,7 @@ function reviewBrief(assets: Asset[], feedbacks: Map<number, string[]>): string 
  * Records one Artist attempt as a version of the Asset: the Runner's raw images, kept in the Run Notes as a trace, and
  * what the Asset Checks found.
  */
-async function recordVersion(ctx: WorkflowContext, asset: Asset, attempt: number, files: string[], summary: string, check: AssetCheckResult) {
+async function recordVersion(pool: pg.Pool, ctx: WorkflowContext, asset: Asset, attempt: number, files: string[], summary: string, check: AssetCheckResult) {
   const dir = join(ctx.worktreePath, RUN_NOTES_DIR, "assets");
   const kept: string[] = [];
   mkdirSync(dir, { recursive: true });
@@ -390,7 +388,7 @@ async function recordVersion(ctx: WorkflowContext, asset: Asset, attempt: number
     mkdirSync(join(ctx.worktreePath, RUN_NOTES_DIR, "assets", "versions"), { recursive: true });
     copyFileSync(real, join(ctx.worktreePath, imagePath));
   }
-  await ctx.pool.query(
+  await pool.query(
     `INSERT INTO asset_versions (asset_id, iteration, attempt, raw_images, written, failures, warnings, summary, image_path)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
     [asset.id, ctx.run.iteration, attempt, JSON.stringify(kept), check.written, JSON.stringify(check.failures), JSON.stringify(check.warnings), summary, imagePath],
@@ -402,15 +400,15 @@ async function recordVersion(ctx: WorkflowContext, asset: Asset, attempt: number
  * Asset was never rejected. When the Artist is about to start over (`starting`), the rejected file is cleared from the
  * target path, so that a missing file means nothing was written this time.
  */
-async function rejectedBefore(ctx: WorkflowContext, asset: Asset, starting: boolean): Promise<Rejected | undefined> {
-  const { rows: earlier } = await ctx.pool.query(
+async function rejectedBefore(pool: pg.Pool, ctx: WorkflowContext, asset: Asset, starting: boolean): Promise<Rejected | undefined> {
+  const { rows: earlier } = await pool.query(
     `SELECT v.image_path FROM asset_versions v WHERE v.asset_id = $1 AND v.iteration < $2 AND ${PASSING} AND v.image_path IS NOT NULL
      ORDER BY v.id DESC LIMIT 1`,
     [asset.id, ctx.run.iteration],
   );
   if (!earlier[0]) return undefined;
   if (starting) rmSync(join(ctx.worktreePath, asset.targetPath), { force: true });
-  const { rows } = await ctx.pool.query("SELECT feedback FROM asset_verdicts WHERE asset_id = $1 AND verdict = 'reject' ORDER BY id", [asset.id]);
+  const { rows } = await pool.query("SELECT feedback FROM asset_verdicts WHERE asset_id = $1 AND verdict = 'reject' ORDER BY id", [asset.id]);
   return { imagePath: earlier[0].image_path, feedbacks: rows.map((r) => r.feedback) };
 }
 
@@ -446,8 +444,8 @@ const MAX_UNWRITTEN_ATTEMPTS = 2;
  * was tried is read from the recorded versions, so a restarted Run goes on from there. False when the Run cannot go on
  * (it paused, opened an Escalation, or was abandoned).
  */
-async function drawAsset(ctx: WorkflowContext, asset: Asset, artDirection: string, artReferences: string[], palette: string[] | null): Promise<boolean> {
-  const { run, project, pool, worktreePath } = ctx;
+async function drawAsset(pool: pg.Pool, ctx: WorkflowContext, asset: Asset, artDirection: string, artReferences: string[], palette: string[] | null): Promise<boolean> {
+  const { run, project, worktreePath } = ctx;
   const seat = ctx.agents.artist;
   if (!seat) throw new Error("Forgequor has no Runner for the Artist.");
   for (;;) {
@@ -456,7 +454,7 @@ async function drawAsset(ctx: WorkflowContext, asset: Asset, artDirection: strin
       [asset.id, run.iteration],
     );
     const last = versions.at(-1);
-    const rejected = await rejectedBefore(ctx, asset, !versions.length);
+    const rejected = await rejectedBefore(pool, ctx, asset, !versions.length);
     // Only the first attempt of the Run sets the existing art aside (and clears the target): later passes must not clear
     // what the Artist just wrote, and an Iteration after a rejection finds the target cleared already. Every attempt of
     // every Iteration is still shown the Replaced Art.
@@ -486,7 +484,7 @@ async function drawAsset(ctx: WorkflowContext, asset: Asset, artDirection: strin
     await pool.query("UPDATE assets SET status = 'generating' WHERE id = $1", [asset.id]);
     ctx.changed();
 
-    const { result, timedOut } = await runAgentStep(ctx, seat, {
+    const done = await runAgentStep(ctx, seat, {
       name: "artist",
       attempt,
       assetId: asset.id,
@@ -494,21 +492,8 @@ async function drawAsset(ctx: WorkflowContext, asset: Asset, artDirection: strin
       prompt: artistPrompt(asset, project.artDirectionPath, artDirection, { redo, rejected, references, replaced }),
       images,
     });
-    if (!(await ctx.stillRunning())) return false;
-    // A Step that finished on its own just as the timeout fired keeps its real result.
-    if (timedOut && result.status === "failed") {
-      await ctx.openGate("escalation", `The Artist's Step timed out after ${describeDuration(ctx.stepTimeoutMs)} and was killed.`);
-      return false;
-    }
-    if (result.status === "failed") {
-      await ctx.openGate("escalation", "The Artist failed.", result.error);
-      return false;
-    }
-    if (result.status === "quota_exhausted") {
-      await ctx.pause(result.resetsAt);
-      return false;
-    }
-    await recordVersion(ctx, asset, attempt, result.files ?? [], result.summary, checkAssetFile(worktreePath, asset, palette));
+    if (!done) return false;
+    await recordVersion(pool, ctx, asset, attempt, done.files ?? [], done.summary, checkAssetFile(worktreePath, asset, palette));
   }
   await pool.query("UPDATE assets SET status = 'waiting' WHERE id = $1", [asset.id]);
   ctx.changed();
@@ -516,8 +501,8 @@ async function drawAsset(ctx: WorkflowContext, asset: Asset, artDirection: strin
 }
 
 /** The human approved the Asset Gate: commit the Assets, open the pull request with Forgequor's own Review Brief, approve the Run. */
-async function finish(ctx: WorkflowContext, assets: Asset[]) {
-  const { pool, run, worktreePath } = ctx;
+async function finish(pool: pg.Pool, ctx: WorkflowContext, assets: Asset[]) {
+  const { run, worktreePath } = ctx;
   await pool.query("UPDATE assets SET status = 'approved' WHERE run_id = $1", [run.id]);
   await commitPaths(worktreePath, assets.map((a) => a.targetPath), commitMessage(assets));
   const { rows } = await pool.query(
@@ -526,13 +511,14 @@ async function finish(ctx: WorkflowContext, assets: Asset[]) {
   );
   const feedbacks = new Map<number, string[]>();
   for (const r of rows) feedbacks.set(Number(r.asset_id), [...(feedbacks.get(Number(r.asset_id)) ?? []), r.feedback]);
-  const pr = await publishPullRequest(ctx, () => reviewBrief(assets, feedbacks));
+  const pr = await ctx.publishPullRequest(() => reviewBrief(assets, feedbacks));
   if (!pr) return;
   await ctx.approve();
 }
 
 /** The `assets` Workflow: the Artist draws each Asset in turn, the human judges them at the Asset Gate, then the pull request opens. */
-export const assetsWorkflow: Workflow = {
+export function createAssetsWorkflow(pool: pg.Pool): Workflow {
+  return {
   name: "assets",
 
   plan(input: RunInput): RunPlan {
@@ -548,7 +534,7 @@ export const assetsWorkflow: Workflow = {
   },
 
   async run(ctx) {
-    const { run, project, worktreePath, pool } = ctx;
+    const { run, project, worktreePath } = ctx;
     const assets = await loadAssets(pool, run.id);
 
     const todo = assets.filter((a) => a.status === "pending" || a.status === "generating" || a.status === "rejected");
@@ -574,14 +560,15 @@ export const assetsWorkflow: Workflow = {
       const palette = parsePalette(artDirection);
       const artReferences = parseReferences(artDirection);
       for (const asset of todo) {
-        if (!(await drawAsset(ctx, asset, artDirection, artReferences, palette))) return;
+        if (!(await drawAsset(pool, ctx, asset, artDirection, artReferences, palette))) return;
       }
     }
 
     const { rows: gates } = await pool.query("SELECT decision FROM gates WHERE run_id = $1 AND kind = 'asset' ORDER BY id DESC LIMIT 1", [run.id]);
-    if (gates[0]?.decision === "approve") return finish(ctx, assets);
+    if (gates[0]?.decision === "approve") return finish(pool, ctx, assets);
     if (!(await ctx.stillRunning())) return;
     const waiting = (await loadAssets(pool, run.id)).filter((a) => a.status === "waiting").length;
     await ctx.openGate("asset", `${waiting} ${waiting === 1 ? "Asset is" : "Assets are"} waiting for your verdict.`);
   },
-};
+  };
+}

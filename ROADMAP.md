@@ -24,7 +24,7 @@ The engine behind every Workflow, with no change visible to the human: a deeper 
 - [x] `m3-00b` **M2 review follow-ups**: the small gaps the M2 branch review found (listed below under "M2 review follow-ups").
   - Spec: `docs/specs/m3a-workflow-engine.md`
   - Blocked by: `m3-00a`
-- [ ] `m3-01` **One Step executor, a small context**: how a Step's result becomes progress, an Escalation or a Pause is written once and used by both Workflows.
+- [x] `m3-01` **One Step executor, a small context**: how a Step's result becomes progress, an Escalation or a Pause is written once and used by both Workflows.
   - Spec: `docs/specs/m3a-workflow-engine.md`
   - Blocked by: `m3-00b`
   - Acceptance:

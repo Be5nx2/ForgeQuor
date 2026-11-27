@@ -1,3 +1,4 @@
+import { describeDuration } from "../duration.js";
 import type { StepResult } from "../runner/runner.js";
 import type { AgentSeat, WorkflowContext } from "./workflow.js";
 
@@ -13,22 +14,23 @@ export interface AgentStep {
   images?: string[];
 }
 
+type Succeeded = Extract<StepResult, { status: "succeeded" }>;
+
 /**
- * One Agent attempt, recorded as a Step attempt and streamed live. Killed, and reported as timed out, after the Step
- * timeout; killed too when the human abandons the Run.
+ * The one executor of Agent Steps. Runs one Agent attempt, records it as a Step attempt and streams its progress live;
+ * the Agent is killed after the Step timeout, and when the human abandons the Run. Then maps the result the same way for
+ * every Workflow: success returns it; failure or timeout opens an Escalation naming the Agent; Quota exhaustion pauses
+ * the Run. Returns null when the Run cannot go on (it waits at a Gate, is paused, or was abandoned).
  */
-export async function runAgentStep(
-  ctx: WorkflowContext,
-  seat: AgentSeat,
-  step: AgentStep,
-): Promise<{ result: StepResult; timedOut: boolean }> {
-  const { run, pool, stop, stepTimeoutMs, worktreePath } = ctx;
-  const { rows } = await pool.query(
-    `INSERT INTO step_attempts (run_id, iteration, step, attempt, runner, model, status, asset_id)
-     VALUES ($1, $2, $3, $4, $5, $6, 'running', $7) RETURNING id`,
-    [run.id, run.iteration, step.name, step.attempt, seat.runnerName, seat.model ?? null, step.assetId ?? null],
-  );
-  const attemptId = Number(rows[0].id);
+export async function runAgentStep(ctx: WorkflowContext, seat: AgentSeat, step: AgentStep): Promise<Succeeded | null> {
+  const { run, stop, stepTimeoutMs, worktreePath, records } = ctx;
+  const attemptId = await records.startAttempt({
+    step: step.name,
+    attempt: step.attempt,
+    runner: seat.runnerName,
+    model: seat.model,
+    assetId: step.assetId,
+  });
   const log: string[] = [];
   ctx.changed();
 
@@ -54,18 +56,23 @@ export async function runAgentStep(
     clearTimeout(timer);
     stop.removeEventListener("abort", stopStep);
   }
-  await pool.query(
-    `UPDATE step_attempts SET status = $2, ended_at = now(), summary = $3, error = $4, quota_resets_at = $5, event_log = $6
-     WHERE id = $1`,
-    [
-      attemptId,
-      result.status,
-      result.status === "succeeded" ? result.summary : null,
-      result.status === "failed" ? result.error : null,
-      result.status === "quota_exhausted" ? result.resetsAt : null,
-      log.join("\n"),
-    ],
-  );
+  await records.finishAttempt(attemptId, result, log.join("\n"));
   ctx.changed();
-  return { result, timedOut };
+
+  if (!(await ctx.stillRunning())) return null;
+  const agent = step.name.charAt(0).toUpperCase() + step.name.slice(1);
+  // A Step that finished on its own just as the timeout fired keeps its real result.
+  if (timedOut && result.status === "failed") {
+    await ctx.openGate("escalation", `The ${agent}'s Step timed out after ${describeDuration(stepTimeoutMs)} and was killed.`);
+    return null;
+  }
+  if (result.status === "failed") {
+    await ctx.openGate("escalation", `The ${agent} failed.`, result.error);
+    return null;
+  }
+  if (result.status === "quota_exhausted") {
+    await ctx.pause(result.resetsAt);
+    return null;
+  }
+  return result;
 }
