@@ -91,8 +91,8 @@ All settings are optional environment variables. Set them in the shell that runs
 | `FORGEQUOR_PORT` | `4170` | Port of the API and UI |
 | `FORGEQUOR_DATABASE_URL` | `postgres://forgequor:forgequor@localhost:5433/forgequor` | PostgreSQL connection |
 | `FORGEQUOR_WORKTREES` | `~/.forgequor/worktrees` | Where Run worktrees are created |
-| `FORGEQUOR_DEVELOPER_MODEL` | Claude Code's default | Model used by the Developer Agent |
-| `FORGEQUOR_ARTIST_MODEL` | Codex's default | Model Codex uses for the Artist Agent |
+| `FORGEQUOR_<SEAT>_RUNNER` | per seat: Claude Code, except `REVIEWER_B` and `ARTIST` (Codex) | Runner (`claude` or `codex`) of an Agent seat. Seats: `GRILLER`, `SPEC_WRITER`, `ARCHITECT`, `DEVELOPER`, `REVIEWER_A`, `REVIEWER_B`, `CONSOLIDATOR`, `ARTIST`. A seat whose Runner cannot be started opens an Escalation naming it when a Step needs it |
+| `FORGEQUOR_<SEAT>_MODEL` | the Runner's default | Model of an Agent seat, such as `FORGEQUOR_DEVELOPER_MODEL` or `FORGEQUOR_ARTIST_MODEL` |
 | `FORGEQUOR_STEP_TIMEOUT_MINUTES` | `60` | An Agent's Step running longer is killed and escalated |
 | `FORGEQUOR_CHECK_TIMEOUT_MINUTES` | `10` | A Check command running longer is killed and counts as failed |
 

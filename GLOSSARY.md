@@ -104,6 +104,10 @@ _Avoid_: Bot, worker, assistant
 The AI tool that actually executes an **Agent**'s work, such as Claude Code or Codex, set to one of its models.
 _Avoid_: Provider, backend, engine
 
+**Seat**:
+The place where one **Agent**'s **Runner** and model are set (`developer`, `reviewer-a`, `reviewer-b`, `artist`...), by default or through an environment variable. A seat whose **Runner** cannot be started opens an **Escalation** naming it when a **Step** needs it.
+_Avoid_: Slot, assignment
+
 **Consolidator**:
 The **Agent** that merges two Reviewers' reviews into one and checks each remark against the code; a disagreement it cannot settle opens a **Gate** carrying its recommendation.
 _Avoid_: Merger, aggregator, judge
