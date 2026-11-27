@@ -2,7 +2,7 @@ import type pg from "pg";
 import type { Runner } from "../runner/runner.js";
 import type { AssetRequest, GateKind, Project, Run, RunUpdate } from "./types.js";
 import type { RunRecords } from "./run-records.js";
-import type { WorkflowInput } from "./workflow-definition.js";
+import type { WorkflowDefinition, WorkflowInput } from "./workflow-definition.js";
 
 /** The Runner an Agent works through, and the model it is set to. */
 export interface AgentSeat {
@@ -34,6 +34,8 @@ export interface LaunchRepository {
 export interface RunPlan {
   task: string;
   title: string;
+  /** The inputs the human gave, when not every input the Workflow declares (the others are produced by a Step, or missing). Default: all of them. */
+  given?: WorkflowInput[];
   /** Refuses the launch (by throwing a clear error) when what the input leans on is not right in the repository. Runs before anything is stored. */
   check?(repo: LaunchRepository): Promise<void>;
   /** Stores the input with the new Run, inside the core's launch transaction. */
@@ -67,8 +69,8 @@ export interface WorkflowContext {
    * after a restart.
    */
   publishPullRequest(brief: () => string): Promise<{ number: number; url: string } | null>;
-  /** Opens a Gate and makes the Run Waiting, unless the Run was abandoned meanwhile. */
-  openGate(kind: GateKind, reason: string, evidence?: string): Promise<void>;
+  /** Opens a Gate (for the Workflow Step `step`, if any) and makes the Run Waiting, unless the Run was abandoned meanwhile. */
+  openGate(kind: GateKind, reason: string, evidence?: string, step?: string): Promise<void>;
   /** The Runner's Quota ran out: the Run waits for the reset, keeping its slot. */
   pause(resetsAt: Date | null): Promise<void>;
   /** The Run's work is done and its pull request is open: the Run becomes Approved, unless it was abandoned meanwhile. */
@@ -79,13 +81,17 @@ export interface WorkflowContext {
 
 /**
  * A named sequence of Steps. `plan` checks what the human gave (the Step types that use an input validate it) and says
- * what the Run is called; it throws a clear error when the input is no good. `run` works the Run until it waits at a Gate, pauses or is abandoned, starting over from
- * what is recorded when the Run was worked on before. An error it throws opens an Escalation.
+ * what the Run is called; it throws a clear error when the input is no good. A Run freezes the `definition` it starts
+ * with, and the engine works the Run from it until it waits at a Gate, pauses or is abandoned, starting over from what is
+ * recorded when the Run was worked on before. An error it throws opens an Escalation.
  */
 export interface Workflow {
   name: string;
   /** The inputs the Workflow takes at launch. */
   inputs: readonly WorkflowInput[];
+  /** The Steps of the Workflow, as a Run starts with them. */
+  definition: WorkflowDefinition;
   plan(input: RunInput): RunPlan;
-  run(ctx: WorkflowContext): Promise<void>;
+  /** A Workflow that runs as code instead of from its definition (`assets`, until m3-05 moves it to the engine). */
+  run?(ctx: WorkflowContext): Promise<void>;
 }

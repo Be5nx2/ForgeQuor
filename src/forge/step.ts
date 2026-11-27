@@ -6,6 +6,8 @@ export interface AgentStep {
   /** The Step's name in the Run's record ("developer", "artist"). */
   name: string;
   attempt: number;
+  /** The Workflow Step running it, when the Workflow is run by the engine. */
+  stepId?: string;
   /** The Asset this Step works on, for the Artist. */
   assetId?: number;
   instructions: string;
@@ -30,6 +32,7 @@ export async function runAgentStep(ctx: WorkflowContext, seat: AgentSeat, step: 
     runner: seat.runnerName,
     model: seat.model,
     assetId: step.assetId,
+    stepId: step.stepId,
   });
   const log: string[] = [];
   ctx.changed();

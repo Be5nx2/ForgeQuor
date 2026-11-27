@@ -31,6 +31,8 @@ export interface GateKindModule {
   label: string;
   /** What the human can do at it. */
   actions: GateAction[];
+  /** Why a Gate Step of this kind opens it, as the human reads it. */
+  reason?: string;
   /**
    * Validates a decision the Gate offers (the core already refused the others) and says where the Run goes. Throws an
    * InvalidInputError for a decision that does not fit, such as a rejection without Feedback.
@@ -49,6 +51,7 @@ export const finalGate: GateKindModule = {
   kind: "final",
   label: "A final Gate",
   actions: ["approve", "reject", "abandon"],
+  reason: "The Developer finished.",
   async decide(_gate, { action, feedback }) {
     if (action === "abandon") return { next: "abandon" };
     if (action === "approve") return { next: "approve" };

@@ -2,7 +2,8 @@ import type pg from "pg";
 import type { StepResult } from "../runner/runner.js";
 import type { CheckOutcome } from "./checks.js";
 import type { GateDecision, GateKind } from "./types.js";
-import { resumePoint, type ResumePoint } from "./resume.js";
+import { createStepStates, type StepStates } from "./step-states.js";
+import type { WorkflowInput } from "./workflow-definition.js";
 
 /** What a Step attempt is recorded with when it starts. */
 export interface AttemptStart {
@@ -13,6 +14,8 @@ export interface AttemptStart {
   model?: string;
   /** The Asset the attempt works on, for the Artist. */
   assetId?: number;
+  /** The Workflow Step the attempt belongs to. */
+  stepId?: string;
 }
 
 /** The Run's own records, and the only way a Workflow reads or writes them: no Workflow holds the database pool. */
@@ -24,8 +27,15 @@ export interface RunRecords {
   /** Whether the Project's setup commands already passed for this Run. */
   setupDone(): Promise<boolean>;
   markSetupDone(): Promise<void>;
-  /** Where the Developer and Checks loop picks up, within the Run's current Iteration. */
-  resumePoint(checkCount: number): Promise<ResumePoint>;
+  /** Where each Step of the Run stands in its current Iteration. */
+  steps: StepStates;
+  /** The inputs the Run has: given at launch, or produced by a Step. */
+  inputs(): Promise<WorkflowInput[]>;
+  giveInput(input: WorkflowInput): Promise<void>;
+  /** The decision of the latest Gate the Step opened in the current Iteration: null when it is still open, undefined when it opened none. */
+  gateDecision(stepId: string): Promise<GateDecision | null | undefined>;
+  /** Forgets the Check results of a Developer attempt, such as those an interrupted run of the Checks left. */
+  clearChecks(attempt: number): Promise<void>;
   /** Records the outcome of every Check of a Developer attempt. */
   recordChecks(attempt: number, outcomes: CheckOutcome[]): Promise<void>;
   /** The Feedback of every rejection of this Run, oldest first. */
@@ -43,9 +53,9 @@ export function createRunRecords(pool: pg.Pool, runId: number, iteration: number
   return {
     async startAttempt(s) {
       const { rows } = await pool.query(
-        `INSERT INTO step_attempts (run_id, iteration, step, attempt, runner, model, status, asset_id)
-         VALUES ($1, $2, $3, $4, $5, $6, 'running', $7) RETURNING id`,
-        [runId, iteration, s.step, s.attempt, s.runner, s.model ?? null, s.assetId ?? null],
+        `INSERT INTO step_attempts (run_id, iteration, step, attempt, runner, model, status, asset_id, step_id)
+         VALUES ($1, $2, $3, $4, $5, $6, 'running', $7, $8) RETURNING id`,
+        [runId, iteration, s.step, s.attempt, s.runner, s.model ?? null, s.assetId ?? null, s.stepId ?? null],
       );
       return Number(rows[0].id);
     },
@@ -70,7 +80,24 @@ export function createRunRecords(pool: pg.Pool, runId: number, iteration: number
     async markSetupDone() {
       await pool.query("UPDATE runs SET setup_done = true WHERE id = $1", [runId]);
     },
-    resumePoint: (checkCount) => resumePoint(pool, runId, iteration, checkCount),
+    steps: createStepStates(pool, runId, iteration),
+    async inputs() {
+      const { rows } = await pool.query("SELECT inputs FROM runs WHERE id = $1", [runId]);
+      return rows[0].inputs;
+    },
+    async giveInput(input) {
+      await pool.query("UPDATE runs SET inputs = CASE WHEN inputs ? $2 THEN inputs ELSE inputs || to_jsonb($2::text) END WHERE id = $1", [runId, input]);
+    },
+    async gateDecision(stepId) {
+      const { rows } = await pool.query(
+        "SELECT decision FROM gates WHERE run_id = $1 AND iteration = $2 AND step = $3 ORDER BY id DESC LIMIT 1",
+        [runId, iteration, stepId],
+      );
+      return rows[0] ? rows[0].decision : undefined;
+    },
+    async clearChecks(attempt) {
+      await pool.query("DELETE FROM check_results WHERE run_id = $1 AND iteration = $2 AND attempt = $3", [runId, iteration, attempt]);
+    },
     async recordChecks(attempt, outcomes) {
       for (const c of outcomes) {
         await pool.query(

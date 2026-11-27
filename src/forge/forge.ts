@@ -2,14 +2,17 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type pg from "pg";
 import type { Runner } from "../runner/runner.js";
-import { developerWorkflow } from "./developer.js";
+import { developerAgent, developerWorkflow } from "./developer.js";
+import { runEngine, type StepTypeModule } from "./engine.js";
+import { agentStepType, checksStepType, gateStepType, publishStepType, type AgentModule } from "./step-types.js";
+import type { WorkflowDefinition } from "./workflow-definition.js";
 import { publishPullRequest } from "./publish.js";
 import { createRunRecords } from "./run-records.js";
 import { builtInExtensions } from "./builtin.js";
 import { AssetNotFoundError, GateError, InvalidInputError, RunNotFoundError, RunStateError } from "./errors.js";
 import type { Extension } from "./extension.js";
 import { escalationGate, finalGate, refusal, type GateKindModule, type GateOutcome } from "./gates.js";
-import type { AgentSeat, RunInput, Workflow } from "./workflow.js";
+import type { AgentSeat, RunInput, Workflow, WorkflowContext } from "./workflow.js";
 import type { CodeHost } from "../codehost/codehost.js";
 import { parseDefaultSize, parseReferences } from "./art-direction.js";
 import type {
@@ -27,6 +30,7 @@ import type {
   RunState,
   RunUpdate,
   StepAttempt,
+  StepState,
   Verdict,
 } from "./types.js";
 import { createRunWorktree, existsInBranch, inspectRepository, listInBranch, readInBranch, RegistrationError, refreshDefaultBranch, repositoryPath, slugify } from "./workspace.js";
@@ -164,6 +168,7 @@ function toAttempt(r: Record<string, any>): StepAttempt {
     id: Number(r.id),
     iteration: r.iteration,
     step: r.step,
+    stepId: r.step_id,
     attempt: r.attempt,
     runner: r.runner,
     model: r.model,
@@ -208,6 +213,7 @@ function toGate(r: Record<string, any>, actions: GateAction[]): Gate {
     id: Number(r.id),
     runId: Number(r.run_id),
     iteration: r.iteration,
+    stepId: r.step,
     kind: r.kind,
     reason: r.reason,
     evidence: r.evidence,
@@ -232,6 +238,12 @@ export function createForge(deps: ForgeDeps): Forge {
   /** The Gate kinds, by kind: each decides its own Gates. */
   const gateKinds = new Map<GateKind, GateKindModule>([finalGate, escalationGate, ...extensions.flatMap((e) => e.gateKinds)].map((k) => [k.kind, k]));
   const gateOf = (r: Record<string, any>): Gate => toGate(r, gateKinds.get(r.kind)?.actions ?? []);
+  /** The Agents a Workflow's Agent Step can name. */
+  const agentModules = new Map<string, AgentModule>([developerAgent, ...extensions.flatMap((e) => e.agents ?? [])].map((a) => [a.name, a]));
+  /** What the engine runs, by Step type. */
+  const stepTypes = new Map<StepTypeModule["type"], StepTypeModule>(
+    [agentStepType(agentModules), checksStepType, publishStepType, gateStepType(gateKinds), ...extensions.flatMap((e) => e.stepTypes ?? [])].map((t) => [t.type, t]),
+  );
   /** Each Agent's Runner: the Developer works through Claude Code, the Artist through Codex. */
   const agents: { developer: AgentSeat; artist?: AgentSeat } = {
     developer: { runner: deps.runner, runnerName: "claude", model: deps.developerModel },
@@ -276,11 +288,11 @@ export function createForge(deps: ForgeDeps): Forge {
   }
 
   /** Opens a Gate and makes the Run Waiting, unless the Run was abandoned meanwhile. */
-  async function openGate(runId: number, kind: GateKind, reason: string, evidence?: string) {
+  async function openGate(runId: number, kind: GateKind, reason: string, evidence?: string, step?: string) {
     await pool.query(
       `WITH r AS (UPDATE runs SET state = 'waiting', updated_at = now() WHERE id = $1 AND state = 'running' RETURNING id, iteration)
-       INSERT INTO gates (run_id, iteration, kind, reason, evidence) SELECT id, iteration, $2, $3, $4 FROM r`,
-      [runId, kind, reason, evidence ?? null],
+       INSERT INTO gates (run_id, iteration, kind, reason, evidence, step) SELECT id, iteration, $2, $3, $4, $5 FROM r`,
+      [runId, kind, reason, evidence ?? null, step ?? null],
     );
     changed(runId);
   }
@@ -461,6 +473,25 @@ export function createForge(deps: ForgeDeps): Forge {
     await promote(Number(rows[0].project_id)).catch((e) => console.error(`Run ${runId}: could not start the next Queued Run:`, e));
   }
 
+  /** The Run's Steps in Workflow order with where each stands in the Run's current Iteration; none for a Workflow that runs as code. */
+  async function stepsOf(run: Run): Promise<StepState[]> {
+    const flow = workflows.get(run.workflow);
+    if (!flow || flow.run) return [];
+    const { rows: frozen } = await pool.query("SELECT definition FROM runs WHERE id = $1", [run.id]);
+    const definition: WorkflowDefinition = frozen[0]?.definition ?? flow.definition;
+    const { rows } = await pool.query("SELECT step, status, attempts FROM step_states WHERE run_id = $1 AND iteration = $2", [run.id, run.iteration]);
+    const recorded = new Map(rows.map((r) => [r.step as string, r]));
+    return definition.steps.map((s) => ({
+      id: s.id,
+      type: s.type,
+      detail: s.type === "agent" ? s.agent : s.type === "gate" ? s.gate : null,
+      needs: s.needs,
+      iteration: run.iteration,
+      status: recorded.get(s.id)?.status ?? "waiting",
+      attempts: recorded.get(s.id)?.attempts ?? 0,
+    }));
+  }
+
   /** Works on a Run until it waits at a Gate, pauses, or is abandoned; starts over from what is recorded if it was worked on before. */
   async function execute(run: Run, project: Project) {
     const stopper = new AbortController();
@@ -502,7 +533,10 @@ export function createForge(deps: ForgeDeps): Forge {
       const workflow = workflows.get(run.workflow);
       if (!workflow) throw new Error(`Unknown Workflow "${run.workflow}".`);
       const records = createRunRecords(pool, run.id, run.iteration);
-      await workflow.run({
+      // The definition the Run started with, not the Workflow's as it is now.
+      const { rows: frozen } = await pool.query("SELECT definition FROM runs WHERE id = $1", [run.id]);
+      const definition: WorkflowDefinition = frozen[0]?.definition ?? workflow.definition;
+      const context: WorkflowContext = {
         run,
         project,
         branch,
@@ -520,11 +554,12 @@ export function createForge(deps: ForgeDeps): Forge {
         checkTimeoutMs: deps.checkTimeoutMs,
         changed: () => changed(run.id),
         emit,
-        openGate: (kind, reason, evidence) => openGate(run.id, kind, reason, evidence),
+        openGate: (kind, reason, evidence, step) => openGate(run.id, kind, reason, evidence, step),
         pause: (resetsAt) => pause(run.id, resetsAt),
         approve: () => approveRun(run.id),
         stillRunning: () => stillRunning(run.id),
-      });
+      };
+      await (workflow.run ? workflow.run(context) : runEngine(context, definition, stepTypes));
     } catch (e: any) {
       // If even the Escalation cannot be recorded (database down), the Run stays Running and restart recovery picks it up.
       await openGate(run.id, "escalation", "The Run could not continue.", String(e?.message ?? e)).catch((err) =>
@@ -624,9 +659,9 @@ export function createForge(deps: ForgeDeps): Forge {
       try {
         await client.query("BEGIN");
         const { rows } = await client.query(
-          `INSERT INTO runs (project_id, workflow, title, task, tracker_ref, state)
-           VALUES ($1, $2, $3, $4, $5, 'queued') RETURNING id`,
-          [projectId, workflow, plan.title, plan.task, trackerRef?.trim() || null],
+          `INSERT INTO runs (project_id, workflow, title, task, tracker_ref, state, definition, inputs)
+           VALUES ($1, $2, $3, $4, $5, 'queued', $6, $7) RETURNING id`,
+          [projectId, workflow, plan.title, plan.task, trackerRef?.trim() || null, JSON.stringify(flow.definition), JSON.stringify(plan.given ?? flow.inputs)],
         );
         runId = Number(rows[0].id);
         await plan.store?.(client, runId, project);
@@ -667,6 +702,7 @@ export function createForge(deps: ForgeDeps): Forge {
       }
       return {
         ...toRun(rows[0]),
+        steps: await stepsOf(toRun(rows[0])),
         assets,
         iterations,
         attempts: attempts.rows.map(toAttempt),

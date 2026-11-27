@@ -1,4 +1,6 @@
+import type { StepTypeModule } from "./engine.js";
 import type { GateKindModule } from "./gates.js";
+import type { AgentModule } from "./step-types.js";
 import type { Asset, GateVerdict } from "./types.js";
 import type { Workflow } from "./workflow.js";
 
@@ -18,6 +20,10 @@ export interface Extension {
   workflows: Workflow[];
   /** The Gate kinds the extension decides. */
   gateKinds: GateKindModule[];
+  /** The Agents a Workflow's Agent Step can name, besides the Developer. */
+  agents?: AgentModule[];
+  /** The Step types the extension adds to the engine's. */
+  stepTypes?: StepTypeModule[];
   /** What the extension holds of a Run, for its detail, given the ids of the Run's Gates. */
   detail(runId: number, gateIds: number[]): Promise<RunDetailPart>;
   /** The file of an Asset image of a Run; throws an AssetNotFoundError for what it does not have. */

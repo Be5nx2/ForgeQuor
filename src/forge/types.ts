@@ -59,6 +59,8 @@ export interface StepAttempt {
   id: number;
   iteration: number;
   step: string;
+  /** The Workflow Step the attempt belongs to; null for a Run from before Workflows were frozen. */
+  stepId: string | null;
   attempt: number;
   runner: string;
   model: string | null;
@@ -90,6 +92,8 @@ export interface Gate {
   runId: number;
   /** The Iteration of its Run the Gate was opened in. */
   iteration: number;
+  /** The Workflow Step that opened it; null for a Run from before Workflows were frozen. */
+  stepId: string | null;
   kind: GateKind;
   reason: string;
   evidence: string | null;
@@ -112,7 +116,27 @@ export interface Iteration {
   feedback: string | null;
 }
 
+/** Where a Step of a Run stands: waiting for what it needs, running, done, skipped (its `when` input was missing), or failed (it opened an Escalation). */
+export type StepStatus = "waiting" | "running" | "done" | "skipped" | "failed";
+
+/** One Step of a Run's Workflow in its current Iteration, as the Run detail lists it, in Workflow order. */
+export interface StepState {
+  /** The Step's id in the Workflow. */
+  id: string;
+  type: "agent" | "checks" | "gate" | "publish" | "artist";
+  /** The Agent's name for an Agent Step, the Gate kind for a Gate; null for the others. */
+  detail: string | null;
+  /** The ids of the Steps that must be done or skipped before this one starts. */
+  needs: string[];
+  iteration: number;
+  status: StepStatus;
+  /** How many passes the Step has finished in this Iteration; automatic loop-backs count against its `max_attempts`. */
+  attempts: number;
+}
+
 export interface RunDetail extends Run {
+  /** The Run's Steps in Workflow order, as they stand in its current Iteration; empty for a Workflow that runs as code. */
+  steps: StepState[];
   /** The Asset Requests of an `assets` Run and where each stands; empty for other Workflows. */
   assets: Asset[];
   iterations: Iteration[];
