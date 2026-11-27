@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { getJson } from "./api";
+import NewRunView from "./views/NewRunView.vue";
 import ProjectsView from "./views/ProjectsView.vue";
 import RunDetailView from "./views/RunDetailView.vue";
 import RunsView from "./views/RunsView.vue";
@@ -14,6 +15,7 @@ interface Tool {
 
 const tabs = [
   { id: "waiting", label: "Waiting for you" },
+  { id: "new", label: "New Run" },
   { id: "runs", label: "Runs" },
   { id: "projects", label: "Projects" },
 ] as const;
@@ -47,6 +49,7 @@ onMounted(async () => {
     </nav>
 
     <WaitingView v-if="tab === 'waiting'" @open="openRun" />
+    <NewRunView v-else-if="tab === 'new'" @open="openRun" />
     <ProjectsView v-else-if="tab === 'projects'" />
     <RunDetailView v-else-if="runId !== null" :id="runId" @back="runId = null" />
     <RunsView v-else @open="openRun" />
