@@ -9,7 +9,7 @@ A git repository Forgequor works on, usually a game, possibly Forgequor itself.
 _Avoid_: Repo, target, workspace
 
 **Workflow**:
-A reusable, versioned definition of the graph of **Steps** (sequential or in parallel) that turns a task into a reviewed change.
+A reusable, versioned definition of the graph of **Steps** (sequential or in parallel, with loops back on rejection) that turns a task into a reviewed change; a **Run** keeps the version it started with.
 _Avoid_: Pipeline, process, template
 
 **Run**:
@@ -17,7 +17,7 @@ One execution of a **Workflow** on one task of a **Project**, isolated in its ow
 _Avoid_: Job, execution, pipeline run
 
 **Step**:
-One stage of a **Workflow**, performed either by an **Agent** or by the human at a **Gate**.
+One stage of a **Workflow**, of one of a fixed set of kinds: an **Agent**'s work, **Checks**, a **Gate** for the human, or publishing the pull request.
 _Avoid_: Stage, phase, task
 
 **Gate**:
