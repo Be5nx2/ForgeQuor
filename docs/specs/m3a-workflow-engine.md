@@ -85,6 +85,7 @@ A Workflow becomes a YAML file that composes **Steps** of a fixed set of coded t
 31. As the human, I want loops that I drive by rejecting at a Gate to have no cap, so that I stop when the work is right.
 32. As a Workflow author, I want a Step skipped when an input it needs is missing (such as no Asset Requests), so that one Workflow covers runs with and without art.
 33. As a Workflow author, I want a Workflow to declare its inputs (a task, Asset Requests), so that the Run form and launch checks know what to ask for.
+33b. As a Workflow author, I want an input to come either from the human at launch or from an earlier Step of the Run (such as Asset Requests the Griller produces in M3b), so that a Step can depend on what the Run itself discovered.
 34. As a Workflow author, I want every error in a Workflow (unknown type, unknown Step id, a cycle, parallel Steps that are not read-only, an unknown input, a duplicate id) reported at once with where it is, so that I fix a Workflow in one go.
 35. As the human, I want a Run's slot to count once however many of its Steps run in parallel, so that the concurrency limit still means Runs.
 
@@ -187,11 +188,11 @@ Database access goes through those operations, not a raw pool.
 - `needs` and `on_reject` point at existing ids;
 - `needs` has no cycle;
 - two Steps that can run at the same time must both be read-only;
-- `when` names a declared input;
+- `when` names an input that is either given at launch or produced by a Step this one needs, directly or indirectly;
 - defaults are applied, such as 3 attempts.
 
 **The shape of a definition, as decided in the grilling:**
-- the Workflow's name and description, and its declared inputs (`task`, `assets`);
+- the Workflow's name and description, and the inputs it takes at launch (`task`, `assets`);
 - `steps`, each with:
   - an `id`;
   - a `type`, one of `agent` (with `agent: <name>`), `checks`, `gate` (with `gate: final | asset`), `publish`, `artist`;
@@ -218,6 +219,8 @@ The Run is Approved after Publish when the Workflow ends there.
 
 **Execution.**
 - A Run's Steps are scheduled from the frozen definition. A Step starts when everything it needs is done or skipped.
+- An input is given at launch or produced by a Step. Which inputs a Step type produces is part of that coded type (in M3b, the Griller Agent produces `assets`), never declared in YAML. A produced input is validated with the same rules as at launch, against the freshly fetched default branch; an invalid one goes back to the Step that produced it with the reason.
+- `when` is evaluated when the Step becomes ready, on the inputs given or produced so far, not at launch.
 - Read-only Steps whose needs are met start together.
 - After a read-only Step, Forgequor compares the worktree outside the Run Notes with how it was before. Any change fails the Step and opens an Escalation naming the files.
 - Each Step's state is persisted per Run and Iteration: waiting, running, done, skipped, failed, plus its attempt count.
