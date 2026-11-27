@@ -29,7 +29,8 @@ const isGriller = (s: StepRequest) => s.instructions.includes("You are the Grill
 const isReviewer = (s: StepRequest) => s.instructions.includes("You are the Reviewer") || s.instructions.includes("You are the Consolidator");
 const grillers = () => claude.steps.filter(isGriller);
 const isSpecWriter = (s: StepRequest) => s.instructions.includes("You are the Spec Writer");
-const developers = () => claude.steps.filter((s) => !isGriller(s) && !isSpecWriter(s) && !isReviewer(s));
+const isArchitect = (s: StepRequest) => s.instructions.includes("You are the Architect");
+const developers = () => claude.steps.filter((s) => !isGriller(s) && !isSpecWriter(s) && !isArchitect(s) && !isReviewer(s));
 const artists = () => codex.steps.filter((s) => s.instructions.includes("You are the Artist"));
 
 const REQUESTS = join(".forgequor", "asset-requests.json");
@@ -44,6 +45,11 @@ function griller(turns: { say: string; requests?: unknown }[]) {
   let n = 0;
   return (step: StepRequest): StepResult | void => {
     if (isReviewer(step)) return passing;
+    if (isArchitect(step)) {
+      mkdirSync(join(step.cwd, ".forgequor"), { recursive: true });
+      writeFileSync(join(step.cwd, ".forgequor", "implementation-plan.md"), "The plan.\n");
+      return;
+    }
     if (isSpecWriter(step)) {
       mkdirSync(join(step.cwd, "docs", "specs"), { recursive: true });
       writeFileSync(join(step.cwd, "docs", "specs", "let-the-player-jump-twice.md"), "# Double jump\n");
@@ -139,7 +145,7 @@ describe("art inside feature", () => {
     run = await confirm(run);
 
     // The Artist drew the Asset and the human is asked for a verdict; nothing of the code started yet.
-    expect(stepsOf(run).slice(0, 5)).toEqual(["griller:done", "spec-writer:done", "spec:done", "artist:done", "asset-gate:running"]);
+    expect(stepsOf(run).slice(0, 6)).toEqual(["griller:done", "spec-writer:done", "spec:done", "architect:done", "artist:done", "asset-gate:running"]);
     expect(open(run)).toMatchObject({ kind: "asset", stepId: "asset-gate" });
     expect(run.assets.map((a) => [a.name, a.targetPath, a.status])).toEqual([["Hero Idle", HERO_PATH, "waiting"]]);
     expect(artists()).toHaveLength(1);
@@ -153,7 +159,7 @@ describe("art inside feature", () => {
 
     run = await judge(run);
     expect(run.state).toBe("waiting");
-    expect(stepsOf(run)).toEqual(["griller:done", "spec-writer:done", "spec:done", "artist:done", "asset-gate:done", "developer:done", "checks:done", "review:done", "publish:done", "final:running"]);
+    expect(stepsOf(run)).toEqual(["griller:done", "spec-writer:done", "spec:done", "architect:done", "artist:done", "asset-gate:done", "developer:done", "checks:done", "review:done", "publish:done", "final:running"]);
     // The Developer is given the approved Assets' paths, and the Assets are already in the branch.
     expect(developers()).toHaveLength(1);
     expect(developers()[0]!.prompt).toContain(HERO_PATH);
@@ -176,7 +182,7 @@ describe("art inside feature", () => {
     let run = await feature(p.id);
     run = await confirm(run);
 
-    expect(stepsOf(run)).toEqual(["griller:done", "spec-writer:done", "spec:done", "artist:skipped", "asset-gate:skipped", "developer:done", "checks:done", "review:done", "publish:done", "final:running"]);
+    expect(stepsOf(run)).toEqual(["griller:done", "spec-writer:done", "spec:done", "architect:done", "artist:skipped", "asset-gate:skipped", "developer:done", "checks:done", "review:done", "publish:done", "final:running"]);
     expect(run.gates.map((g) => g.kind)).toEqual(["conversation", "spec", "final"]);
     expect(artists()).toHaveLength(0);
     expect(developers()[0]!.prompt).not.toContain("Assets");

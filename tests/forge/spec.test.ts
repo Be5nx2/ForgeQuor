@@ -27,10 +27,11 @@ let counter = 0;
 const SPEC = "docs/specs/let-the-player-jump-twice.md";
 const isGriller = (s: StepRequest) => s.instructions.includes("You are the Griller");
 const isSpecWriter = (s: StepRequest) => s.instructions.includes("You are the Spec Writer");
+const isArchitect = (s: StepRequest) => s.instructions.includes("You are the Architect");
 const isReviewer = (s: StepRequest) => s.instructions.includes("You are the Reviewer") || s.instructions.includes("You are the Consolidator");
 const passing: StepResult = { status: "succeeded", summary: "Summary: Fine.\n\nFindings:\n- None.\n\nDoubts: None.\n\nVerdict: pass" };
 const specWriters = () => claude.steps.filter(isSpecWriter);
-const developers = () => claude.steps.filter((s) => !isGriller(s) && !isSpecWriter(s) && !isReviewer(s));
+const developers = () => claude.steps.filter((s) => !isGriller(s) && !isSpecWriter(s) && !isArchitect(s) && !isReviewer(s));
 
 const write = (step: StepRequest, path: string, text: string) => {
   mkdirSync(dirname(join(step.cwd, path)), { recursive: true });
@@ -38,6 +39,9 @@ const write = (step: StepRequest, path: string, text: string) => {
 };
 /** The Spec Writer writes version `n` of the spec (the `n`th time it is asked) unless `specWriting` says otherwise. */
 let specWriting: (step: StepRequest, n: number) => StepResult | void = (step, n) => write(step, SPEC, `# Double jump\n\nSpec, version ${n}.\n`);
+
+/** What the Architect does: writes the Implementation Plan to the Run Notes (`architecting` is replaced by tests that script it). */
+let architecting: (step: StepRequest) => StepResult | void = (step) => write(step, ".forgequor/implementation-plan.md", "# Plan\n\nModule: jump.\n");
 
 beforeAll(async () => {
   const db = await createTestDatabase();
@@ -54,6 +58,7 @@ afterAll(async () => {
   rmSync(worktrees, { recursive: true, force: true });
 });
 afterEach(() => {
+  architecting = (step) => write(step, ".forgequor/implementation-plan.md", "# Plan\n\nModule: jump.\n");
   specWriting = (step, n) => write(step, SPEC, `# Double jump\n\nSpec, version ${n}.\n`);
   claude.use(play);
   claude.steps.length = 0;
@@ -69,6 +74,7 @@ let specs = 0;
 function play(step: StepRequest): StepResult | void {
   if (isReviewer(step)) return passing;
   if (isGriller(step)) return { status: "succeeded", summary: "Kind: summary\n\nBuild a double jump: once per fall." };
+  if (isArchitect(step)) return architecting(step);
   if (isSpecWriter(step)) return specWriting(step, ++specs);
   write(step, "jump.txt", "jump\n");
   write(step, ".forgequor/review-brief.md", "What the Developer did.\n");
@@ -110,7 +116,7 @@ describe("the Spec Writer", () => {
     const run = await toSpecGate(p);
 
     expect(specPathOf({ id: run.id, title: run.title })).toBe(SPEC);
-    expect(stepsOf(run)).toEqual(["griller:done", "spec-writer:done", "spec:running", "artist:waiting", "asset-gate:waiting", "developer:waiting", "checks:waiting", "review:waiting", "publish:waiting", "final:waiting"]);
+    expect(stepsOf(run)).toEqual(["griller:done", "spec-writer:done", "spec:running", "architect:waiting", "artist:waiting", "asset-gate:waiting", "developer:waiting", "checks:waiting", "review:waiting", "publish:waiting", "final:waiting"]);
     const commits = git(run.worktreePath!, "log", "--format=%H %s", "origin/main..HEAD").split("\n");
     expect(commits).toHaveLength(1);
     expect(commits[0]).toMatch(/docs\(spec\): Let the player jump twice\.$/);
@@ -223,7 +229,7 @@ describe("the spec Gate", () => {
     run = await decide(run, "approve");
 
     expect(run.state).toBe("waiting");
-    expect(stepsOf(run)).toEqual(["griller:done", "spec-writer:done", "spec:done", "artist:skipped", "asset-gate:skipped", "developer:done", "checks:done", "review:done", "publish:done", "final:running"]);
+    expect(stepsOf(run)).toEqual(["griller:done", "spec-writer:done", "spec:done", "architect:done", "artist:skipped", "asset-gate:skipped", "developer:done", "checks:done", "review:done", "publish:done", "final:running"]);
     expect(developers()).toHaveLength(1);
     expect(developers()[0]!.prompt).toContain(`The human approved the spec at ${SPEC}: read it first, and build what it says.`);
     expect(developers()[0]!.prompt).toContain("Build a double jump: once per fall.");
@@ -269,7 +275,7 @@ describe("the spec Gate", () => {
     expect(specWriters()[2]!.prompt).toContain("1. Add what happens on a ledge.\n2. Also say nothing about double taps.");
 
     run = await decide(run, "approve");
-    expect(stepsOf(run).slice(0, 6)).toEqual(["griller:done", "spec-writer:done", "spec:done", "artist:skipped", "asset-gate:skipped", "developer:done"]);
+    expect(stepsOf(run).slice(0, 7)).toEqual(["griller:done", "spec-writer:done", "spec:done", "architect:done", "artist:skipped", "asset-gate:skipped", "developer:done"]);
     // The Developer reads the spec the human approved; Feedback on the spec is not "the reviewer rejected your work".
     expect(developers()[0]!.prompt).not.toContain("rejected your earlier work");
     expect(readFileSync(join(run.worktreePath!, SPEC), "utf8")).toContain("version 3");

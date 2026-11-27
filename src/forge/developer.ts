@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { commitLeftovers, REVIEW_BRIEF_FILE, RUN_NOTES_DIR } from "./workspace.js";
 import { describeFailure, passed, runChecks } from "./checks.js";
 import { REVIEW_REASON_PREFIX } from "./review.js";
+import { planOf } from "./architect.js";
 import { specOf } from "./spec.js";
 import type { AgentModule } from "./step-types.js";
 import { catalogueOf } from "./step-types.js";
@@ -38,14 +39,17 @@ export interface DeveloperPromptContext {
   summary?: string | null;
   /** The approved spec's path. */
   specPath?: string | null;
+  /** The Architect's Implementation Plan: its path and Markdown. */
+  plan?: { path: string; content: string } | null;
   /** The approved Assets' paths. */
   assetPaths?: string[];
 }
 
-export function developerPrompt(task: string, { sentBack, feedbacks = [], summary, specPath, assetPaths = [] }: DeveloperPromptContext = {}): string {
+export function developerPrompt(task: string, { sentBack, feedbacks = [], summary, specPath, plan, assetPaths = [] }: DeveloperPromptContext = {}): string {
   let prompt = `Task:\n\n${task}`;
   if (summary) prompt += `\n\nThe human talked this task through with the Griller and confirmed this summary of what to build; build exactly that:\n\n${summary}`;
   if (specPath) prompt += `\n\nThe human approved the spec at ${specPath}: read it first, and build what it says.`;
+  if (plan) prompt += `\n\nThe Architect wrote this Implementation Plan (it is at ${plan.path}, a Run Note): follow its modules, its test seams and its order of small steps.\n\n${plan.content}`;
   if (assetPaths.length) prompt += `\n\nThe Artist drew these Assets for this work and the human approved them. They are already committed on this branch: use them, and do not redraw or change them.\n${assetPaths.map((p) => `- ${p}`).join("\n")}`;
   if (feedbacks.length) {
     const history = feedbacks.map((f, i) => `${i + 1}. ${f}`).join("\n");
@@ -91,6 +95,7 @@ export const developerAgent: AgentModule = {
       feedbacks: await ctx.records.earlierFeedbacks(),
       summary: await ctx.records.conversation.confirmedSummary(),
       specPath: spec?.path,
+      plan: planOf(ctx.worktreePath),
       assetPaths: await ctx.records.approvedAssetPaths(),
     });
   },

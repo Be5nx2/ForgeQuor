@@ -7,6 +7,7 @@ import { bugfixAgent, bugfixWorkflow, developerAgent, developerWorkflow } from "
 import { createConversationRecords } from "./conversation-records.js";
 import { createConversationGate, conversationStepType, type ConversationAgent } from "./conversation.js";
 import { featureWorkflow, grillerAgent } from "./feature.js";
+import { architectAgent } from "./architect.js";
 import { specGate, specWriterAgent } from "./spec.js";
 import { runEngine, type StepTypeModule } from "./engine.js";
 import { agentStepType, catalogueOf, checksStepType, gateStepType, publishStepType, type AgentModule } from "./step-types.js";
@@ -299,7 +300,7 @@ export function createForge(deps: ForgeDeps): Forge {
     return kind ? { ...gate, actions: await offered(kind, gate) } : gate;
   };
   /** The Agents a Workflow's Agent Step can name. */
-  const agentModules = new Map<string, AgentModule>([developerAgent, bugfixAgent, specWriterAgent, ...extensions.flatMap((e) => e.agents ?? [])].map((a) => [a.name, a]));
+  const agentModules = new Map<string, AgentModule>([developerAgent, bugfixAgent, specWriterAgent, architectAgent, ...extensions.flatMap((e) => e.agents ?? [])].map((a) => [a.name, a]));
   /** The Agents a conversation Step can name. */
   const conversationAgents = new Map<string, ConversationAgent>([grillerAgent].map((a) => [a.name, a]));
   /** How each input an Agent produces is read and validated. */

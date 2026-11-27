@@ -29,8 +29,9 @@ const isGriller = (s: StepRequest) => s.instructions.includes("You are the Grill
 const isReviewer = (s: StepRequest) => s.instructions.includes("You are the Reviewer") || s.instructions.includes("You are the Consolidator");
 const passing: StepResult = { status: "succeeded", summary: "Summary: Fine.\n\nFindings:\n- None.\n\nDoubts: None.\n\nVerdict: pass" };
 const isSpecWriter = (s: StepRequest) => s.instructions.includes("You are the Spec Writer");
+const isArchitect = (s: StepRequest) => s.instructions.includes("You are the Architect");
 const grillers = () => claude.steps.filter(isGriller);
-const developers = () => claude.steps.filter((s) => !isGriller(s) && !isSpecWriter(s) && !isReviewer(s));
+const developers = () => claude.steps.filter((s) => !isGriller(s) && !isSpecWriter(s) && !isArchitect(s) && !isReviewer(s));
 /** Where the Spec Writer writes the spec of the Run these tests start. */
 const SPEC = "docs/specs/let-the-player-jump-twice.md";
 
@@ -42,6 +43,11 @@ function script(turns: (string | ((step: StepRequest, n: number) => StepResult |
   let n = 0;
   return (step: StepRequest): StepResult | void => {
     if (isReviewer(step)) return passing;
+    if (isArchitect(step)) {
+      mkdirSync(join(step.cwd, ".forgequor"), { recursive: true });
+      writeFileSync(join(step.cwd, ".forgequor", "implementation-plan.md"), "The plan.\n");
+      return;
+    }
     if (isSpecWriter(step)) {
       mkdirSync(join(step.cwd, "docs/specs"), { recursive: true });
       writeFileSync(join(step.cwd, SPEC), "# Double jump\n\nThe spec.\n");
@@ -137,7 +143,7 @@ describe("a feature Run's grilling", () => {
     expect(run.workflow).toBe("feature");
     expect(run.review).toBe("duo");
     expect(run.state).toBe("waiting");
-    expect(stepsOf(run)).toEqual(["griller:running", "spec-writer:waiting", "spec:waiting", "artist:waiting", "asset-gate:waiting", "developer:waiting", "checks:waiting", "review:waiting", "publish:waiting", "final:waiting"]);
+    expect(stepsOf(run)).toEqual(["griller:running", "spec-writer:waiting", "spec:waiting", "architect:waiting", "artist:waiting", "asset-gate:waiting", "developer:waiting", "checks:waiting", "review:waiting", "publish:waiting", "final:waiting"]);
     expect(run.steps[0]).toMatchObject({ type: "conversation", detail: "griller" });
     expect(open(run)).toMatchObject({ kind: "conversation", stepId: "griller", actions: ["answer", "abandon"], evidence: expect.stringContaining("double jump feel") });
     expect(grillers()).toHaveLength(1);
@@ -187,7 +193,7 @@ describe("a feature Run's grilling", () => {
     run = await confirmAndApprove(run);
 
     expect(run.state).toBe("waiting");
-    expect(stepsOf(run)).toEqual(["griller:done", "spec-writer:done", "spec:done", "artist:skipped", "asset-gate:skipped", "developer:done", "checks:done", "review:done", "publish:done", "final:running"]);
+    expect(stepsOf(run)).toEqual(["griller:done", "spec-writer:done", "spec:done", "architect:done", "artist:skipped", "asset-gate:skipped", "developer:done", "checks:done", "review:done", "publish:done", "final:running"]);
     expect(run.gates.map((g) => g.kind)).toEqual(["conversation", "conversation", "spec", "final"]);
     expect(run.gates[1]).toMatchObject({ decision: "confirm" });
     expect(developers()).toHaveLength(1);
@@ -442,7 +448,7 @@ describe("what the review and the Developer read after a grilling", () => {
     run = await forge.getRun(run.id);
 
     expect(grillers()).toHaveLength(1);
-    expect(stepsOf(run)).toEqual(["griller:done", "spec-writer:done", "spec:done", "artist:skipped", "asset-gate:skipped", "developer:done", "checks:done", "review:done", "publish:done", "final:running"]);
+    expect(stepsOf(run)).toEqual(["griller:done", "spec-writer:done", "spec:done", "architect:done", "artist:skipped", "asset-gate:skipped", "developer:done", "checks:done", "review:done", "publish:done", "final:running"]);
   });
 });
 
@@ -558,7 +564,7 @@ describe("going back to the Griller from an Escalation", () => {
     await pool.query("UPDATE projects SET setup = $2 WHERE id = $1", [p.id, JSON.stringify(["false"])]);
     run = await confirmAndApprove(run);
     expect(open(run)).toMatchObject({ kind: "escalation", stepId: "developer" });
-    expect(open(run).redo!.goBack.map((s) => s.stepId)).toEqual(["griller", "spec-writer", "spec"]);
+    expect(open(run).redo!.goBack.map((s) => s.stepId)).toEqual(["griller", "spec-writer", "spec", "architect"]);
     await pool.query("UPDATE projects SET setup = '[]' WHERE id = $1", [p.id]);
 
     await forge.decideGate({ gateId: open(run).id, action: "go_back", target: "griller", feedback: "The wall jump matters too." });
@@ -575,7 +581,7 @@ describe("going back to the Griller from an Escalation", () => {
     run = await answer(run, "Yes, include it.");
     run = await confirmAndApprove(run);
     expect(developers().at(-1)!.prompt).toContain("The revised summary, with the wall.");
-    expect(stepsOf(run)).toEqual(["griller:done", "spec-writer:done", "spec:done", "artist:skipped", "asset-gate:skipped", "developer:done", "checks:done", "review:done", "publish:done", "final:running"]);
+    expect(stepsOf(run)).toEqual(["griller:done", "spec-writer:done", "spec:done", "architect:done", "artist:skipped", "asset-gate:skipped", "developer:done", "checks:done", "review:done", "publish:done", "final:running"]);
   });
 });
 

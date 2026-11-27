@@ -1,5 +1,6 @@
 import type { ConversationAgent, ParsedTurn } from "./conversation.js";
 import { deriveTitle, developerAgent } from "./developer.js";
+import { architectAgent } from "./architect.js";
 import { specWriterAgent } from "./spec.js";
 import { catalogueOf } from "./step-types.js";
 import { loadBuiltInWorkflow } from "./workflow-definition.js";
@@ -58,12 +59,12 @@ export const grillerAgent: ConversationAgent = {
 
 /**
  * The `feature` Workflow, from its YAML: the Griller talks the subject through with the human, the Spec Writer writes the
- * spec (approved at the spec Gate), then the Developer builds it, the Checks and the review (duo by default) follow, the pull request opens and the final Gate closes the Run.
+ * spec (approved at the spec Gate), the Architect writes the Implementation Plan, then the Developer builds it, the Checks and the review (duo by default) follow, the pull request opens and the final Gate closes the Run.
  */
 export const featureWorkflow: Workflow = {
   name: "feature",
   inputs: ["task", "review"],
-  definition: loadBuiltInWorkflow("feature", catalogueOf([developerAgent, specWriterAgent], [grillerAgent])),
+  definition: loadBuiltInWorkflow("feature", catalogueOf([developerAgent, specWriterAgent, architectAgent], [grillerAgent])),
   plan({ task, title }) {
     if (!task?.trim()) throw new Error("A feature Run needs a subject.");
     return { task: task.trim(), title: title?.trim() || deriveTitle(task) };
