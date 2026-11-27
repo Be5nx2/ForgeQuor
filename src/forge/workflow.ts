@@ -1,8 +1,7 @@
-import type pg from "pg";
-import type { CodeHost } from "../codehost/codehost.js";
 import type { Runner } from "../runner/runner.js";
 import type { AssetRequest } from "./assets.js";
 import type { GateKind, Project, Run, RunUpdate } from "./forge.js";
+import type { RunRecords } from "./run-records.js";
 
 /** The Runner an Agent works through, and the model it is set to. */
 export interface AgentSeat {
@@ -39,15 +38,21 @@ export interface WorkflowContext {
   defaultBranch: string;
   /** Aborted when the human abandons the Run: whatever is running must stop. */
   stop: AbortSignal;
-  pool: pg.Pool;
   /** The Runner and model of each Agent. The Artist's is missing when Forgequor has no Runner for it. */
   agents: { developer: AgentSeat; artist?: AgentSeat };
-  codeHost: CodeHost;
   stepTimeoutMs: number;
   checkTimeoutMs?: number;
   /** Tells subscribers the Run changed. */
   changed(): void;
   emit(update: RunUpdate): void;
+  /** The Run's own records: Step attempts, Checks, Feedback and its pull request's bookkeeping. */
+  records: RunRecords;
+  /**
+   * Pushes the Run's branch, opens its pull request unless it has one, and posts the Review Brief once. Returns the pull
+   * request, or null when the human abandoned the Run meanwhile (the pull request is then closed). Safe to run again
+   * after a restart.
+   */
+  publishPullRequest(brief: () => string): Promise<{ number: number; url: string } | null>;
   /** Opens a Gate and makes the Run Waiting, unless the Run was abandoned meanwhile. */
   openGate(kind: GateKind, reason: string, evidence?: string): Promise<void>;
   /** The Runner's Quota ran out: the Run waits for the reset, keeping its slot. */

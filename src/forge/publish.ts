@@ -1,13 +1,19 @@
 import { pushBranch } from "./workspace.js";
+import type { CodeHost } from "../codehost/codehost.js";
 import type { WorkflowContext } from "./workflow.js";
+
+/** What publishing needs of a Run: the Workflow context, and the code host the core holds. */
+export type PublishContext = Pick<WorkflowContext, "run" | "project" | "worktreePath" | "branch" | "defaultBranch" | "records" | "changed" | "stillRunning"> & {
+  codeHost: CodeHost;
+};
 
 /**
  * Pushes the Run's branch, opens its pull request unless it has one, and posts the Review Brief once. Returns the pull
  * request, or null when the human abandoned the Run meanwhile (the pull request is then closed). Safe to run again after
  * a restart: each part is done only if it was not yet.
  */
-export async function publishPullRequest(ctx: WorkflowContext, brief: () => string): Promise<{ number: number; url: string } | null> {
-  const { run, project, worktreePath, branch, defaultBranch, pool } = ctx;
+export async function publishPullRequest(ctx: PublishContext, brief: () => string): Promise<{ number: number; url: string } | null> {
+  const { run, project, worktreePath, branch, defaultBranch, records } = ctx;
   await pushBranch(worktreePath, branch);
   let pr = run.prNumber ? { number: run.prNumber, url: run.prUrl! } : null;
   if (!pr) {
@@ -19,7 +25,7 @@ export async function publishPullRequest(ctx: WorkflowContext, brief: () => stri
       title: run.title,
       body: `${run.task}\n\n---\nForgequor Run #${run.id}`,
     });
-    await pool.query("UPDATE runs SET pr_number = $2, pr_url = $3 WHERE id = $1", [run.id, pr.number, pr.url]);
+    await records.recordPullRequest(pr.number, pr.url);
     ctx.changed();
   }
   if (!(await ctx.stillRunning())) {
@@ -27,10 +33,9 @@ export async function publishPullRequest(ctx: WorkflowContext, brief: () => stri
     await ctx.codeHost.closePullRequest({ owner: project.remoteOwner, repo: project.remoteName, number: pr.number }).catch(() => {});
     return null;
   }
-  const { rows: posted } = await pool.query("SELECT brief_posted FROM runs WHERE id = $1", [run.id]);
-  if (!posted[0].brief_posted) {
+  if (!(await records.briefPosted())) {
     await ctx.codeHost.comment({ owner: project.remoteOwner, repo: project.remoteName, number: pr.number, body: brief() });
-    await pool.query("UPDATE runs SET brief_posted = true WHERE id = $1", [run.id]);
+    await records.markBriefPosted();
     ctx.changed();
   }
   return pr;
