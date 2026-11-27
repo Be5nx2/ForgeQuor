@@ -31,8 +31,8 @@ export type ApprovedRun = Json<Server.ApprovedRun>;
 export type RunUpdate = Json<Server.RunUpdate>;
 
 /** Records the human's decision at a Gate and returns the updated Run. */
-export function decideGate(gateId: number, action: GateAction, feedback?: string, verdicts?: Verdict[]): Promise<RunDetail> {
-  return postJson(`/api/gates/${gateId}/decision`, { action, feedback, verdicts });
+export function decideGate(gateId: number, action: GateAction, feedback?: string, verdicts?: Verdict[], target?: string): Promise<RunDetail> {
+  return postJson(`/api/gates/${gateId}/decision`, { action, feedback, verdicts, target });
 }
 
 /**
