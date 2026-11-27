@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { commitLeftovers, REVIEW_BRIEF_FILE, RUN_NOTES_DIR } from "./workspace.js";
 import { describeFailure, passed, runChecks } from "./checks.js";
 import { REVIEW_REASON_PREFIX } from "./review.js";
+import { specOf } from "./spec.js";
 import type { AgentModule } from "./step-types.js";
 import { catalogueOf } from "./step-types.js";
 import { loadBuiltInWorkflow } from "./workflow-definition.js";
@@ -28,9 +29,23 @@ This Run fixes a bug, and the task is the bug description. Follow the \`diagnosi
  * The Developer's prompt; on a retry it carries what sent the work back: the Check that failed, or the Review that asked
  * for changes. The Feedback of the human's rejections is listed as well.
  */
-export function developerPrompt(task: string, sentBack?: string, feedbacks: string[] = [], summary?: string | null, assetPaths: string[] = []): string {
+export interface DeveloperPromptContext {
+  /** Why the work was sent back: the Check that failed, or the Review that asked for changes. */
+  sentBack?: string;
+  /** The Feedback of the human's rejections, oldest first. */
+  feedbacks?: string[];
+  /** The summary the human confirmed with the Griller. */
+  summary?: string | null;
+  /** The approved spec's path. */
+  specPath?: string | null;
+  /** The approved Assets' paths. */
+  assetPaths?: string[];
+}
+
+export function developerPrompt(task: string, { sentBack, feedbacks = [], summary, specPath, assetPaths = [] }: DeveloperPromptContext = {}): string {
   let prompt = `Task:\n\n${task}`;
   if (summary) prompt += `\n\nThe human talked this task through with the Griller and confirmed this summary of what to build; build exactly that:\n\n${summary}`;
+  if (specPath) prompt += `\n\nThe human approved the spec at ${specPath}: read it first, and build what it says.`;
   if (assetPaths.length) prompt += `\n\nThe Artist drew these Assets for this work and the human approved them. They are already committed on this branch: use them, and do not redraw or change them.\n${assetPaths.map((p) => `- ${p}`).join("\n")}`;
   if (feedbacks.length) {
     const history = feedbacks.map((f, i) => `${i + 1}. ${f}`).join("\n");
@@ -70,7 +85,14 @@ export const developerAgent: AgentModule = {
     return true;
   },
   async prompt(ctx, attempt) {
-    return developerPrompt(ctx.run.task, attempt.sentBack ?? undefined, await ctx.records.earlierFeedbacks(), await ctx.records.conversation.confirmedSummary(), await ctx.records.approvedAssetPaths());
+    const spec = await specOf(ctx);
+    return developerPrompt(ctx.run.task, {
+      sentBack: attempt.sentBack ?? undefined,
+      feedbacks: await ctx.records.earlierFeedbacks(),
+      summary: await ctx.records.conversation.confirmedSummary(),
+      specPath: spec?.path,
+      assetPaths: await ctx.records.approvedAssetPaths(),
+    });
   },
   async after(ctx) {
     await commitLeftovers(ctx.worktreePath, "chore: commit work left by the Developer");

@@ -140,7 +140,7 @@ Griller with a **Conversation Gate** (it writes the Project's glossary and ADRs 
     - the Griller ends with a summary the human confirms or continues from; the Project's glossary and ADRs it changed are committed;
     - `feature` v0 is Griller → Developer → Checks → review (duo by default) → pull request → final Gate, launched from a free-text subject;
     - going back to the Griller from an Escalation reopens the conversation.
-- [ ] `m3-14` **Spec Writer and spec Gate**: the grilling becomes a spec the human approves.
+- [x] `m3-14` **Spec Writer and spec Gate**: the grilling becomes a spec the human approves.
   - Spec: `docs/specs/m3b-the-team.md`
   - Blocked by: `m3-13`
   - Acceptance:

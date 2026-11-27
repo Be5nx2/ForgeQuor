@@ -42,3 +42,14 @@ form.filters select { flex: 1 1 12rem; min-width: 0; max-width: 100%; }
 .chat li { margin: 0.5rem 0; padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px solid #8884; }
 .chat li.human { margin-left: 2rem; }
 .chat pre { white-space: pre-wrap; margin: 0.25rem 0 0; }
+
+.markdown { overflow-wrap: anywhere; }
+.markdown > :first-child { margin-top: 0.25rem; }
+.markdown h3, .markdown h4, .markdown h5, .markdown h6 { margin: 0.75rem 0 0.25rem; }
+.markdown p, .markdown ul, .markdown ol, .markdown blockquote, .markdown table { margin: 0.4rem 0; }
+.markdown pre { margin: 0.4rem 0; overflow-x: auto; }
+.markdown code { background: #080f19; padding: 0 0.25rem; border-radius: 4px; }
+.markdown pre code { padding: 0; background: none; }
+.markdown blockquote { border-left: 3px solid #8886; padding-left: 0.75rem; color: inherit; opacity: 0.85; }
+.markdown table { border-collapse: collapse; }
+.markdown th, .markdown td { border: 1px solid #8884; padding: 0.2rem 0.5rem; text-align: left; }

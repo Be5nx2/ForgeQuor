@@ -3,6 +3,7 @@ import { onMounted, onUnmounted, ref } from "vue";
 import { followRuns, getJson, type ApprovedRun, type OpenGate, type RunDetail } from "../api";
 import AssetGallery from "../components/AssetGallery.vue";
 import GateActions from "../components/GateActions.vue";
+import Markdown from "../components/Markdown.vue";
 
 const emit = defineEmits<{ open: [id: number] }>();
 const gates = ref<OpenGate[]>([]);
@@ -41,9 +42,10 @@ onUnmounted(() => stopFollowing?.());
   <ul>
     <li v-for="g in gates" :key="g.id" class="clickable" @click="emit('open', g.runId)">
       <strong>{{ g.runTitle }}</strong>
-      <span class="badge">{{ g.kind === "final" ? "final Gate" : g.kind === "asset" ? "Asset Gate" : g.kind === "review" ? "review Gate" : g.kind === "conversation" ? "Conversation Gate" : "Escalation" }}</span>
+      <span class="badge">{{ g.kind === "final" ? "final Gate" : g.kind === "asset" ? "Asset Gate" : g.kind === "review" ? "review Gate" : g.kind === "spec" ? "spec Gate" : g.kind === "conversation" ? "Conversation Gate" : "Escalation" }}</span>
       <div class="muted">{{ g.projectName }} · {{ g.reason }}</div>
-      <pre v-if="g.evidence">{{ g.evidence }}</pre>
+      <Markdown v-if="g.evidence && (g.kind === 'spec' || g.kind === 'conversation')" :text="g.evidence" />
+      <pre v-else-if="g.evidence">{{ g.evidence }}</pre>
       <div v-if="g.kind === 'asset' && runs[g.runId]" @click.stop>
         <AssetGallery :run-id="g.runId" :iteration="runs[g.runId]!.iteration" :assets="runs[g.runId]!.assets" :gate="g" @decided="load" />
       </div>

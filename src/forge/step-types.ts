@@ -1,4 +1,5 @@
 import type { StepOutcome, StepTypeModule } from "./engine.js";
+import { headOf, sweepForbiddenChanges, type MayChange } from "./deliverables.js";
 import { describeFailure, passed, runChecks } from "./checks.js";
 import { reviewSection } from "./review.js";
 import { requireSeat, type SeatName } from "./seats.js";
@@ -21,6 +22,8 @@ export interface AttemptInfo {
 export interface AgentModule {
   /** The name a Workflow gives in `agent:`, and the Step's name in the Run's record. */
   name: string;
+  /** How Escalations name it when its name does not read well capitalised ("Spec Writer"); by default the name capitalised. */
+  label?: string;
   /** Whose Runner and model it works through. */
   seat: SeatName;
   instructions: string;
@@ -29,6 +32,11 @@ export interface AgentModule {
   /** Runs before each attempt; false means the Step cannot start (it opened an Escalation, or the Run was abandoned). */
   before?(ctx: WorkflowContext, attempt: AttemptInfo): Promise<boolean>;
   prompt(ctx: WorkflowContext, attempt: AttemptInfo): Promise<string>;
+  /**
+   * The Project files it may change, when it may change only some. Anything else it changes (or commits) is put back as it
+   * was, silently when the attempt failed, and with an Escalation naming the files when it succeeded.
+   */
+  mayChange?(ctx: WorkflowContext): MayChange;
   /** Runs after a successful attempt, such as committing what it left behind. */
   after?(ctx: WorkflowContext): Promise<void>;
   /**
@@ -54,22 +62,44 @@ const done: StepOutcome = { next: "done" };
 export function agentStepType(agents: ReadonlyMap<string, AgentModule>): StepTypeModule {
   return {
     type: "agent",
-    exhausted: (step, attempts) => `The ${capitalised(step.type === "agent" ? step.agent : step.id)} still gives invalid input after ${attempts} ${attempts === 1 ? "attempt" : "attempts"}.`,
+    exhausted: (step, attempts) => `The ${step.type === "agent" ? (agents.get(step.agent)?.label ?? capitalised(step.agent)) : capitalised(step.id)} still gives invalid input after ${attempts} ${attempts === 1 ? "attempt" : "attempts"}.`,
     async execute({ ctx, step, state }) {
       if (step.type !== "agent") throw new Error(`Step "${step.id}" is not an Agent Step.`);
       const agent = agents.get(step.agent);
       if (!agent) throw new Error(`Step "${step.id}" names an unknown Agent "${step.agent}".`);
-      const seat = await requireSeat(ctx, agent.seat, capitalised(agent.name));
+      const seat = await requireSeat(ctx, agent.seat, (agent.label ?? capitalised(agent.name)));
       if (!seat) return stop;
       const attempt: AttemptInfo = { number: state.attempts + 1, sentBack: state.sentBack };
       if (agent.before && !(await agent.before(ctx, attempt))) return stop;
-      const result = await runAgentStep(ctx, seat, {
-        name: agent.name,
-        stepId: step.id,
-        attempt: attempt.number,
-        instructions: agent.instructions,
-        prompt: await agent.prompt(ctx, attempt),
-      });
+      const mayChange = agent.mayChange?.(ctx);
+      // Whatever an earlier attempt (or a crash) left outside what the Agent may change goes first, so it cannot escape later.
+      if (mayChange) await sweepForbiddenChanges(ctx.worktreePath, mayChange);
+      const head = mayChange ? await headOf(ctx.worktreePath) : undefined;
+      let result;
+      try {
+        result = await runAgentStep(ctx, seat, {
+          name: agent.name,
+          stepId: step.id,
+          attempt: attempt.number,
+          instructions: agent.instructions,
+          title: agent.label ? `The ${agent.label}` : undefined,
+          prompt: await agent.prompt(ctx, attempt),
+        });
+      } catch (e) {
+        if (mayChange) await sweepForbiddenChanges(ctx.worktreePath, mayChange, head).catch(() => {});
+        throw e;
+      }
+      if (mayChange) {
+        // An attempt that did not succeed (failed, timed out, paused, abandoned) is swept silently: it is not used anyway.
+        const forbidden = await sweepForbiddenChanges(ctx.worktreePath, mayChange, head).catch((e) => {
+          if (result) throw e;
+          return [] as string[];
+        });
+        if (result && forbidden.length) {
+          await ctx.openGate("escalation", `The ${(agent.label ?? capitalised(agent.name))} changed files it may not change, so they were put back as they were.`, forbidden.join("\n"));
+          return stop;
+        }
+      }
       if (!result) return stop;
       await agent.after?.(ctx);
       if (agent.harvest) {
@@ -138,8 +168,9 @@ export function gateStepType(kinds: ReadonlyMap<GateKind, GateKindModule>): Step
       }
       // Still open: nothing to do but wait for the human.
       if (decision === null) return stop;
-      const reason = kinds.get(step.gate)?.reason;
-      await ctx.openGate(step.gate, (typeof reason === "function" ? await reason(ctx) : reason) ?? "A decision is needed.");
+      const module = kinds.get(step.gate);
+      const reason = module?.reason;
+      await ctx.openGate(step.gate, (typeof reason === "function" ? await reason(ctx) : reason) ?? "A decision is needed.", await module?.evidence?.(ctx));
       return stop;
     },
   };

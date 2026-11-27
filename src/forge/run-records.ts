@@ -64,6 +64,8 @@ export interface RunRecords {
   recordChecks(attempt: number, outcomes: CheckOutcome[]): Promise<void>;
   /** The Feedback of every rejection of this Run, and of every retry or go back from an Escalation that was given one, oldest first. */
   earlierFeedbacks(): Promise<string[]>;
+  /** The Feedback of the human's rejections of the Run's spec Gate, oldest first: what the Spec Writer redoes the spec with. */
+  specFeedbacks(): Promise<string[]>;
   /** Remembers the pull request opened for the Run. */
   recordPullRequest(number: number, url: string): Promise<void>;
   /** Whether the Review Brief was already posted on the pull request. */
@@ -180,7 +182,12 @@ export function createRunRecords(pool: pg.Pool, runId: number, iteration: number
       }
     },
     async earlierFeedbacks() {
-      const { rows } = await pool.query("SELECT feedback FROM gates WHERE run_id = $1 AND (decision = 'reject' OR (decision IN ('retry', 'go_back') AND feedback IS NOT NULL)) ORDER BY id", [runId]);
+      // The spec Gate's Feedback went into the spec: it is the Spec Writer's, not the Developer's or the Reviewers'.
+      const { rows } = await pool.query("SELECT feedback FROM gates WHERE run_id = $1 AND kind <> 'spec' AND (decision = 'reject' OR (decision IN ('retry', 'go_back') AND feedback IS NOT NULL)) ORDER BY id", [runId]);
+      return rows.map((r) => r.feedback);
+    },
+    async specFeedbacks() {
+      const { rows } = await pool.query("SELECT feedback FROM gates WHERE run_id = $1 AND kind = 'spec' AND decision = 'reject' ORDER BY id", [runId]);
       return rows.map((r) => r.feedback);
     },
     async recordPullRequest(number, url) {

@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import { followRuns, getJson, postJson, type RunDetail } from "../api";
 import AssetGallery from "../components/AssetGallery.vue";
 import GateActions from "../components/GateActions.vue";
+import Markdown from "../components/Markdown.vue";
 
 const props = defineProps<{ id: number }>();
 defineEmits<{ back: [] }>();
@@ -94,7 +95,7 @@ onUnmounted(() => stopFollowing?.());
         <li v-for="t in run.conversation" :key="t.id" :class="t.author">
           <strong>{{ t.author === "agent" ? (run.steps.find((s) => s.id === t.stepId)?.detail ?? "Agent").replace(/^./, (c) => c.toUpperCase()) : "You" }}</strong>
           <span class="badge">{{ { questions: "questions", summary: "proposed summary", answer: "answer", confirm: "confirmed", feedback: "feedback" }[t.kind] }}</span>
-          <pre>{{ t.body }}</pre>
+          <Markdown :text="t.body" />
         </li>
       </ol>
       <p v-if="run.gates.some((g) => g.kind === 'conversation' && !g.decidedAt)" class="muted">Reply under the open Conversation Gate below.</p>
@@ -126,9 +127,10 @@ onUnmounted(() => stopFollowing?.());
     <p v-if="!run.gates.length" class="muted">None yet.</p>
     <ul>
       <li v-for="g in run.gates" :key="g.id">
-        <strong>{{ g.kind === "final" ? "Final Gate" : g.kind === "asset" ? "Asset Gate" : g.kind === "review" ? "Review Gate" : g.kind === "conversation" ? "Conversation Gate" : "Escalation" }}</strong> · iteration {{ g.iteration }}:
+        <strong>{{ g.kind === "final" ? "Final Gate" : g.kind === "asset" ? "Asset Gate" : g.kind === "review" ? "Review Gate" : g.kind === "spec" ? "Spec Gate" : g.kind === "conversation" ? "Conversation Gate" : "Escalation" }}</strong> · iteration {{ g.iteration }}:
         {{ g.kind === "asset" && g.decidedAt ? `${g.verdicts.length} ${g.verdicts.length === 1 ? "Asset" : "Assets"} judged.` : g.reason }}
-        <pre v-if="g.evidence">{{ g.evidence }}</pre>
+        <Markdown v-if="g.evidence && (g.kind === 'spec' || g.kind === 'conversation')" :text="g.evidence" />
+        <pre v-else-if="g.evidence">{{ g.evidence }}</pre>
         <div v-if="g.decidedAt" class="muted">
           {{ { approve: "Approved", reject: "Rejected", retry: "Retried", go_back: "Went back", abandon: "Abandoned", answer: "Answered", confirm: "Confirmed" }[g.decision ?? "abandon"] }} · {{ new Date(g.decidedAt).toLocaleString() }}
           <pre v-if="g.feedback">{{ g.feedback }}</pre>
