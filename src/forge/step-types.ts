@@ -49,7 +49,7 @@ const done: StepOutcome = { next: "done" };
 export function agentStepType(agents: ReadonlyMap<string, AgentModule>): StepTypeModule {
   return {
     type: "agent",
-    exhausted: (step, attempts) => `The ${capitalised(step.type === "agent" ? step.agent : step.id)} still gives invalid input after ${attempts} attempts.`,
+    exhausted: (step, attempts) => `The ${capitalised(step.type === "agent" ? step.agent : step.id)} still gives invalid input after ${attempts} ${attempts === 1 ? "attempt" : "attempts"}.`,
     async execute({ ctx, step, state }) {
       if (step.type !== "agent") throw new Error(`Step "${step.id}" is not an Agent Step.`);
       const agent = agents.get(step.agent);
@@ -83,7 +83,7 @@ export function agentStepType(agents: ReadonlyMap<string, AgentModule>): StepTyp
 /** The Checks Step type: the Project's Checks in order; the first that fails sends the Run back to the Step it names. */
 export const checksStepType: StepTypeModule = {
   type: "checks",
-  exhausted: (_step, attempts) => `A Check still fails after ${attempts} attempts.`,
+  exhausted: (_step, attempts) => `A Check still fails after ${attempts} ${attempts === 1 ? "attempt" : "attempts"}.`,
   async execute({ ctx, state }) {
     const attempt = state.attempts + 1;
     // What an interrupted run of the Checks left is forgotten: they all run again.

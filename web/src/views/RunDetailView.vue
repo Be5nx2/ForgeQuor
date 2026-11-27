@@ -93,8 +93,8 @@ onUnmounted(() => stopFollowing?.());
       <ol class="steps" aria-label="Workflow steps">
         <li v-for="s in run.steps" :key="s.id">
           <strong>{{ s.id }}</strong>
-          <span class="muted"> · {{ s.type }}<template v-if="s.detail"> {{ s.detail }}</template></span>
-          <span class="badge">{{ s.status }}</span>
+          <span class="muted">{{ " · " + s.type + (s.detail ? ` (${s.detail})` : "") }}</span>
+          {{ " " }}<span class="badge">{{ s.status }}</span>
           <span v-if="s.attempts" class="muted"> · {{ s.attempts }} {{ s.attempts === 1 ? "pass" : "passes" }}</span>
           <span v-if="s.status === 'waiting' && s.needs.length" class="muted"> · after {{ s.needs.join(", ") }}</span>
         </li>

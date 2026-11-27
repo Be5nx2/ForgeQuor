@@ -33,3 +33,5 @@ form.stack input:not([type="checkbox"]):not([type="number"]) { flex: none; width
 form.stack label.fill { flex-direction: row; align-items: center; }
 
 .compare { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; }
+form.filters { flex-wrap: wrap; }
+form.filters select { flex: 1 1 12rem; min-width: 0; max-width: 100%; }

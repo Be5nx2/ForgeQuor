@@ -316,7 +316,7 @@ async function drawAsset(store: AssetStore, ctx: WorkflowContext, asset: Asset, 
       const counted = retriedAt ? versions.filter((v) => v.at >= retriedAt) : versions;
       const unwritten = counted.filter((v) => !v.written).length;
       if (counted.length >= MAX_ARTIST_ATTEMPTS || unwritten >= MAX_UNWRITTEN_ATTEMPTS) {
-        const afterAttempts = `after ${counted.length} attempts`;
+        const afterAttempts = `after ${counted.length} ${counted.length === 1 ? "attempt" : "attempts"}`;
         await (last.written
           ? ctx.openGate("escalation", `"${asset.name}" still fails the Asset Checks ${afterAttempts}.`, last.failures.join("\n"))
           : ctx.openGate("escalation", `The Artist wrote nothing at the target path of "${asset.name}" (${asset.targetPath}) ${afterAttempts}.`, last.summary));

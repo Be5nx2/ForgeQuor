@@ -14,6 +14,8 @@ const form = ref({ projectId: "", workflow: "developer", task: "", title: "", tr
 /** The chosen Project's Workflows (built-in and its own), and why its own could not be read. */
 const workflows = ref<WorkflowOption[]>([]);
 const workflowsProblem = ref("");
+/** True while the chosen Project's Workflows are being fetched (the remote is read, which takes a few seconds). */
+const workflowsLoading = ref(false);
 const chosen = computed(() => workflows.value.find((w) => w.name === form.value.workflow));
 /** The form asks for what the chosen Workflow takes at launch. */
 const asks = (input: "task" | "assets") => chosen.value?.inputs.includes(input) ?? false;
@@ -121,10 +123,14 @@ watch(
   async (id) => {
     const none: ArtInfo = { present: false, defaultSize: null, references: [], images: [] };
     const fetched = id ? await getJson<ArtInfo>(`/api/projects/${id}/art-info`).catch(() => none) : none;
+    workflows.value = [];
+    workflowsProblem.value = "";
+    workflowsLoading.value = !!id;
     const noWorkflows: WorkflowList = { workflows: [], problem: null };
     const list = id ? await getJson<WorkflowList>(`/api/projects/${id}/workflows`).catch((e): WorkflowList => ({ workflows: [], problem: `Could not load the Workflows: ${e.message}` })) : noWorkflows;
     // A quicker switch to another Project already moved on: drop this answer.
     if (form.value.projectId !== id) return;
+    workflowsLoading.value = false;
     workflows.value = list.workflows;
     workflowsProblem.value = list.problem ?? "";
     // The Workflow picked for the previous Project may not exist here: fall back to the first one.
@@ -144,7 +150,8 @@ watch(
     <select v-model="form.projectId" aria-label="Project">
       <option v-for="p in projects" :key="p.id" :value="String(p.id)">{{ projectLabel(p) }}</option>
     </select>
-    <select v-model="form.workflow" aria-label="Workflow">
+    <p v-if="workflowsLoading" class="muted" role="status">Loading Workflows…</p>
+    <select v-else v-model="form.workflow" aria-label="Workflow">
       <option v-for="w in workflows" :key="w.name" :value="w.name">{{ w.name }} ({{ originLabel(w) }}){{ w.errors.length ? " - invalid" : w.description ? `: ${w.description}` : "" }}</option>
     </select>
     <p v-if="workflowsProblem" class="error">{{ workflowsProblem }}</p>
@@ -192,12 +199,12 @@ watch(
     </template>
     <input v-model="form.title" placeholder="Title (derived from the task or Assets if empty)" aria-label="Title" />
     <input v-model="form.trackerRef" placeholder="Tracker reference (optional, e.g. $12a)" aria-label="Tracker reference" />
-    <button type="submit" :disabled="!launchable">Start Run</button>
+    <button type="submit" :disabled="workflowsLoading || !launchable">Start Run</button>
   </form>
   <p v-if="error" class="error">{{ error }}</p>
 
   <h2>Runs</h2>
-  <form>
+  <form class="filters">
     <select v-model="filterProject" aria-label="Filter by Project">
       <option value="">All Projects</option>
       <option v-for="p in projects" :key="p.id" :value="String(p.id)">{{ projectLabel(p) }}</option>
