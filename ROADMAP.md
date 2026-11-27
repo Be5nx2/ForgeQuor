@@ -138,6 +138,8 @@ YAML **Workflows** with parallel **Steps**, Griller with chat, Spec Writer, Arch
 - Coalesce live "changed" updates so a chatty Agent does not make the UI reload the Run on every event.
 - Tileset atlas: an Asset Request for N tiles delivered as one atlas image (Godot TileSet), instead of one file per tile (M2 grilling).
 - Produce a Run's Asset Requests in parallel instead of one after the other (image generation burns Quota 3-5x faster, so sequential first).
+- Animated preview of an Animation Strip in the gallery (frames played in a loop, larger than the 4x a 64 px strip gets today), to judge the motion (real strip test, m2-07).
+- Should an Approved Run keep its Project slot until its pull request is merged? It uses no Quota any more, but holds the queue while the human has not merged (real strip test, m2-07). To grill.
 
 ## Done
 
