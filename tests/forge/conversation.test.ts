@@ -137,7 +137,7 @@ describe("a feature Run's grilling", () => {
     expect(run.workflow).toBe("feature");
     expect(run.review).toBe("duo");
     expect(run.state).toBe("waiting");
-    expect(stepsOf(run)).toEqual(["griller:running", "spec-writer:waiting", "spec:waiting", "developer:waiting", "checks:waiting", "review:waiting", "publish:waiting", "final:waiting"]);
+    expect(stepsOf(run)).toEqual(["griller:running", "spec-writer:waiting", "spec:waiting", "artist:waiting", "asset-gate:waiting", "developer:waiting", "checks:waiting", "review:waiting", "publish:waiting", "final:waiting"]);
     expect(run.steps[0]).toMatchObject({ type: "conversation", detail: "griller" });
     expect(open(run)).toMatchObject({ kind: "conversation", stepId: "griller", actions: ["answer", "abandon"], evidence: expect.stringContaining("double jump feel") });
     expect(grillers()).toHaveLength(1);
@@ -187,7 +187,7 @@ describe("a feature Run's grilling", () => {
     run = await confirmAndApprove(run);
 
     expect(run.state).toBe("waiting");
-    expect(stepsOf(run)).toEqual(["griller:done", "spec-writer:done", "spec:done", "developer:done", "checks:done", "review:done", "publish:done", "final:running"]);
+    expect(stepsOf(run)).toEqual(["griller:done", "spec-writer:done", "spec:done", "artist:skipped", "asset-gate:skipped", "developer:done", "checks:done", "review:done", "publish:done", "final:running"]);
     expect(run.gates.map((g) => g.kind)).toEqual(["conversation", "conversation", "spec", "final"]);
     expect(run.gates[1]).toMatchObject({ decision: "confirm" });
     expect(developers()).toHaveLength(1);
@@ -442,7 +442,7 @@ describe("what the review and the Developer read after a grilling", () => {
     run = await forge.getRun(run.id);
 
     expect(grillers()).toHaveLength(1);
-    expect(stepsOf(run)).toEqual(["griller:done", "spec-writer:done", "spec:done", "developer:done", "checks:done", "review:done", "publish:done", "final:running"]);
+    expect(stepsOf(run)).toEqual(["griller:done", "spec-writer:done", "spec:done", "artist:skipped", "asset-gate:skipped", "developer:done", "checks:done", "review:done", "publish:done", "final:running"]);
   });
 });
 
@@ -575,7 +575,7 @@ describe("going back to the Griller from an Escalation", () => {
     run = await answer(run, "Yes, include it.");
     run = await confirmAndApprove(run);
     expect(developers().at(-1)!.prompt).toContain("The revised summary, with the wall.");
-    expect(stepsOf(run)).toEqual(["griller:done", "spec-writer:done", "spec:done", "developer:done", "checks:done", "review:done", "publish:done", "final:running"]);
+    expect(stepsOf(run)).toEqual(["griller:done", "spec-writer:done", "spec:done", "artist:skipped", "asset-gate:skipped", "developer:done", "checks:done", "review:done", "publish:done", "final:running"]);
   });
 });
 

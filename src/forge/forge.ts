@@ -11,14 +11,14 @@ import { specGate, specWriterAgent } from "./spec.js";
 import { runEngine, type StepTypeModule } from "./engine.js";
 import { agentStepType, catalogueOf, checksStepType, gateStepType, publishStepType, type AgentModule } from "./step-types.js";
 import { describeInvalid, resolveWorkflows, type ResolvedWorkflow } from "./project-workflows.js";
-import { DEFAULT_REVIEW_MODE, REVIEW_MODES, type WorkflowDefinition } from "./workflow-definition.js";
+import { DEFAULT_REVIEW_MODE, REVIEW_MODES, type WorkflowDefinition, type WorkflowInput } from "./workflow-definition.js";
 import { publishPullRequest } from "./publish.js";
 import { createRunRecords, toReview } from "./run-records.js";
 import { reviewStepType } from "./review.js";
 import { buildSeats, type RunnerName, type SeatSettings } from "./seats.js";
 import { builtInExtensions } from "./builtin.js";
 import { AssetNotFoundError, GateError, InvalidInputError, RunNotFoundError, RunStateError } from "./errors.js";
-import type { Extension } from "./extension.js";
+import type { Extension, InputProducer } from "./extension.js";
 import { allows, escalationGate, finalGate, offered, refusal, reviewGate, type GateKindModule, type GateOutcome } from "./gates.js";
 import { goBackChoices, redoFailedSteps, redoSteps, redoSet, type StepRow } from "./step-states.js";
 import type { Publication, RunInput, Workflow, WorkflowContext } from "./workflow.js";
@@ -302,9 +302,11 @@ export function createForge(deps: ForgeDeps): Forge {
   const agentModules = new Map<string, AgentModule>([developerAgent, bugfixAgent, specWriterAgent, ...extensions.flatMap((e) => e.agents ?? [])].map((a) => [a.name, a]));
   /** The Agents a conversation Step can name. */
   const conversationAgents = new Map<string, ConversationAgent>([grillerAgent].map((a) => [a.name, a]));
+  /** How each input an Agent produces is read and validated. */
+  const inputProducers = new Map<WorkflowInput, InputProducer>(extensions.flatMap((e) => Object.entries(e.inputProducers ?? {}) as [WorkflowInput, InputProducer][]));
   /** What the engine runs, by Step type. */
   const stepTypes = new Map<StepTypeModule["type"], StepTypeModule>(
-    [agentStepType(agentModules), checksStepType, publishStepType(publicationOf), gateStepType(gateKinds), reviewStepType, conversationStepType(conversationAgents), ...extensions.flatMap((e) => e.stepTypes ?? [])].map((t) => [t.type, t]),
+    [agentStepType(agentModules), checksStepType, publishStepType(publicationOf), gateStepType(gateKinds), reviewStepType, conversationStepType(conversationAgents, inputProducers), ...extensions.flatMap((e) => e.stepTypes ?? [])].map((t) => [t.type, t]),
   );
   /** Each Agent seat's Runner and model: its setting, else its default (Claude Code for most, Codex for the second Reviewer and the Artist). */
   const runners: Partial<Record<RunnerName, Runner>> = { claude: deps.runner, codex: deps.artistRunner };
@@ -651,7 +653,7 @@ export function createForge(deps: ForgeDeps): Forge {
   async function projectWorkflows(project: Project, branch?: string | null): Promise<ResolvedWorkflow[]> {
     return resolveWorkflows(project.localPath, branch === undefined ? await freshDefaultBranch(project.id, project.localPath) : branch, {
       builtIn: [...workflows.values()],
-      catalogue: catalogueOf(agentModules.values(), conversationAgents.keys()),
+      catalogue: catalogueOf(agentModules.values(), conversationAgents.values()),
       stepTypes: new Set(stepTypes.keys()),
       gateKinds: new Set(gateKinds.keys()),
     });

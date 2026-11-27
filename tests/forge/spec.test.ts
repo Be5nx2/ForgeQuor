@@ -110,7 +110,7 @@ describe("the Spec Writer", () => {
     const run = await toSpecGate(p);
 
     expect(specPathOf({ id: run.id, title: run.title })).toBe(SPEC);
-    expect(stepsOf(run)).toEqual(["griller:done", "spec-writer:done", "spec:running", "developer:waiting", "checks:waiting", "review:waiting", "publish:waiting", "final:waiting"]);
+    expect(stepsOf(run)).toEqual(["griller:done", "spec-writer:done", "spec:running", "artist:waiting", "asset-gate:waiting", "developer:waiting", "checks:waiting", "review:waiting", "publish:waiting", "final:waiting"]);
     const commits = git(run.worktreePath!, "log", "--format=%H %s", "origin/main..HEAD").split("\n");
     expect(commits).toHaveLength(1);
     expect(commits[0]).toMatch(/docs\(spec\): Let the player jump twice\.$/);
@@ -223,7 +223,7 @@ describe("the spec Gate", () => {
     run = await decide(run, "approve");
 
     expect(run.state).toBe("waiting");
-    expect(stepsOf(run)).toEqual(["griller:done", "spec-writer:done", "spec:done", "developer:done", "checks:done", "review:done", "publish:done", "final:running"]);
+    expect(stepsOf(run)).toEqual(["griller:done", "spec-writer:done", "spec:done", "artist:skipped", "asset-gate:skipped", "developer:done", "checks:done", "review:done", "publish:done", "final:running"]);
     expect(developers()).toHaveLength(1);
     expect(developers()[0]!.prompt).toContain(`The human approved the spec at ${SPEC}: read it first, and build what it says.`);
     expect(developers()[0]!.prompt).toContain("Build a double jump: once per fall.");
@@ -269,7 +269,7 @@ describe("the spec Gate", () => {
     expect(specWriters()[2]!.prompt).toContain("1. Add what happens on a ledge.\n2. Also say nothing about double taps.");
 
     run = await decide(run, "approve");
-    expect(stepsOf(run).slice(0, 4)).toEqual(["griller:done", "spec-writer:done", "spec:done", "developer:done"]);
+    expect(stepsOf(run).slice(0, 6)).toEqual(["griller:done", "spec-writer:done", "spec:done", "artist:skipped", "asset-gate:skipped", "developer:done"]);
     // The Developer reads the spec the human approved; Feedback on the spec is not "the reviewer rejected your work".
     expect(developers()[0]!.prompt).not.toContain("rejected your earlier work");
     expect(readFileSync(join(run.worktreePath!, SPEC), "utf8")).toContain("version 3");

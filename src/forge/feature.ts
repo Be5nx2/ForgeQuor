@@ -3,6 +3,7 @@ import { deriveTitle, developerAgent } from "./developer.js";
 import { specWriterAgent } from "./spec.js";
 import { catalogueOf } from "./step-types.js";
 import { loadBuiltInWorkflow } from "./workflow-definition.js";
+import { ASSET_REQUESTS_NOTE } from "./assets.js";
 import type { Workflow } from "./workflow.js";
 import { RUN_NOTES_DIR } from "./workspace.js";
 
@@ -17,6 +18,8 @@ export const GRILLER_INSTRUCTIONS = `You are the Griller on a Forgequor Run. You
 - You never ask the human through a tool: you talk through your turns. Each turn is ONE round: a short numbered list of questions (at most 7), each with your recommended answer, then you end your turn. The human answers the whole round in one message and you carry on in the same conversation, so build on what they said.
 - Record what you decide as you go: update GLOSSARY.md with the domain terms the human and you settle, and write an ADR in docs/adr/ for a decision that is hard to reverse, surprising or a real trade-off. Those two places are the only Project files you may change; Forgequor puts back anything else, and fails the Step. Do not edit code, do not commit, do not run commands that write files (a build, a formatter, tests).
 - When nothing is left to settle, propose a summary instead of more questions. It must stand alone, as the Developer will build from it without having heard the conversation: what to build and why, the behaviour and the edge cases agreed, the decisions made (with the terms of the glossary), what is out of scope, and how the work is checked. The human confirms it or answers to continue.
+
+- If the feature needs new pixel art (sprites, tiles, animations), order it while you grill: settle with the human what each Asset shows and its size, and the Project's Art Direction document (read it first) governs the style. Once they have confirmed what is needed, and before you propose the summary, write the Asset Requests to ${ASSET_REQUESTS_NOTE} as a JSON array (a Run Note, never committed), and say in the summary which Assets are ordered and at which paths they will be: the Developer is given the approved Assets' paths. Each Asset Request is an object: "name" (what it is, in words: its file name is made from it), "kind" ("sprite", "tile" or "animation"), "description" (what it shows), "width" and "height" (whole pixels; the size of one frame for an animation), optionally "fill" (true to cover every pixel), "frames" (an animation needs at least 2), "references" (repository paths of PNG images whose style to match) and "replace" (true to redraw a file that already exists: without it an existing file is an error). Example: [{"name": "Hero idle", "kind": "animation", "description": "The hero standing, breathing slowly", "width": 16, "height": 16, "frames": 4}]. Forgequor validates the file when the human confirms your summary, against the repository's default branch (a request that would overwrite an existing file, or lean on a missing reference, is refused); if it is refused, the conversation reopens with the reasons: fix the file and propose the summary again. Write no file, or an empty list, when no art is needed.
 
 Every turn ends the same way. Write it to ${GRILLER_NOTE} (your final message is read if you cannot write files; never rely on that), in exactly this format: the first line is "Kind: questions" or "Kind: summary", and everything after it is the turn, in Markdown.
 
@@ -45,6 +48,7 @@ export const grillerAgent: ConversationAgent = {
   notePath: GRILLER_NOTE,
   transcriptPath: GRILLING_TRANSCRIPT,
   title: "Grilling",
+  produces: ["assets"],
   opening: (ctx) => `The human wants this built. The subject:\n\n${ctx.run.task}\n\nBegin the grilling: look at the repository as you need to, then ask your first round of questions.`,
   parse: parseGrillerTurn,
   retry: (problem) => `Your last turn could not be used: ${problem}\n\nGive that turn again, in the format: write it to ${GRILLER_NOTE}, its first line "Kind: questions" or "Kind: summary".`,
@@ -59,7 +63,7 @@ export const grillerAgent: ConversationAgent = {
 export const featureWorkflow: Workflow = {
   name: "feature",
   inputs: ["task", "review"],
-  definition: loadBuiltInWorkflow("feature", catalogueOf([developerAgent, specWriterAgent], [grillerAgent.name])),
+  definition: loadBuiltInWorkflow("feature", catalogueOf([developerAgent, specWriterAgent], [grillerAgent])),
   plan({ task, title }) {
     if (!task?.trim()) throw new Error("A feature Run needs a subject.");
     return { task: task.trim(), title: title?.trim() || deriveTitle(task) };

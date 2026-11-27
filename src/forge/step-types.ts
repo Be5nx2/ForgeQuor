@@ -47,8 +47,11 @@ export interface AgentModule {
 }
 
 /** What a Workflow definition can name of the Agents. */
-export function catalogueOf(agents: Iterable<AgentModule>, conversations: Iterable<string> = []): StepCatalogue {
-  return { agents: Object.fromEntries([...agents].map((a) => [a.name, { produces: a.produces ?? [] }])), conversations: [...conversations] };
+export function catalogueOf(agents: Iterable<AgentModule>, conversations: Iterable<{ name: string; produces?: readonly WorkflowInput[] }> = []): StepCatalogue {
+  return {
+    agents: Object.fromEntries([...agents].map((a) => [a.name, { produces: a.produces ?? [] }])),
+    conversations: Object.fromEntries([...conversations].map((c) => [c.name, { produces: c.produces ?? [] }])),
+  };
 }
 
 const capitalised = (name: string) => name.charAt(0).toUpperCase() + name.slice(1);
@@ -159,7 +162,10 @@ export function gateStepType(kinds: ReadonlyMap<GateKind, GateKindModule>): Step
     async execute({ ctx, step }) {
       if (step.type !== "gate") throw new Error(`Step "${step.id}" is not a Gate.`);
       const decision = await ctx.records.gateDecision(step.id);
-      if (decision === "approve") return done;
+      if (decision === "approve") {
+        await kinds.get(step.gate)?.approved?.(ctx);
+        return done;
+      }
       // Still open: nothing to do but wait for the human.
       if (decision === null) return stop;
       const module = kinds.get(step.gate);

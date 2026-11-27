@@ -59,6 +59,11 @@ export interface NewVersion {
 export interface AssetStore {
   /** Writes a Run's Asset Requests as Asset rows, inside the launch transaction. */
   insertRequests(client: pg.PoolClient, runId: number, requests: AssetRequest[], targetPath: (a: AssetRequest) => string): Promise<void>;
+  /**
+   * Replaces the Run's Asset Requests with these (the Griller of a `feature` Run orders art mid-Run, and may order it again
+   * if its conversation is replayed), forgetting what was drawn for the earlier ones.
+   */
+  replaceRequests(runId: number, requests: AssetRequest[], targetPath: (a: AssetRequest) => string): Promise<void>;
   /** A Run's Assets, in order, each with the warnings of its latest version, the versions the human saw and every attempt. */
   load(runId: number): Promise<Asset[]>;
   setStatus(assetId: number, status: AssetStatus): Promise<void>;
@@ -92,15 +97,36 @@ export interface AssetStore {
   imageFile(runId: number, assetId: number, which?: number | "replaced"): Promise<string>;
 }
 
+async function insertRequests(client: pg.PoolClient, runId: number, requests: AssetRequest[], targetPath: (a: AssetRequest) => string): Promise<void> {
+  for (const [position, a] of requests.entries()) {
+    await client.query(
+      `INSERT INTO assets (run_id, position, name, kind, description, width, height, fill, frames, style_references, replace, target_path)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+      [runId, position, a.name, a.kind, a.description, a.width, a.height, a.fill === true, a.frames ?? 1, JSON.stringify(a.references ?? []), a.replace === true, targetPath(a)],
+    );
+  }
+}
+
 export function createAssetStore(pool: pg.Pool): AssetStore {
   return {
-    async insertRequests(client, runId, requests, targetPath) {
-      for (const [position, a] of requests.entries()) {
-        await client.query(
-          `INSERT INTO assets (run_id, position, name, kind, description, width, height, fill, frames, style_references, replace, target_path)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-          [runId, position, a.name, a.kind, a.description, a.width, a.height, a.fill === true, a.frames ?? 1, JSON.stringify(a.references ?? []), a.replace === true, targetPath(a)],
-        );
+    insertRequests,
+
+    async replaceRequests(runId, requests, targetPath) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const ids = "SELECT id FROM assets WHERE run_id = $1";
+        await client.query(`UPDATE step_attempts SET asset_id = NULL WHERE asset_id IN (${ids})`, [runId]);
+        await client.query(`DELETE FROM asset_verdicts WHERE asset_id IN (${ids})`, [runId]);
+        await client.query(`DELETE FROM asset_versions WHERE asset_id IN (${ids})`, [runId]);
+        await client.query("DELETE FROM assets WHERE run_id = $1", [runId]);
+        await insertRequests(client, runId, requests, targetPath);
+        await client.query("COMMIT");
+      } catch (e) {
+        await client.query("ROLLBACK").catch(() => {});
+        throw e;
+      } finally {
+        client.release();
       }
     },
 

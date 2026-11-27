@@ -6,9 +6,11 @@ import type { StepOutcome, StepTypeModule } from "./engine.js";
 import { createConversationRecords, type Turn } from "./conversation-records.js";
 import { commitDeliverables, headOf, sweepForbiddenChanges, type MayChange } from "./deliverables.js";
 import { InvalidInputError } from "./errors.js";
+import type { InputProducer } from "./extension.js";
 import type { GateKindModule } from "./gates.js";
 import { requireSeat, type SeatName } from "./seats.js";
 import { runAgentStep } from "./step.js";
+import type { WorkflowInput } from "./workflow-definition.js";
 import type { AgentSeat, WorkflowContext } from "./workflow.js";
 
 /** What an Agent's text says as one turn of a conversation: a round of questions, or the summary it proposes, or what is wrong with it. */
@@ -33,6 +35,11 @@ export interface ConversationAgent {
   retry(problem: string): string;
   /** The Project files it may change; what else it changes is undone. */
   mayChange: MayChange;
+  /**
+   * The inputs it produces for the Steps after it, which `when` can then test. When the human confirms the summary they
+   * are read and validated (see `InputProducer`); an invalid one reopens the conversation with the reasons.
+   */
+  produces?: readonly WorkflowInput[];
   /** The commit message for what it changed, made when the human confirms the summary. */
   commitMessage: string;
 }
@@ -123,7 +130,7 @@ function seededPrompt(transcript: string): string {
  * A conversation that was confirmed is reopened when the Run is sent back to the Step with Feedback, which becomes the
  * human's next message.
  */
-export function conversationStepType(agents: ReadonlyMap<string, ConversationAgent>): StepTypeModule {
+export function conversationStepType(agents: ReadonlyMap<string, ConversationAgent>, producers: ReadonlyMap<WorkflowInput, InputProducer> = new Map()): StepTypeModule {
   return {
     type: "conversation",
     async execute({ ctx, step }) {
@@ -143,8 +150,13 @@ export function conversationStepType(agents: ReadonlyMap<string, ConversationAge
       else if (last.author === "human") {
         // Confirmed already. Only a Run sent back to this Step with Feedback reopens the conversation.
         const feedback = last.gateId === null ? null : await conversation.reopenFeedback(step.id, last.gateId);
-        if (feedback === null) return done;
-        message = humanMessage(await conversation.add(step.id, { author: "human", kind: "feedback", body: feedback }));
+        if (feedback !== null) message = humanMessage(await conversation.add(step.id, { author: "human", kind: "feedback", body: feedback }));
+        else {
+          // What the Agent produced is checked here, not only when the human confirms: a restart in between finds it unchecked.
+          const invalid = await produceInputs(ctx, agent, step.id, producers);
+          if (invalid === null) return done;
+          message = humanMessage(await conversation.add(step.id, { author: "human", kind: "feedback", body: invalid }));
+        }
       } else {
         // The Agent spoke last: the human's decision on its Gate is what comes next.
         const gateId = last.gateId ?? (await waitOnGate(ctx, agent, step.id, last));
@@ -155,11 +167,15 @@ export function conversationStepType(agents: ReadonlyMap<string, ConversationAge
           await commitDeliverables(ctx.worktreePath, agent.mayChange, agent.commitMessage);
           await conversation.add(step.id, { author: "human", kind: "confirm", body: "Confirmed.", gateId });
           await write();
-          return done;
+          // What the Agent produced is checked now; if it is no good the conversation goes on, with the reasons as the human's next message.
+          const invalid = await produceInputs(ctx, agent, step.id, producers);
+          if (invalid === null) return done;
+          message = humanMessage(await conversation.add(step.id, { author: "human", kind: "feedback", body: invalid }));
+        } else {
+          if (decided.decision !== "answer") return stop;
+          message = decided.message ?? "";
+          await conversation.add(step.id, { author: "human", kind: "answer", body: message, gateId });
         }
-        if (decided.decision !== "answer") return stop;
-        message = decided.message ?? "";
-        await conversation.add(step.id, { author: "human", kind: "answer", body: message, gateId });
       }
       if (last) {
         await write();
@@ -175,6 +191,23 @@ export function conversationStepType(agents: ReadonlyMap<string, ConversationAge
       return stop;
     },
   };
+}
+
+/**
+ * Reads and validates the inputs the Agent produces, giving the Run each one it did produce. Returns what is wrong with
+ * them, as the next message of the conversation, or null when they are all fine.
+ */
+async function produceInputs(ctx: WorkflowContext, agent: ConversationAgent, stepId: string, producers: ReadonlyMap<WorkflowInput, InputProducer>): Promise<string | null> {
+  for (const input of agent.produces ?? []) {
+    const producer = producers.get(input);
+    if (!producer) throw new Error(`The ${capitalised(agent.name)} produces "${input}", but nothing reads that input.`);
+    const produced = await producer(ctx);
+    if ("invalid" in produced) {
+      return `Forgequor could not use what you produced for the Run. Fix it or remove it, then propose the summary again for the human to confirm.\n\n${produced.invalid}`;
+    }
+    if (produced.given) await ctx.records.giveInput(input, stepId);
+  }
+  return null;
 }
 
 /**
