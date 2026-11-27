@@ -5,6 +5,7 @@ All notable changes to Forgequor. Format: [Keep a Changelog](https://keepachange
 ## [Unreleased]
 
 ### Added
+- `tests/acceptance/comfort.ba.ts`: M4 BA scenarios, archiving of an abandoned Run (worktree, branches, pull request, history kept), a Claude Quota reading after a Step, Workflow validation and the Team seats (m4-11).
 - `/to-workflow` shared Skill: turns a need into a Project Workflow, reusing a close one when it exists and validating the file through `POST /api/workflows/validate`; its reference of Step types and built-in Workflows is checked against the code (m4-10).
 - Startup catch-up and purge: at startup finished Runs not yet archived are archived and stray Run folders swept; Runs archived more than `FORGEQUOR_ARCHIVE_DAYS` (default 60) days ago are deleted with everything that belongs to them, at startup and every 24 hours (m4-02).
 - Archive a Run when it ends: a merged, closed or abandoned Run loses its worktree and local branch (and, unmerged, its remote branch) and is marked archived, readable as before; the Runs tab hides archived Runs unless asked (m4-01).

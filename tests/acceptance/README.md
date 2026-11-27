@@ -14,6 +14,8 @@ Never part of `npm test`: it starts the real app, talks to GitHub and runs real 
 | `forgequor.ba.ts` §5 | Opt-in (`BA_ASSETS=1`, uses Codex): an `assets` Run drawn, rejected with Feedback, redrawn, approved, published. |
 | `team.ba.ts` `bugfix` | A buggy script pushed to the sandbox, a bug description, solo review: the Developer fixes it, the Check passes, the Reviewer passes it, the PR holds only the fix and its Review Brief has the Review. |
 | `team.ba.ts` `feature` | A subject; the suite answers the Griller's rounds in the Conversation Gate and confirms its summary, approves the spec at the spec Gate; the Architect plans, the Developer builds, duo review (Reviewers + Consolidator); the PR holds the code and the spec, no Skills or Run Notes; abandon closes it. |
+| `comfort.ba.ts` §1–2 | A `developer` Run abandoned at its final Gate is archived: worktree folder, local and remote branch gone, pull request CLOSED, `archivedAt` set, and its Steps, Gates, Checks and Reviews still served; after the Claude Step `GET /api/quota` has a Claude reading with both percents and a small age. |
+| `comfort.ba.ts` §3 | No Agent: `POST /api/workflows/validate` is valid for a built-in YAML copy and lists errors for a broken one; `GET /api/team` lists the seats. |
 
 ## Running it
 
