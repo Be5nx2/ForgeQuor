@@ -16,6 +16,7 @@ import {
   repositoryPath,
   servableAssetFile,
   VerdictError,
+  verdictFeedback,
 } from "./assets.js";
 import type { AgentSeat, Workflow } from "./workflow.js";
 import type { CodeHost } from "../codehost/codehost.js";
@@ -689,10 +690,7 @@ export function createForge(deps: ForgeDeps): Forge {
       // Each rejected Gate started the Iteration after its own. An Asset Gate's Feedback is that of its rejected verdicts.
       const iterations: Iteration[] = [{ number: 1, feedback: null }];
       for (const g of gates.rows.filter((g) => g.decision === "reject")) {
-        const perAsset = (verdicts.get(Number(g.id)) ?? [])
-          .filter((v) => v.verdict === "reject")
-          .map((v) => `${assets.find((a) => a.id === v.assetId)?.name ?? `Asset ${v.assetId}`}: ${v.feedback}`);
-        iterations.push({ number: g.iteration + 1, feedback: g.feedback ?? (perAsset.join("\n") || null) });
+        iterations.push({ number: g.iteration + 1, feedback: g.feedback ?? verdictFeedback(verdicts.get(Number(g.id)) ?? [], assets) });
       }
       return {
         ...toRun(rows[0]),

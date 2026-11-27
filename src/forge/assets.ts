@@ -221,7 +221,15 @@ export async function loadGateVerdicts(pool: pg.Pool, gateIds: number[]): Promis
   return byGate;
 }
 
-const PNG_SIGNATURE = Buffer.from("89504e470d0a1a0a", "hex");
+/** The Feedback of an Asset Gate's rejected verdicts, one `name: Feedback` line each; null when it rejected nothing. */
+export function verdictFeedback(verdicts: GateVerdict[], assets: Asset[]): string | null {
+  const lines = verdicts
+    .filter((v) => v.verdict === "reject")
+    .map((v) => `${assets.find((a) => a.id === v.assetId)?.name ?? `Asset ${v.assetId}`}: ${v.feedback}`);
+  return lines.join("\n") || null;
+}
+
+const PNG_SIGNATURE =Buffer.from("89504e470d0a1a0a", "hex");
 
 /** Where the art an Asset replaces is kept in the Run Notes, as `<asset id>.png`, relative to the worktree. */
 const REPLACED_DIR = `${RUN_NOTES_DIR}/assets/replaced`;
@@ -461,10 +469,10 @@ async function drawAsset(ctx: WorkflowContext, asset: Asset, artDirection: strin
     if (last) {
       const unwritten = versions.filter((v) => !v.written).length;
       if (versions.length >= MAX_ARTIST_ATTEMPTS || unwritten >= MAX_UNWRITTEN_ATTEMPTS) {
-        const tries = `after ${versions.length} attempts`;
+        const afterAttempts = `after ${versions.length} attempts`;
         await (last.written
-          ? ctx.openGate("escalation", `"${asset.name}" still fails the Asset Checks ${tries}.`, last.failures.join("\n"))
-          : ctx.openGate("escalation", `The Artist wrote nothing at the target path of "${asset.name}" (${asset.targetPath}) ${tries}.`, last.summary));
+          ? ctx.openGate("escalation", `"${asset.name}" still fails the Asset Checks ${afterAttempts}.`, last.failures.join("\n"))
+          : ctx.openGate("escalation", `The Artist wrote nothing at the target path of "${asset.name}" (${asset.targetPath}) ${afterAttempts}.`, last.summary));
         return false;
       }
       redo = last.written ? { failures: last.failures } : { unwritten: true };

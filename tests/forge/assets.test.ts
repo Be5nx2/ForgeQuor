@@ -1160,7 +1160,7 @@ describe("an assets Run cut short", () => {
   });
 });
 
-describe("what an assets Run tells the human (M2 review follow-ups)", () => {
+describe("what an assets Run tells the human and spends", () => {
   const OLD = "assets/art/sprites/hero-idle.png";
 
   it("lists each Asset's palette warnings in the Review Brief", async () => {
