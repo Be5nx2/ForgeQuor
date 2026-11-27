@@ -5,7 +5,7 @@ import type { GateKindModule } from "./gates.js";
 import type { GateKind } from "./types.js";
 import { readReviewBrief, runNotesInBranch } from "./workspace.js";
 import type { StepCatalogue, WorkflowInput } from "./workflow-definition.js";
-import type { WorkflowContext } from "./workflow.js";
+import type { Publication, WorkflowContext } from "./workflow.js";
 
 /** What an Agent attempt is told about itself. */
 export interface AttemptInfo {
@@ -98,19 +98,24 @@ export const checksStepType: StepTypeModule = {
 };
 
 /** The Publish Step type: pushes the branch, opens the pull request and posts the Review Brief. */
-export const publishStepType: StepTypeModule = {
+export function publishStepType(publications: ReadonlyMap<string, Publication>): StepTypeModule {
+  return {
   type: "publish",
   async execute({ ctx }) {
     if (!(await ctx.stillRunning())) return stop;
+    const publication = publications.get(ctx.run.workflow);
+    await publication?.prepare?.(ctx);
     const notes = await runNotesInBranch(ctx.worktreePath, ctx.defaultBranch);
     if (notes.length) {
       await ctx.openGate("escalation", "A commit adds Run Notes, so the branch was not pushed.", notes.join("\n"));
       return stop;
     }
-    const pr = await ctx.publishPullRequest(() => readReviewBrief(ctx.worktreePath) ?? "The Developer wrote no Review Brief for this pull request.");
+    const brief = publication ? await publication.brief(ctx) : (readReviewBrief(ctx.worktreePath) ?? "The Developer wrote no Review Brief for this pull request.");
+    const pr = await ctx.publishPullRequest(() => brief);
     return pr ? done : stop;
   },
-};
+  };
+}
 
 /**
  * The Gate Step type: opens a Gate of the Step's kind and waits for the human. A Gate approved in this Iteration is done;
@@ -125,7 +130,8 @@ export function gateStepType(kinds: ReadonlyMap<GateKind, GateKindModule>): Step
       if (decision === "approve") return done;
       // Still open: nothing to do but wait for the human.
       if (decision === null) return stop;
-      await ctx.openGate(step.gate, kinds.get(step.gate)?.reason ?? "A decision is needed.");
+      const reason = kinds.get(step.gate)?.reason;
+      await ctx.openGate(step.gate, (typeof reason === "function" ? await reason(ctx) : reason) ?? "A decision is needed.");
       return stop;
     },
   };

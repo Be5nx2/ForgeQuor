@@ -5,10 +5,11 @@ import { replacedCopyPath, servableAssetFile } from "./asset-files.js";
 import { createAssetStore, VerdictError, verdictFeedback, type AssetStore } from "./asset-store.js";
 import { parseReferences } from "./art-direction.js";
 import { AssetNotFoundError, InvalidInputError } from "./errors.js";
+import type { StepTypeModule } from "./engine.js";
 import type { GateKindModule } from "./gates.js";
 import { runAgentStep } from "./step.js";
 import { loadBuiltInWorkflow } from "./workflow-definition.js";
-import type { RunInput, RunPlan, Workflow, WorkflowContext } from "./workflow.js";
+import type { Publication, RunInput, RunPlan, Workflow, WorkflowContext } from "./workflow.js";
 import type { Asset, AssetKind, AssetRequest } from "./types.js";
 import { commitPaths, existsAtHead, repositoryPath, RUN_NOTES_DIR, slugify } from "./workspace.js";
 import type { Extension, RunDetailPart } from "./extension.js";
@@ -342,15 +343,62 @@ async function drawAsset(store: AssetStore, ctx: WorkflowContext, asset: Asset, 
   return true;
 }
 
-/** The human approved the Asset Gate: commit the Assets, open the pull request with Forgequor's own Review Brief, approve the Run. */
-async function finish(store: AssetStore, ctx: WorkflowContext, assets: Asset[]) {
-  const { worktreePath, run } = ctx;
-  await store.approveAll(run.id);
-  await commitPaths(worktreePath, assets.map((a) => a.targetPath), commitMessage(assets));
-  const feedbacks = await store.rejectionFeedbacksOf(assets.map((a) => a.id));
-  const pr = await ctx.publishPullRequest(() => reviewBrief(assets, feedbacks));
-  if (!pr) return;
-  await ctx.approve();
+/** The Publish Step of an `assets` Run: the human approved every Asset, so Forgequor commits them and writes the Review Brief itself. */
+function assetsPublication(store: AssetStore): Publication {
+  return {
+    async prepare(ctx) {
+      const assets = await store.load(ctx.run.id);
+      await store.approveAll(ctx.run.id);
+      await commitPaths(ctx.worktreePath, assets.map((a) => a.targetPath), commitMessage(assets));
+    },
+    async brief(ctx) {
+      const assets = await store.load(ctx.run.id);
+      return reviewBrief(assets, await store.rejectionFeedbacksOf(assets.map((a) => a.id)));
+    },
+  };
+}
+
+/**
+ * The `artist` Step type: the Artist draws each Asset that is still to be drawn in turn, with its Asset Checks and
+ * retries. What was tried is read from the recorded versions, so a restarted Run goes on from where it was. Done when every
+ * Asset waits for the human's verdict.
+ */
+function artistStepType(store: AssetStore): StepTypeModule {
+  return {
+    type: "artist",
+    async execute({ ctx }) {
+      const { project, worktreePath } = ctx;
+      const assets = await store.load(ctx.run.id);
+      const todo = assets.filter((a) => a.status === "pending" || a.status === "generating" || a.status === "rejected");
+      if (!todo.length) return { next: "done" };
+      // The Run may have waited in the queue: what the launch check saw can have changed on the remote since.
+      const existingTargets: string[] = [];
+      for (const a of todo) if (!a.replace && (await existsAtHead(worktreePath, a.targetPath))) existingTargets.push(a.targetPath);
+      if (existingTargets.length) {
+        await ctx.openGate(
+          "escalation",
+          `${existingTargets.join(", ")} ${existingTargets.length === 1 ? "exists" : "exist"} in the repository already, so nothing was generated.`,
+          "The file was added after this Run was started. Abandon the Run, then start it again with the Asset marked as replacing that file, or under another name.",
+        );
+        return { next: "stop" };
+      }
+      const artDirection = readArtDirection(worktreePath, project.artDirectionPath);
+      if (artDirection === null) {
+        await ctx.openGate(
+          "escalation",
+          "The Art Direction is missing, so nothing was generated.",
+          `Expected a file at ${project.artDirectionPath} in the repository, on its default branch.`,
+        );
+        return { next: "stop" };
+      }
+      const palette = parsePalette(artDirection);
+      const artReferences = parseReferences(artDirection);
+      for (const asset of todo) {
+        if (!(await drawAsset(store, ctx, asset, artDirection, artReferences, palette))) return { next: "stop" };
+      }
+      return { next: "done" };
+    },
+  };
 }
 
 /**
@@ -367,12 +415,12 @@ function launchAssetRequests(store: AssetStore, input: unknown): Pick<RunPlan, "
   };
 }
 
-/** The `assets` Workflow: the Artist draws each Asset in turn, the human judges them at the Asset Gate, then the pull request opens. */
+/** The `assets` Workflow, from its YAML: the Artist draws each Asset, the human judges them at the Asset Gate, then the pull request opens. */
 export function createAssetsWorkflow(store: AssetStore): Workflow {
   return {
   name: "assets",
   inputs: ["assets"],
-  // Frozen with each Run; the Workflow still runs as code until m3-05 moves it to the engine.
+  // Frozen with each Run, and what the engine works the Run from.
   definition: loadBuiltInWorkflow("assets"),
 
   plan(input: RunInput): RunPlan {
@@ -387,42 +435,7 @@ export function createAssetsWorkflow(store: AssetStore): Workflow {
     };
   },
 
-  async run(ctx) {
-    const { run, project, worktreePath } = ctx;
-    const assets = await store.load(run.id);
-
-    const todo = assets.filter((a) => a.status === "pending" || a.status === "generating" || a.status === "rejected");
-    if (todo.length) {
-      // The Run may have waited in the queue: what the launch check saw can have changed on the remote since.
-      const existingTargets: string[] = [];
-      for (const a of todo) if (!a.replace && (await existsAtHead(worktreePath, a.targetPath))) existingTargets.push(a.targetPath);
-      if (existingTargets.length) {
-        return ctx.openGate(
-          "escalation",
-          `${existingTargets.join(", ")} ${existingTargets.length === 1 ? "exists" : "exist"} in the repository already, so nothing was generated.`,
-          "The file was added after this Run was started. Abandon the Run, then start it again with the Asset marked as replacing that file, or under another name.",
-        );
-      }
-      const artDirection = readArtDirection(worktreePath, project.artDirectionPath);
-      if (artDirection === null) {
-        return ctx.openGate(
-          "escalation",
-          "The Art Direction is missing, so nothing was generated.",
-          `Expected a file at ${project.artDirectionPath} in the repository, on its default branch.`,
-        );
-      }
-      const palette = parsePalette(artDirection);
-      const artReferences = parseReferences(artDirection);
-      for (const asset of todo) {
-        if (!(await drawAsset(store, ctx, asset, artDirection, artReferences, palette))) return;
-      }
-    }
-
-    if ((await ctx.records.lastDecision("asset")) === "approve") return finish(store, ctx, assets);
-    if (!(await ctx.stillRunning())) return;
-    const waiting = (await store.load(run.id)).filter((a) => a.status === "waiting").length;
-    await ctx.openGate("asset", `${waiting} ${waiting === 1 ? "Asset is" : "Assets are"} waiting for your verdict.`);
-  },
+  publication: assetsPublication(store),
   };
 }
 
@@ -435,6 +448,10 @@ export function createAssetGate(store: AssetStore): GateKindModule {
     kind: "asset",
     label: "An Asset Gate",
     actions: ["judge", "abandon"],
+    async reason(ctx) {
+      const waiting = (await store.load(ctx.run.id)).filter((a) => a.status === "waiting").length;
+      return `${waiting} ${waiting === 1 ? "Asset is" : "Assets are"} waiting for your verdict.`;
+    },
     async decide(gate, { action, verdicts }) {
       if (action === "abandon") return { next: "abandon" };
       let given;
@@ -464,6 +481,7 @@ export function createAssetsExtension(pool: pg.Pool): Extension {
   return {
     workflows: [createAssetsWorkflow(store)],
     gateKinds: [createAssetGate(store)],
+    stepTypes: [artistStepType(store)],
     async detail(runId, gateIds) {
       const assets = await store.load(runId);
       const verdicts = await store.gateVerdicts(gateIds);

@@ -1,5 +1,6 @@
 import type pg from "pg";
 import { InvalidInputError } from "./errors.js";
+import type { WorkflowContext } from "./workflow.js";
 import type { Gate, GateAction, GateKind, Verdict } from "./types.js";
 
 /** What the human gave at a Gate; each kind reads the part that concerns it. */
@@ -32,7 +33,7 @@ export interface GateKindModule {
   /** What the human can do at it. */
   actions: GateAction[];
   /** Why a Gate Step of this kind opens it, as the human reads it. */
-  reason?: string;
+  reason?: string | ((ctx: WorkflowContext) => Promise<string>);
   /**
    * Validates a decision the Gate offers (the core already refused the others) and says where the Run goes. Throws an
    * InvalidInputError for a decision that does not fit, such as a rejection without Feedback.

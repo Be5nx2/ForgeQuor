@@ -12,7 +12,7 @@ import { builtInExtensions } from "./builtin.js";
 import { AssetNotFoundError, GateError, InvalidInputError, RunNotFoundError, RunStateError } from "./errors.js";
 import type { Extension } from "./extension.js";
 import { escalationGate, finalGate, refusal, type GateKindModule, type GateOutcome } from "./gates.js";
-import type { AgentSeat, RunInput, Workflow, WorkflowContext } from "./workflow.js";
+import type { AgentSeat, Publication, RunInput, Workflow, WorkflowContext } from "./workflow.js";
 import type { CodeHost } from "../codehost/codehost.js";
 import { parseDefaultSize, parseReferences } from "./art-direction.js";
 import type {
@@ -235,6 +235,8 @@ export function createForge(deps: ForgeDeps): Forge {
   /** The Workflows a Run can follow, by name. */
   const extensions = deps.extensions ?? builtInExtensions(pool);
   const workflows = new Map<string, Workflow>([developerWorkflow, ...extensions.flatMap((e) => e.workflows)].map((w) => [w.name, w]));
+  /** How each Workflow's pull request is made, when it is not the default. */
+  const publications = new Map<string, Publication>([...workflows.values()].flatMap((w) => (w.publication ? [[w.name, w.publication] as const] : [])));
   /** The Gate kinds, by kind: each decides its own Gates. */
   const gateKinds = new Map<GateKind, GateKindModule>([finalGate, escalationGate, ...extensions.flatMap((e) => e.gateKinds)].map((k) => [k.kind, k]));
   const gateOf = (r: Record<string, any>): Gate => toGate(r, gateKinds.get(r.kind)?.actions ?? []);
@@ -242,7 +244,7 @@ export function createForge(deps: ForgeDeps): Forge {
   const agentModules = new Map<string, AgentModule>([developerAgent, ...extensions.flatMap((e) => e.agents ?? [])].map((a) => [a.name, a]));
   /** What the engine runs, by Step type. */
   const stepTypes = new Map<StepTypeModule["type"], StepTypeModule>(
-    [agentStepType(agentModules), checksStepType, publishStepType, gateStepType(gateKinds), ...extensions.flatMap((e) => e.stepTypes ?? [])].map((t) => [t.type, t]),
+    [agentStepType(agentModules), checksStepType, publishStepType(publications), gateStepType(gateKinds), ...extensions.flatMap((e) => e.stepTypes ?? [])].map((t) => [t.type, t]),
   );
   /** Each Agent's Runner: the Developer works through Claude Code, the Artist through Codex. */
   const agents: { developer: AgentSeat; artist?: AgentSeat } = {
@@ -473,10 +475,10 @@ export function createForge(deps: ForgeDeps): Forge {
     await promote(Number(rows[0].project_id)).catch((e) => console.error(`Run ${runId}: could not start the next Queued Run:`, e));
   }
 
-  /** The Run's Steps in Workflow order with where each stands in the Run's current Iteration; none for a Workflow that runs as code. */
+  /** The Run's Steps in Workflow order with where each stands in the Run's current Iteration. */
   async function stepsOf(run: Run): Promise<StepState[]> {
     const flow = workflows.get(run.workflow);
-    if (!flow || flow.run) return [];
+    if (!flow) return [];
     const { rows: frozen } = await pool.query("SELECT definition FROM runs WHERE id = $1", [run.id]);
     const definition: WorkflowDefinition = frozen[0]?.definition ?? flow.definition;
     const { rows } = await pool.query("SELECT step, status, attempts FROM step_states WHERE run_id = $1 AND iteration = $2", [run.id, run.iteration]);
@@ -559,7 +561,7 @@ export function createForge(deps: ForgeDeps): Forge {
         approve: () => approveRun(run.id),
         stillRunning: () => stillRunning(run.id),
       };
-      await (workflow.run ? workflow.run(context) : runEngine(context, definition, stepTypes));
+      await runEngine(context, definition, stepTypes);
     } catch (e: any) {
       // If even the Escalation cannot be recorded (database down), the Run stays Running and restart recovery picks it up.
       await openGate(run.id, "escalation", "The Run could not continue.", String(e?.message ?? e)).catch((err) =>
