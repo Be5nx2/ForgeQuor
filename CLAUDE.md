@@ -29,9 +29,9 @@ After cloning or changing skills, run `scripts/link-skills.sh` (generated folder
 | Product / alignment | `/grill-me`, `/grill-with-docs`, `/wait-what` |
 | Spec writer | `/to-spec` |
 | Project manager | `/to-tickets`, `/triage`, `/wayfinder` |
-| Architect | forgequor: `/codebase-architect`, `/improve-codebase-architecture`, `codebase-design`; shared: `domain-modeling` |
-| Developer | forgequor: `/implement`, `/implement-spec`, `tdd`, `prototype` |
-| Debugger | forgequor: `diagnosing-bugs` |
+| Architect | forgequor: `/codebase-architect`, `/improve-codebase-architecture`; shared: `codebase-design`, `domain-modeling` |
+| Developer | forgequor: `/implement`, `/implement-spec`, `prototype`; shared: `tdd` |
+| Debugger | `diagnosing-bugs` |
 | Reviewer | `code-review` |
 | Release | `pr` |
 | Research / mentor | `research`, `/teach`, `/handoff`, `/retro` |
