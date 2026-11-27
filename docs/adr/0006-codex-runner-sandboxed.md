@@ -8,3 +8,4 @@ We take the safer setting wherever the tool offers one. Claude Code has no equiv
 
 - An Agent on Codex cannot touch files outside its worktree. If a future Agent on Codex needs more (installing packages, a Developer on Codex), revisit this for that Agent rather than widening it for all.
 - Codex's image tool writes a raw, much larger image under Codex's home folder; the Agent scales it down and saves the Asset in the worktree, which the sandbox allows. Forgequor validates the file at the Asset's target path, and collects the raw images by thread only as a trace for the Run Notes.
+- A read-only Step (a Reviewer on Codex) runs in Codex's `read-only` sandbox instead, so it cannot write at all, not even Run Notes: its final message is its output.
