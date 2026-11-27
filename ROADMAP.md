@@ -85,6 +85,7 @@ Codex **Runner**, **Artist**, an `assets` **Workflow** (Artist → asset **Gate*
     - Animation Strips land in the `animations` kind folder;
     - the Asset Checks expect a width of frame width × frame count;
     - the gallery shows the strip and its frame count, and the Review Brief gives it.
+    - in the gallery, an Asset's past versions are shown magnified like the current one, not only at real size, so they can be compared by eye (found in the real Feedback loop test).
 - [ ] `m2-08` **References, default size and safe replacement**: new art matches existing art, and nothing is overwritten by accident.
   - Spec: `docs/specs/m2-assets.md`
   - Blocked by: `m2-04`
