@@ -1,149 +1,37 @@
-export interface Project {
-  id: number;
-  name: string;
-  localPath: string;
-  remoteOwner: string;
-  remoteName: string;
-  defaultBranch: string;
-  checks: string[];
-  setup: string[];
-  maxConcurrentRuns: number;
-  artDirectionPath: string;
-  artFolder: string;
-}
-export type AssetKind = "sprite" | "tile" | "animation";
-export interface AssetRequest {
-  name: string;
-  kind: AssetKind;
-  description: string;
-  width: number;
-  height: number;
-  fill?: boolean;
-  /** Frames of an Animation Strip, side by side in one image. */
-  frames?: number;
-  /** Existing repository PNGs to match the style of. */
-  references?: string[];
-  /** Replaces the file already at the target path. */
-  replace?: boolean;
-}
-/** What the Run form needs about a Project's art, read from its default branch. */
-export interface ArtInfo {
-  present: boolean;
-  defaultSize: { width: number; height: number } | null;
-  references: string[];
-  images: string[];
-}
-export interface Asset extends AssetRequest {
-  id: number;
-  fill: boolean;
-  frames: number;
-  references: string[];
-  replace: boolean;
-  position: number;
-  targetPath: string;
-  status: "pending" | "generating" | "waiting" | "approved";
-  /** Colours outside the Art Direction's palette in the current version; a warning, never a failure. */
-  warnings: string[];
-  /** The versions the human saw, oldest first, each with the Feedback it got; the last is the current one. */
-  versions: AssetVersion[];
-}
-export interface AssetVersion {
-  id: number;
-  iteration: number;
-  attempt: number;
-  feedback: string | null;
-}
-export interface Verdict {
-  assetId: number;
-  action: "approve" | "reject";
-  feedback?: string;
-}
-export interface GateVerdict {
-  assetId: number;
-  verdict: "approve" | "reject";
-  feedback: string | null;
-}
-export interface CheckResult {
-  id: number;
-  iteration: number;
-  attempt: number;
-  command: string;
-  exitStatus: number | null;
-  output: string;
-}
-export interface Run {
-  id: number;
-  projectId: number;
-  workflow: string;
-  iteration: number;
-  title: string;
-  task: string;
-  trackerRef: string | null;
-  state: string;
-  branch: string | null;
-  worktreePath: string | null;
-  prNumber: number | null;
-  prUrl: string | null;
-  resumeAt: string | null;
-  createdAt: string;
-}
-export interface StepAttempt {
-  id: number;
-  iteration: number;
-  step: string;
-  attempt: number;
-  runner: string;
-  model: string | null;
-  assetId: number | null;
-  status: string;
-  startedAt: string;
-  endedAt: string | null;
-  summary: string | null;
-  error: string | null;
-  eventLog: string;
-}
-export interface Gate {
-  id: number;
-  runId: number;
-  kind: "final" | "escalation" | "asset";
-  reason: string;
-  evidence: string | null;
-  actions: GateAction[];
-  decidedAt: string | null;
-  decision: "approve" | "reject" | "abandon" | null;
-  feedback: string | null;
-  verdicts: GateVerdict[];
-}
-export type GateAction = "approve" | "reject" | "abandon" | "judge";
+// The API's shapes are the server's own (src/forge/types.ts), so the two can never drift apart. That module imports
+// nothing, and these imports are types only: no server code reaches the browser.
+import type * as Server from "../../src/forge/types";
+
+/** A server shape as it arrives over JSON: every Date is a string. */
+type Json<T> = T extends Date ? string : T extends (infer U)[] ? Json<U>[] : T extends object ? { [K in keyof T]: Json<T[K]> } : T;
+
+export type Project = Json<Server.Project>;
+export type ArtInfo = Json<Server.ArtInfo>;
+export type AssetKind = Server.AssetKind;
+export type AssetStatus = Server.AssetStatus;
+export type AssetRequest = Json<Server.AssetRequest>;
+export type Asset = Json<Server.Asset>;
+export type AssetVersion = Json<Server.AssetVersion>;
+export type AssetAttempt = Json<Server.AssetAttempt>;
+export type Verdict = Json<Server.Verdict>;
+export type GateVerdict = Json<Server.GateVerdict>;
+export type CheckResult = Json<Server.CheckResult>;
+export type RunState = Server.RunState;
+export type Run = Json<Server.Run>;
+export type StepAttempt = Json<Server.StepAttempt>;
+export type GateKind = Server.GateKind;
+export type GateAction = Server.GateAction;
+export type Gate = Json<Server.Gate>;
+export type Iteration = Json<Server.Iteration>;
+export type RunDetail = Json<Server.RunDetail>;
+export type OpenGate = Json<Server.OpenGate>;
+export type ApprovedRun = Json<Server.ApprovedRun>;
+export type RunUpdate = Json<Server.RunUpdate>;
 
 /** Records the human's decision at a Gate and returns the updated Run. */
 export function decideGate(gateId: number, action: GateAction, feedback?: string, verdicts?: Verdict[]): Promise<RunDetail> {
   return postJson(`/api/gates/${gateId}/decision`, { action, feedback, verdicts });
 }
-export interface Iteration {
-  number: number;
-  feedback: string | null;
-}
-export interface RunDetail extends Run {
-  assets: Asset[];
-  iterations: Iteration[];
-  attempts: StepAttempt[];
-  checks: CheckResult[];
-  gates: Gate[];
-}
-export interface OpenGate extends Gate {
-  runTitle: string;
-  projectName: string;
-}
-/** An Approved Run on the merge list: its pull request waits for the human's merge. */
-export interface ApprovedRun extends Run {
-  projectName: string;
-}
-
-/** A live update from the server: a Step's progress, or a Run that changed. */
-export type RunUpdate =
-  | { type: "progress"; runId: number; attemptId: number; kind: "text" | "tool" | "other"; summary: string }
-  | { type: "changed"; runId: number };
 
 /**
  * Follows live Run updates over server-sent events. `onOpen` fires on every (re)connection, so a view can reload what it

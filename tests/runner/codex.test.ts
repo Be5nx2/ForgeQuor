@@ -165,6 +165,15 @@ describe("Codex Runner", () => {
     expect(result).toEqual({ status: "failed", error: "stream closed" });
   });
 
+  it("reports a bare error event on an unfinished turn as a failure, even when it mentions a usage limit", async () => {
+    const { result } = await runStep({
+      stdout: [started, line({ type: "error", message: "You've hit your usage limit. Try again at Mar 17th, 2030 5:46 PM." })],
+      exitCode: 1,
+    });
+
+    expect(result).toEqual({ status: "failed", error: "You've hit your usage limit. Try again at Mar 17th, 2030 5:46 PM." });
+  });
+
   it("does not treat a plain rate-limit failure as an exhausted Quota", async () => {
     const { result } = await runStep({ stdout: [started, failed("429 rate limit exceeded")], exitCode: 1 });
 

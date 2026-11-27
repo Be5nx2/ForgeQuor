@@ -95,9 +95,9 @@ export function createCodexRunner(options: CodexRunnerOptions = {}): Runner {
         return QUOTA_TEXT.test(failure) ? { status: "quota_exhausted", resetsAt: retryTime(failure) } : { status: "failed", error: failure };
       }
       if (!completed) {
-        if (lastError !== null) {
-          return QUOTA_TEXT.test(lastError) ? { status: "quota_exhausted", resetsAt: retryTime(lastError) } : { status: "failed", error: lastError };
-        }
+        // Only a failed turn says the Quota ran out: a bare `error` event may be a stream or transport error, so pausing
+        // the Run on its wording would be a guess. It is a failure, which the human sees at the Escalation.
+        if (lastError !== null) return { status: "failed", error: lastError };
         const detail = outcome.stderr.trim();
         if (outcome.signal) return { status: "failed", error: `codex was killed by ${outcome.signal}${detail ? `: ${detail}` : ""}` };
         return outcome.code

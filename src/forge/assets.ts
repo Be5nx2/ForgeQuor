@@ -7,68 +7,10 @@ import { parseReferences } from "./art-direction.js";
 import { publishPullRequest } from "./publish.js";
 import { runAgentStep } from "./step.js";
 import type { RunInput, RunPlan, Workflow, WorkflowContext } from "./workflow.js";
+import type { Asset, AssetKind, AssetRequest, GateVerdict, Verdict } from "./types.js";
 import { commitPaths, existsAtHead, RUN_NOTES_DIR, slugify } from "./workspace.js";
 
-export type AssetKind = "sprite" | "tile" | "animation";
-/** Where an Asset is: not drawn yet, being drawn, drawn and waiting for the human's verdict, approved, or rejected (to be redone in the next Iteration). */
-export type AssetStatus = "pending" | "generating" | "waiting" | "approved" | "rejected";
-
-/** The human's description of one Asset to produce. */
-export interface AssetRequest {
-  name: string;
-  kind: AssetKind;
-  description: string;
-  width: number;
-  height: number;
-  /** The Asset fills its whole square, fully opaque (a ground tile). Off by default; any transparent pixel then fails the Asset Checks. */
-  fill?: boolean;
-  /** For an Animation Strip: how many frames of the chosen size sit side by side in the image. 1 for other kinds. */
-  frames?: number;
-  /** Existing repository images (PNG paths) to match the style of, besides those the Art Direction names. */
-  references?: string[];
-  /** The Asset replaces the file already at its target path. Without it, an existing file is never overwritten. */
-  replace?: boolean;
-}
-
-/** One version of an Asset that reached the human: the Artist's last passing attempt of an Iteration, and the Feedback it got. */
-export interface AssetVersion {
-  id: number;
-  iteration: number;
-  attempt: number;
-  feedback: string | null;
-}
-
-/** The human's verdict on one Asset. */
-export interface Verdict {
-  assetId: number;
-  action: "approve" | "reject";
-  /** Required, and non-empty, to reject. */
-  feedback?: string;
-}
-
-/** A recorded verdict, as the Gate it was given at shows it. */
-export interface GateVerdict {
-  assetId: number;
-  verdict: "approve" | "reject";
-  feedback: string | null;
-}
-
-export interface Asset extends AssetRequest {
-  id: number;
-  fill: boolean;
-  frames: number;
-  references: string[];
-  replace: boolean;
-  /** Order in which the Artist handles the Run's Assets, from 0. */
-  position: number;
-  /** Where the Artist writes the final Asset, relative to the Run's worktree. */
-  targetPath: string;
-  status: AssetStatus;
-  /** What the Asset Checks warned about in its current version (colours outside the palette). Warnings never fail an Asset. */
-  warnings: string[];
-  /** The versions the human saw, oldest first; the last is the current one once the Asset has been drawn. */
-  versions: AssetVersion[];
-}
+export type { Asset, AssetAttempt, AssetKind, AssetRequest, AssetStatus, AssetVersion, GateVerdict, Verdict } from "./types.js";
 
 /** An error in the verdicts the human gave. */
 export class VerdictError extends Error {}
@@ -188,13 +130,14 @@ export function toAsset(r: Record<string, any>): Asset {
     status: r.status,
     warnings: r.warnings ?? [],
     versions: [],
+    attempts: [],
   };
 }
 
 /** The versions of an Asset's Iterations that passed the Asset Checks (the last of each Iteration), with the Feedback each got. */
 const PASSING = "v.written AND jsonb_array_length(v.failures) = 0";
 
-/** Reads a Run's Assets, in order, each with the warnings of its latest version and the versions the human saw. */
+/** Reads a Run's Assets, in order, each with the warnings of its latest version, the versions the human saw and every attempt. */
 export async function loadAssets(pool: pg.Pool, runId: number): Promise<Asset[]> {
   const { rows } = await pool.query(
     `SELECT a.*, (SELECT v.warnings FROM asset_versions v WHERE v.asset_id = a.id ORDER BY v.id DESC LIMIT 1) AS warnings
@@ -214,6 +157,19 @@ export async function loadAssets(pool: pg.Pool, runId: number): Promise<Asset[]>
     // Only the last passing attempt of an Iteration is the one the human judged.
     if (asset.versions.at(-1)?.iteration === v.iteration) asset.versions.pop();
     asset.versions.push({ id: Number(v.id), iteration: v.iteration, attempt: v.attempt, feedback: v.feedback });
+  }
+  const { rows: attempts } = await pool.query(
+    "SELECT asset_id, iteration, attempt, written, failures, warnings FROM asset_versions WHERE asset_id = ANY($1) ORDER BY id",
+    [assets.map((a) => a.id)],
+  );
+  for (const v of attempts) {
+    assets.find((a) => a.id === Number(v.asset_id))!.attempts.push({
+      iteration: v.iteration,
+      attempt: v.attempt,
+      written: v.written,
+      failures: v.failures,
+      warnings: v.warnings,
+    });
   }
   return assets;
 }
@@ -265,7 +221,15 @@ export async function loadGateVerdicts(pool: pg.Pool, gateIds: number[]): Promis
   return byGate;
 }
 
-const PNG_SIGNATURE = Buffer.from("89504e470d0a1a0a", "hex");
+/** The Feedback of an Asset Gate's rejected verdicts, one `name: Feedback` line each; null when it rejected nothing. */
+export function verdictFeedback(verdicts: GateVerdict[], assets: Asset[]): string | null {
+  const lines = verdicts
+    .filter((v) => v.verdict === "reject")
+    .map((v) => `${assets.find((a) => a.id === v.assetId)?.name ?? `Asset ${v.assetId}`}: ${v.feedback}`);
+  return lines.join("\n") || null;
+}
+
+const PNG_SIGNATURE =Buffer.from("89504e470d0a1a0a", "hex");
 
 /** Where the art an Asset replaces is kept in the Run Notes, as `<asset id>.png`, relative to the worktree. */
 const REPLACED_DIR = `${RUN_NOTES_DIR}/assets/replaced`;
@@ -384,6 +348,12 @@ function reviewBrief(assets: Asset[], feedbacks: Map<number, string[]>): string 
     ...rows,
     "",
   ];
+  const warned = assets.filter((a) => a.warnings.length);
+  if (warned.length) {
+    lines.push("## Palette warnings", "", "Colours outside the Art Direction's palette, accepted by the human with the Asset.", "");
+    for (const a of warned) lines.push(...a.warnings.map((w) => `- **${a.name}**: ${w}`));
+    lines.push("");
+  }
   const redone = assets.filter((a) => feedbacks.get(a.id)?.length);
   if (redone.length) {
     lines.push("## Feedback that led to these Assets", "");
@@ -462,11 +432,14 @@ function setAsideReplaced(ctx: WorkflowContext, asset: Asset, clear: boolean): s
   return copy;
 }
 
-/** An Asset the Artist did not write at its target path gets this many attempts in all (1 try + 1 more). */
+/**
+ * The most Artist Steps one Asset can cost in one Iteration (1 try + 2 more), whatever went wrong with each: this caps
+ * the Quota a stubborn Asset can spend before the human hears of it. A Step cut short by a used-up Quota or a restart
+ * is not counted, since it produced nothing to check.
+ */
+export const MAX_ARTIST_ATTEMPTS = 3;
+/** An Artist that wrote nothing at the target path twice will not: the Run escalates without spending a third Step. */
 const MAX_UNWRITTEN_ATTEMPTS = 2;
-/** An Asset that fails the Asset Checks gets this many attempts in all (1 try + 2 extra). */
-const MAX_FAILING_ATTEMPTS = 3;
-// The two budgets are counted apart: an attempt that wrote nothing does not use up the failing one.
 
 /**
  * Has the Artist draw one Asset until it passes the Asset Checks, sending it back with the reason when it does not. What
@@ -484,25 +457,25 @@ async function drawAsset(ctx: WorkflowContext, asset: Asset, artDirection: strin
     );
     const last = versions.at(-1);
     const rejected = await rejectedBefore(ctx, asset, !versions.length);
-    // Only before the first attempt of this Iteration: later passes must not clear what the Artist just wrote.
-    const replaced = asset.replace && !rejected ? setAsideReplaced(ctx, asset, !versions.length) : undefined;
+    // Only the first attempt of the Run sets the existing art aside (and clears the target): later passes must not clear
+    // what the Artist just wrote, and an Iteration after a rejection finds the target cleared already. Every attempt of
+    // every Iteration is still shown the Replaced Art.
+    const replaced = asset.replace ? setAsideReplaced(ctx, asset, !versions.length && !rejected) : undefined;
     // What the Artist is shown: the Art Direction's references, then the Asset's own, then the art it is redoing.
     const references = [...new Set([...artReferences, ...asset.references])].filter((p) => existsSync(join(worktreePath, p)));
     const images = [...references, ...(rejected ? [rejected.imagePath] : []), ...(replaced ? [replaced] : [])].map((p) => join(worktreePath, p));
     let redo: Redo | undefined;
     if (last?.written && !last.failures.length) break;
-    if (last && !last.written) {
-      if (versions.filter((v) => !v.written).length >= MAX_UNWRITTEN_ATTEMPTS) {
-        await ctx.openGate("escalation", `The Artist wrote nothing at the target path of "${asset.name}" (${asset.targetPath}) after ${MAX_UNWRITTEN_ATTEMPTS} attempts.`, last.summary);
+    if (last) {
+      const unwritten = versions.filter((v) => !v.written).length;
+      if (versions.length >= MAX_ARTIST_ATTEMPTS || unwritten >= MAX_UNWRITTEN_ATTEMPTS) {
+        const afterAttempts = `after ${versions.length} attempts`;
+        await (last.written
+          ? ctx.openGate("escalation", `"${asset.name}" still fails the Asset Checks ${afterAttempts}.`, last.failures.join("\n"))
+          : ctx.openGate("escalation", `The Artist wrote nothing at the target path of "${asset.name}" (${asset.targetPath}) ${afterAttempts}.`, last.summary));
         return false;
       }
-      redo = { unwritten: true };
-    } else if (last) {
-      if (versions.filter((v) => v.written && v.failures.length).length >= MAX_FAILING_ATTEMPTS) {
-        await ctx.openGate("escalation", `"${asset.name}" still fails the Asset Checks after ${MAX_FAILING_ATTEMPTS} attempts.`, last.failures.join("\n"));
-        return false;
-      }
-      redo = { failures: last.failures };
+      redo = last.written ? { failures: last.failures } : { unwritten: true };
     }
 
     const { rows } = await pool.query(
