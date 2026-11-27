@@ -11,6 +11,7 @@ Milestones are specified one at a time with `/to-spec`, then split into items wi
 YAML **Workflows** with parallel **Steps**, Griller with chat, Spec Writer, Architect, solo or duo review (chosen at Run launch) with **Consolidator** (an unsettled reviewer disagreement opens a **Gate** with its recommendation), **Escalation**, configurable iteration limit (default 3), default `feature` and `bugfix` Workflows.
 
 - Spec: to write after the M3 grilling.
+- Prefactor first (M2 branch review): deepen the Workflow seam. The core imports a dozen asset helpers and `startRun` writes asset rows itself, `WorkflowContext` has ~17 members, and Step-result handling is copied in both Workflows; YAML Workflows need a seam where adding one touches no core code.
 
 ## Next
 
@@ -42,6 +43,16 @@ YAML **Workflows** with parallel **Steps**, Griller with chat, Spec Writer, Arch
 - Produce a Run's Asset Requests in parallel instead of one after the other (image generation burns Quota 3-5x faster, so sequential first).
 - Animated preview of an Animation Strip in the gallery (frames played in a loop, larger than the 4x a 64 px strip gets today), to judge the motion (real strip test, m2-07).
 - Should an Approved Run keep its Project slot until its pull request is merged? It uses no Quota any more, but holds the queue while the human has not merged (real strip test, m2-07). To grill.
+
+- M2 review follow-ups (2026-11-27), small:
+  - the `assets` Review Brief omits palette warnings (spec story 46);
+  - Gates do not record their Iteration, so an `assets` Iteration shows no Feedback in the Run detail;
+  - a read Run does not expose each attempt's Asset Check failures;
+  - Replaced Art stops being given to the Artist after the Asset's first rejection;
+  - the two retry budgets add up to 4 Artist Steps per Asset per Iteration: confirm or cap the Quota exposure;
+  - a bare Codex `error` event on an unfinished turn is read as an exhausted Quota;
+  - the UI's API types are copies of the server's and have drifted (no `rejected` Asset status); a dead "Approve all Assets" label;
+  - tests that abandon a Run by SQL instead of the Forge interface; README art path omits `animations`.
 
 ## Done
 
