@@ -51,7 +51,7 @@ import type {
   WorkflowList,
   WorkflowValidation,
 } from "./types.js";
-import { placeSkillPack, SHARED_SKILL_PACK } from "./skill-pack.js";
+import { offeredSkillPacks, placeSkillPacks, SHARED_SKILL_PACK, SKILLS_ROOT } from "./skill-pack.js";
 import { createRunWorktree, existsInBranch, inspectRepository, listInBranch, readInBranch, RegistrationError, refreshDefaultBranch, remoteHasBranch, removeRunWorktree, repositoryPath, runFoldersUnder, slugify } from "./workspace.js";
 
 export { RegistrationError, AssetNotFoundError, GateError, InvalidInputError, RunNotFoundError, RunStateError, SeatLockedError };
@@ -68,6 +68,10 @@ export interface Forge {
   setSetup(projectId: number, commands: string[]): Promise<Project>;
   /** Sets how many Runs of a Project may work at once (at least 1). Raising it starts Queued Runs that now fit. */
   setMaxConcurrentRuns(projectId: number, max: number): Promise<Project>;
+  /** The Skill Packs a Project may pick (besides `shared`, always given). */
+  offeredSkillPacks(): string[];
+  /** Replaces the Skill Packs of a Project (stored in the order offered, which is the order placed). Applies to Runs started afterwards; throws an InvalidInputError for a pack that is not offered. */
+  setSkillPacks(projectId: number, packs: string[]): Promise<Project>;
   /** Sets where a Project keeps its Art Direction document and its Assets (repository paths). Applies to Runs started afterwards; throws an InvalidInputError for a path outside the repository. */
   setArt(projectId: number, art: { artDirectionPath: string; artFolder: string }): Promise<Project>;
   /**
@@ -181,6 +185,8 @@ export interface ForgeDeps {
   skillPack?: string;
   /** How many days an Archived Run is kept before the purge deletes it. Default: 60. */
   archiveDays?: number;
+  /** Folder whose subfolders are the Skill Packs a Project may pick. Default: Forgequor's own `skills/`. */
+  skillsRoot?: string;
   /** The clock, so tests can move time. */
   now?: () => Date;
   /** The timer, so tests can move time: runs a task every so many milliseconds. Default: the real one. */
@@ -190,7 +196,7 @@ export interface ForgeDeps {
 }
 
 const COLUMNS =
-  "id, name, local_path, remote_owner, remote_name, default_branch, checks, setup, max_concurrent_runs, art_direction_path, art_folder";
+  "id, name, local_path, remote_owner, remote_name, default_branch, checks, setup, max_concurrent_runs, art_direction_path, art_folder, skill_packs";
 
 function toProject(r: Record<string, any>): Project {
   return {
@@ -205,6 +211,7 @@ function toProject(r: Record<string, any>): Project {
     maxConcurrentRuns: r.max_concurrent_runs,
     artDirectionPath: r.art_direction_path,
     artFolder: r.art_folder,
+    skillPacks: r.skill_packs,
   };
 }
 
@@ -316,6 +323,7 @@ function reviewModeOf(flow: Workflow, chosen: string | undefined): ReviewMode | 
 
 export function createForge(deps: ForgeDeps): Forge {
   const { pool } = deps;
+  const skillsRoot = deps.skillsRoot ?? SKILLS_ROOT;
   /** The Workflows a Run can follow, by name. */
   const extensions = deps.extensions ?? builtInExtensions(pool);
   const workflows = new Map<string, Workflow>([developerWorkflow, bugfixWorkflow, featureWorkflow, ...extensions.flatMap((e) => e.workflows)].map((w) => [w.name, w]));
@@ -807,6 +815,16 @@ export function createForge(deps: ForgeDeps): Forge {
     };
   }
 
+  /** The Skill Packs the Run starts with: the Project's choice read at its first start, then kept. A pack gone from disk is skipped. */
+  async function packsOfRun(runId: number, projectId: number): Promise<string[]> {
+    const { rows } = await pool.query(
+      `UPDATE runs SET skill_packs = COALESCE(skill_packs, (SELECT skill_packs FROM projects WHERE id = $2)) WHERE id = $1 RETURNING skill_packs`,
+      [runId, projectId],
+    );
+    const offered = new Set(offeredSkillPacks(skillsRoot));
+    return ((rows[0]?.skill_packs as string[] | undefined) ?? []).filter((n) => offered.has(n));
+  }
+
   /** Prepares the Run's worktree, then hands the Run to its Workflow. Any failure opens an Escalation. */
   async function work(run: Run, project: Project, stop: AbortSignal) {
     try {
@@ -822,7 +840,7 @@ export function createForge(deps: ForgeDeps): Forge {
         });
       }
       // Every start and restart: a Skill that went missing is put back.
-      await placeSkillPack(deps.skillPack ?? SHARED_SKILL_PACK, worktreePath);
+      await placeSkillPacks([deps.skillPack ?? SHARED_SKILL_PACK, ...(await packsOfRun(run.id, project.id)).map((n) => join(skillsRoot, n))], worktreePath);
       await pool.query("UPDATE runs SET branch = $2, worktree_path = $3 WHERE id = $1", [run.id, branch, worktreePath]);
       changed(run.id);
 
@@ -1004,6 +1022,17 @@ export function createForge(deps: ForgeDeps): Forge {
       await promote(projectId);
       const { rows: current } = await pool.query(`SELECT ${RUN_COLUMNS} FROM runs WHERE id = $1`, [runId]);
       return toRun(current[0]);
+    },
+
+    offeredSkillPacks: () => offeredSkillPacks(skillsRoot),
+
+    async setSkillPacks(projectId, packs) {
+      const offered = offeredSkillPacks(skillsRoot);
+      const unknown = packs.filter((p) => typeof p !== "string" || !offered.includes(p));
+      if (unknown.length) throw new InvalidInputError(`Unknown Skill Pack: ${unknown.join(", ")}. Offered: ${offered.join(", ") || "none"}.`);
+      const { rows } = await pool.query(`UPDATE projects SET skill_packs = $2 WHERE id = $1 RETURNING ${COLUMNS}`, [projectId, offered.filter((p) => packs.includes(p))]);
+      if (!rows[0]) throw new Error(`No Project ${projectId}.`);
+      return toProject(rows[0]);
     },
 
     async setMaxConcurrentRuns(projectId, max) {
