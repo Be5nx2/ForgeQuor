@@ -244,7 +244,7 @@ Griller with a **Conversation Gate** (it writes the Project's glossary and ADRs 
     - a Project's choice is stored with it and changed from its page (`PUT /api/projects/:id/skill-packs`, refusing an unknown pack);
     - at a Run's start, `shared` then each chosen pack is placed for Claude and Codex, never committed; a Project's own Skill wins, and between packs the first placed wins;
     - a change affects only Runs launched afterwards.
-- [ ] `m4-09` **Workflows page and validation endpoint**: the human sees every Workflow a Project offers, and why an invalid one is not offered.
+- [x] `m4-09` **Workflows page and validation endpoint**: the human sees every Workflow a Project offers, and why an invalid one is not offered.
   - Spec: `docs/specs/m4-comfort.md`
   - Blocked by: none
   - Acceptance:

@@ -11,7 +11,7 @@ import { architectAgent } from "./architect.js";
 import { specGate, specWriterAgent } from "./spec.js";
 import { runEngine, type StepTypeModule } from "./engine.js";
 import { agentStepType, catalogueOf, checksStepType, gateStepType, publishStepType, type AgentModule } from "./step-types.js";
-import { describeInvalid, resolveWorkflows, type ResolvedWorkflow } from "./project-workflows.js";
+import { describeInvalid, resolveWorkflows, validateWorkflowText, type ResolvedWorkflow, type WorkflowKit } from "./project-workflows.js";
 import { DEFAULT_REVIEW_MODE, REVIEW_MODES, type WorkflowDefinition, type WorkflowInput } from "./workflow-definition.js";
 import { publishPullRequest } from "./publish.js";
 import { realEvery, type Every } from "./clock.js";
@@ -47,6 +47,7 @@ import type {
   StepState,
   Verdict,
   WorkflowList,
+  WorkflowValidation,
 } from "./types.js";
 import { placeSkillPack, SHARED_SKILL_PACK } from "./skill-pack.js";
 import { createRunWorktree, existsInBranch, inspectRepository, listInBranch, readInBranch, RegistrationError, refreshDefaultBranch, repositoryPath, slugify } from "./workspace.js";
@@ -79,6 +80,11 @@ export interface Forge {
    * listed, with `problem` saying why.
    */
   listWorkflows(projectId: number): Promise<WorkflowList>;
+  /**
+   * Whether YAML text is a Workflow this Forgequor can launch, with every error found (empty when valid): the same
+   * check as launch, stored nowhere. Given a Project, refuses one the Forge core does not know.
+   */
+  validateWorkflow(yaml: string, projectId?: number): Promise<WorkflowValidation>;
   /**
    * Creates a Run of the given Workflow (`developer` when omitted; an unknown name or an invalid Project Workflow is refused, the Project's Workflows being read from its freshly fetched default branch) and starts it in the background; follow it with `getRun`. A `developer` Run takes a task, an `assets` Run
    * its Asset Requests; the input is refused with an error saying what is wrong before anything starts. A Project already at its concurrent Runs
@@ -666,12 +672,17 @@ export function createForge(deps: ForgeDeps): Forge {
 
   /** The Workflows the Project can launch, its own read from `branch` (its default branch, fetched now when not given; null: none is read). */
   async function projectWorkflows(project: Project, branch?: string | null): Promise<ResolvedWorkflow[]> {
-    return resolveWorkflows(project.localPath, branch === undefined ? await freshDefaultBranch(project.id, project.localPath) : branch, {
+    return resolveWorkflows(project.localPath, branch === undefined ? await freshDefaultBranch(project.id, project.localPath) : branch, workflowKit());
+  }
+
+  /** What this Forgequor has code for, which a Workflow can only compose. */
+  function workflowKit(): WorkflowKit {
+    return {
       builtIn: [...workflows.values()],
       catalogue: catalogueOf(agentModules.values(), conversationAgents.values()),
       stepTypes: new Set(stepTypes.keys()),
       gateKinds: new Set(gateKinds.keys()),
-    });
+    };
   }
 
   /** Prepares the Run's worktree, then hands the Run to its Workflow. Any failure opens an Escalation. */
@@ -813,9 +824,17 @@ export function createForge(deps: ForgeDeps): Forge {
         const resolved = await projectWorkflows(project);
         return { workflows: resolved.map((r) => r.option), problem: null };
       } catch (e: any) {
-        const options = [...workflows.values()].map((w) => ({ name: w.name, description: w.definition.description, inputs: [...w.inputs], ...(w.definition.review ? { reviewDefault: w.definition.review } : {}), origin: "built-in" as const, errors: [], file: null }));
-        return { workflows: options, problem: `The Project's own Workflows could not be read: ${e?.message ?? e}` };
+        const builtIn = await projectWorkflows(project, null);
+        return { workflows: builtIn.map((r) => r.option), problem: `The Project's own Workflows could not be read: ${e?.message ?? e}` };
       }
+    },
+
+    async validateWorkflow(yaml, projectId) {
+      if (projectId !== undefined) {
+        const { rows } = await pool.query("SELECT 1 FROM projects WHERE id = $1", [projectId]);
+        if (!rows[0]) throw new Error(`No Project ${projectId}.`);
+      }
+      return validateWorkflowText(yaml, workflowKit());
     },
 
     async startRun({ projectId, trackerRef, workflow = "developer", ...input }) {

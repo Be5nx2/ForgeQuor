@@ -9,6 +9,8 @@ const form = ref({ projectId: "", workflow: "developer", task: "", title: "", tr
 /** The chosen Project's Workflows (built-in and its own), and why its own could not be read. */
 const workflows = ref<WorkflowOption[]>([]);
 const workflowsProblem = ref("");
+/** How many of the Project's Workflows are invalid, so not offered: the Workflows tab says why. */
+const invalidWorkflows = ref(0);
 /** True while the chosen Project's Workflows are being fetched (the remote is read, which takes a few seconds). */
 const workflowsLoading = ref(false);
 const chosen = computed(() => workflows.value.find((w) => w.name === form.value.workflow));
@@ -110,10 +112,11 @@ watch(
     // A quicker switch to another Project already moved on: drop this answer.
     if (form.value.projectId !== id) return;
     workflowsLoading.value = false;
-    workflows.value = list.workflows;
+    workflows.value = list.workflows.filter((w) => !w.errors.length);
+    invalidWorkflows.value = list.workflows.length - workflows.value.length;
     workflowsProblem.value = list.problem ?? "";
     // The Workflow picked for the previous Project may not exist here: fall back to the first one.
-    if (!list.workflows.some((w) => w.name === form.value.workflow)) form.value.workflow = list.workflows[0]?.name ?? "developer";
+    if (!workflows.value.some((w) => w.name === form.value.workflow)) form.value.workflow = workflows.value[0]?.name ?? "developer";
     art.value = fetched;
     // References are the previous Project's images; the preset size is the new Project's.
     assets.value = assets.value.map((a) => (a.name || a.description ? { ...a, references: [] } : newAsset()));
@@ -133,15 +136,10 @@ watch(
     </select>
     <p v-if="workflowsLoading" class="muted" role="status">Loading Workflows…</p>
     <select v-else v-model="form.workflow" aria-label="Workflow">
-      <option v-for="w in workflows" :key="w.name" :value="w.name">{{ w.name }} ({{ originLabel(w) }}){{ w.errors.length ? " - invalid" : w.description ? `: ${w.description}` : "" }}</option>
+      <option v-for="w in workflows" :key="w.name" :value="w.name">{{ w.name }} ({{ originLabel(w) }}){{ w.description ? `: ${w.description}` : "" }}</option>
     </select>
     <p v-if="workflowsProblem" class="error">{{ workflowsProblem }}</p>
-    <div v-if="chosen && chosen.errors.length" class="error" role="alert">
-      <strong>{{ chosen.file }} is invalid and cannot be launched:</strong>
-      <ul>
-        <li v-for="(e, i) in chosen.errors" :key="i">{{ e.line ? `line ${e.line}: ` : e.path ? `${e.path}: ` : "" }}{{ e.message }}</li>
-      </ul>
-    </div>
+    <p v-if="invalidWorkflows" class="muted">{{ invalidWorkflows }} invalid Workflow{{ invalidWorkflows > 1 ? "s are" : " is" }} not offered: see the Workflows tab.</p>
     <textarea v-if="asks('task')" v-model="form.task" rows="4" placeholder="Task or bug description" aria-label="Task" required />
     <fieldset v-if="asks('review')" class="review-choice">
       <legend>Review</legend>
