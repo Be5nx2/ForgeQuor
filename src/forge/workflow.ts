@@ -1,7 +1,8 @@
+import type pg from "pg";
 import type { Runner } from "../runner/runner.js";
-import type { AssetRequest } from "./assets.js";
-import type { GateKind, Project, Run, RunUpdate } from "./forge.js";
+import type { AssetRequest, GateKind, Project, Run, RunUpdate } from "./types.js";
 import type { RunRecords } from "./run-records.js";
+import type { WorkflowInput } from "./workflow-definition.js";
 
 /** The Runner an Agent works through, and the model it is set to. */
 export interface AgentSeat {
@@ -19,11 +20,24 @@ export interface RunInput {
   assets?: AssetRequest[];
 }
 
-/** What a Workflow makes of a Run's input: the Run's task and title, and its validated Asset Requests (none for most). */
+/** The repository a Run is being launched against, as its launch checks see it. */
+export interface LaunchRepository {
+  project: Project;
+  /** Whether a repository path exists on the Project's default branch, freshly fetched from the remote (fetched once, on first use). */
+  exists(path: string): Promise<boolean>;
+}
+
+/**
+ * What a Workflow makes of a Run's input: the Run's task and title, and what the Step types that use an input do with it
+ * at launch. The core never reads an input itself.
+ */
 export interface RunPlan {
   task: string;
   title: string;
-  assets: AssetRequest[];
+  /** Refuses the launch (by throwing a clear error) when what the input leans on is not right in the repository. Runs before anything is stored. */
+  check?(repo: LaunchRepository): Promise<void>;
+  /** Stores the input with the new Run, inside the core's launch transaction. */
+  store?(client: pg.PoolClient, runId: number, project: Project): Promise<void>;
 }
 
 /**
@@ -64,12 +78,14 @@ export interface WorkflowContext {
 }
 
 /**
- * A named sequence of Steps. `plan` checks what the human gave and says what the Run is called; it throws a clear error
- * when the input is no good. `run` works the Run until it waits at a Gate, pauses or is abandoned, starting over from
+ * A named sequence of Steps. `plan` checks what the human gave (the Step types that use an input validate it) and says
+ * what the Run is called; it throws a clear error when the input is no good. `run` works the Run until it waits at a Gate, pauses or is abandoned, starting over from
  * what is recorded when the Run was worked on before. An error it throws opens an Escalation.
  */
 export interface Workflow {
   name: string;
+  /** The inputs the Workflow takes at launch. */
+  inputs: readonly WorkflowInput[];
   plan(input: RunInput): RunPlan;
   run(ctx: WorkflowContext): Promise<void>;
 }

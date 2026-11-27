@@ -1,20 +1,20 @@
-import { copyFileSync, existsSync, mkdirSync, rmSync, openSync, readFileSync, readSync, closeSync, realpathSync, statSync } from "node:fs";
-import { dirname, join, resolve, sep } from "node:path";
-import type pg from "pg";
+import { copyFileSync, existsSync, mkdirSync, rmSync, readFileSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { checkAssetFile, parsePalette, type AssetCheckResult } from "./asset-checks.js";
+import { replacedCopyPath, servableAssetFile } from "./asset-files.js";
+import { createAssetStore, VerdictError, verdictFeedback, type AssetStore } from "./asset-store.js";
 import { parseReferences } from "./art-direction.js";
+import { AssetNotFoundError, InvalidInputError } from "./errors.js";
+import type { GateKindModule } from "./gates.js";
 import { runAgentStep } from "./step.js";
 import type { RunInput, RunPlan, Workflow, WorkflowContext } from "./workflow.js";
-import type { Asset, AssetKind, AssetRequest, GateVerdict, Verdict } from "./types.js";
-import { commitPaths, existsAtHead, RUN_NOTES_DIR, slugify } from "./workspace.js";
+import type { Asset, AssetKind, AssetRequest } from "./types.js";
+import { commitPaths, existsAtHead, repositoryPath, RUN_NOTES_DIR, slugify } from "./workspace.js";
+import type { Extension, RunDetailPart } from "./extension.js";
+import type pg from "pg";
 
 export type { Asset, AssetAttempt, AssetKind, AssetRequest, AssetStatus, AssetVersion, GateVerdict, Verdict } from "./types.js";
-
-/** An error in the verdicts the human gave. */
-export class VerdictError extends Error {}
-
-/** No such Asset in that Run, or nothing servable recorded for it. */
-export class AssetNotFoundError extends Error {}
+export { AssetNotFoundError, VerdictError, replacedCopyPath, servableAssetFile };
 
 /** The kind subfolder of the art folder each kind of Asset goes to. */
 const KIND_FOLDERS: Record<AssetKind, string> = { sprite: "sprites", tile: "tiles", animation: "animations" };
@@ -26,15 +26,6 @@ const imageSize = (a: { width: number; height: number; frames?: number }) => `${
 /** The size as the human reads it: 16x16, or 16x16 × 4 frames for a strip. */
 const describeSize = (a: { width: number; height: number; kind: AssetKind; frames?: number }) =>
   a.kind === "animation" ? `${size(a)} × ${a.frames} frames` : size(a);
-
-/** A repository-relative path, tidied: no leading or trailing slash. Throws when it is empty, absolute or climbs out of the repository. */
-export function repositoryPath(value: string): string {
-  const path = value.trim().replace(/\/+$/, "");
-  if (!path || path.startsWith("/") || path.includes("\\") || path.split("/").some((part) => part === ".." || part === "." || part === "")) {
-    throw new Error(`"${value.trim()}" is not a path inside the repository.`);
-  }
-  return path;
-}
 
 /** The art folder, then the kind subfolder, then the request name in kebab-case with `.png`. */
 export function assetTargetPath(artFolder: string, kind: AssetKind, name: string): string {
@@ -108,150 +99,6 @@ export async function checkAgainstRepository(assets: AssetRequest[], artFolder: 
         throw new Error(`Asset Request ${i + 1} ("${a.name}"): the reference ${reference} does not exist in the repository's default branch.`);
       }
     }
-  }
-}
-
-export function toAsset(r: Record<string, any>): Asset {
-  return {
-    id: Number(r.id),
-    position: r.position,
-    name: r.name,
-    kind: r.kind,
-    description: r.description,
-    width: r.width,
-    height: r.height,
-    fill: r.fill,
-    frames: r.frames,
-    references: r.style_references,
-    replace: r.replace,
-    targetPath: r.target_path,
-    status: r.status,
-    warnings: r.warnings ?? [],
-    versions: [],
-    attempts: [],
-  };
-}
-
-/** The versions of an Asset's Iterations that passed the Asset Checks (the last of each Iteration), with the Feedback each got. */
-const PASSING = "v.written AND jsonb_array_length(v.failures) = 0";
-
-/** Reads a Run's Assets, in order, each with the warnings of its latest version, the versions the human saw and every attempt. */
-export async function loadAssets(pool: pg.Pool, runId: number): Promise<Asset[]> {
-  const { rows } = await pool.query(
-    `SELECT a.*, (SELECT v.warnings FROM asset_versions v WHERE v.asset_id = a.id ORDER BY v.id DESC LIMIT 1) AS warnings
-     FROM assets a WHERE a.run_id = $1 ORDER BY a.position`,
-    [runId],
-  );
-  const assets: Asset[] = rows.map(toAsset);
-  if (!assets.length) return assets;
-  const { rows: versions } = await pool.query(
-    `SELECT v.id, v.asset_id, v.iteration, v.attempt, d.feedback
-     FROM asset_versions v LEFT JOIN asset_verdicts d ON d.version_id = v.id
-     WHERE v.asset_id = ANY($1) AND ${PASSING} AND v.image_path IS NOT NULL ORDER BY v.id`,
-    [assets.map((a) => a.id)],
-  );
-  for (const v of versions) {
-    const asset = assets.find((a) => a.id === Number(v.asset_id))!;
-    // Only the last passing attempt of an Iteration is the one the human judged.
-    if (asset.versions.at(-1)?.iteration === v.iteration) asset.versions.pop();
-    asset.versions.push({ id: Number(v.id), iteration: v.iteration, attempt: v.attempt, feedback: v.feedback });
-  }
-  const { rows: attempts } = await pool.query(
-    "SELECT asset_id, iteration, attempt, written, failures, warnings FROM asset_versions WHERE asset_id = ANY($1) ORDER BY id",
-    [assets.map((a) => a.id)],
-  );
-  for (const v of attempts) {
-    assets.find((a) => a.id === Number(v.asset_id))!.attempts.push({
-      iteration: v.iteration,
-      attempt: v.attempt,
-      written: v.written,
-      failures: v.failures,
-      warnings: v.warnings,
-    });
-  }
-  return assets;
-}
-
-/**
- * Checks the verdicts the human gave at an Asset Gate against the Assets waiting for one: a verdict for each of them,
- * all at once, none twice, a Feedback for each rejection. Throws a VerdictError saying what is wrong.
- */
-export async function checkVerdicts(pool: pg.Pool, runId: number, given: unknown): Promise<Verdict[]> {
-  if (!Array.isArray(given)) throw new VerdictError("An Asset Gate needs a verdict for each Asset waiting for one.");
-  const { rows } = await pool.query("SELECT id FROM assets WHERE run_id = $1 AND status = 'waiting'", [runId]);
-  const waiting = new Set<number>(rows.map((r) => Number(r.id)));
-  const seen = new Set<number>();
-  for (const v of given) {
-    if (typeof v !== "object" || v === null) throw new VerdictError("Each verdict names an Asset and approves or rejects it.");
-    if (seen.has(v?.assetId)) throw new VerdictError(`Asset ${v.assetId} has more than one verdict: give each Asset's verdict once.`);
-    seen.add(v?.assetId);
-    if (!waiting.has(v?.assetId)) throw new VerdictError(`Asset ${v?.assetId} is not waiting for a verdict at this Gate.`);
-  }
-  if (seen.size !== waiting.size) throw new VerdictError("Give a verdict for every Asset waiting for one, all at once.");
-  return given.map((v) => {
-    if (v.action !== "approve" && v.action !== "reject") throw new VerdictError("A verdict is approve or reject.");
-    const feedback = typeof v.feedback === "string" ? v.feedback.trim() : "";
-    if (v.action === "reject" && !feedback) throw new VerdictError("Rejecting an Asset needs a Feedback saying what to change.");
-    return { assetId: v.assetId, action: v.action, ...(v.action === "reject" ? { feedback } : {}) };
-  });
-}
-
-/** Records the verdicts of a decided Asset Gate and moves each Asset to approved or rejected. Run inside the decision's transaction. */
-export async function recordVerdicts(client: pg.PoolClient, gateId: number, verdicts: Verdict[]) {
-  for (const v of verdicts) {
-    await client.query(
-      `INSERT INTO asset_verdicts (gate_id, asset_id, version_id, verdict, feedback)
-       VALUES ($1, $2, (SELECT v.id FROM asset_versions v WHERE v.asset_id = $2 AND ${PASSING} ORDER BY v.id DESC LIMIT 1), $3, $4)`,
-      [gateId, v.assetId, v.action, v.feedback ?? null],
-    );
-    await client.query("UPDATE assets SET status = $2 WHERE id = $1", [v.assetId, v.action === "approve" ? "approved" : "rejected"]);
-  }
-}
-
-export async function loadGateVerdicts(pool: pg.Pool, gateIds: number[]): Promise<Map<number, GateVerdict[]>> {
-  const { rows } = await pool.query("SELECT * FROM asset_verdicts WHERE gate_id = ANY($1) ORDER BY id", [gateIds]);
-  const byGate = new Map<number, GateVerdict[]>();
-  for (const r of rows) {
-    const list = byGate.get(Number(r.gate_id)) ?? [];
-    list.push({ assetId: Number(r.asset_id), verdict: r.verdict, feedback: r.feedback });
-    byGate.set(Number(r.gate_id), list);
-  }
-  return byGate;
-}
-
-/** The Feedback of an Asset Gate's rejected verdicts, one `name: Feedback` line each; null when it rejected nothing. */
-export function verdictFeedback(verdicts: GateVerdict[], assets: Asset[]): string | null {
-  const lines = verdicts
-    .filter((v) => v.verdict === "reject")
-    .map((v) => `${assets.find((a) => a.id === v.assetId)?.name ?? `Asset ${v.assetId}`}: ${v.feedback}`);
-  return lines.join("\n") || null;
-}
-
-const PNG_SIGNATURE =Buffer.from("89504e470d0a1a0a", "hex");
-
-/** Where the art an Asset replaces is kept in the Run Notes, as `<asset id>.png`, relative to the worktree. */
-const REPLACED_DIR = `${RUN_NOTES_DIR}/assets/replaced`;
-export const replacedCopyPath = (assetId: number) => `${REPLACED_DIR}/${assetId}.png`;
-
-/**
- * The file of an Asset's current version, only when it is a PNG that really lives inside the worktree (a link leading
- * out of it does not count). Null otherwise.
- */
-export function servableAssetFile(worktreePath: string, targetPath: string): string | null {
-  try {
-    const root = realpathSync(worktreePath);
-    const real = realpathSync(resolve(root, targetPath));
-    if (!real.startsWith(root + sep) || !statSync(real).isFile()) return null;
-    const head = Buffer.alloc(PNG_SIGNATURE.length);
-    const fd = openSync(real, "r");
-    try {
-      readSync(fd, head, 0, head.length, 0);
-    } finally {
-      closeSync(fd);
-    }
-    return head.equals(PNG_SIGNATURE) ? real : null;
-  } catch {
-    return null;
   }
 }
 
@@ -367,7 +214,7 @@ function reviewBrief(assets: Asset[], feedbacks: Map<number, string[]>): string 
  * Records one Artist attempt as a version of the Asset: the Runner's raw images, kept in the Run Notes as a trace, and
  * what the Asset Checks found.
  */
-async function recordVersion(pool: pg.Pool, ctx: WorkflowContext, asset: Asset, attempt: number, files: string[], summary: string, check: AssetCheckResult) {
+async function recordVersion(store: AssetStore, ctx: WorkflowContext, asset: Asset, attempt: number, files: string[], summary: string, check: AssetCheckResult) {
   const dir = join(ctx.worktreePath, RUN_NOTES_DIR, "assets");
   const kept: string[] = [];
   mkdirSync(dir, { recursive: true });
@@ -388,11 +235,17 @@ async function recordVersion(pool: pg.Pool, ctx: WorkflowContext, asset: Asset, 
     mkdirSync(join(ctx.worktreePath, RUN_NOTES_DIR, "assets", "versions"), { recursive: true });
     copyFileSync(real, join(ctx.worktreePath, imagePath));
   }
-  await pool.query(
-    `INSERT INTO asset_versions (asset_id, iteration, attempt, raw_images, written, failures, warnings, summary, image_path)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-    [asset.id, ctx.run.iteration, attempt, JSON.stringify(kept), check.written, JSON.stringify(check.failures), JSON.stringify(check.warnings), summary, imagePath],
-  );
+  await store.addVersion({
+    assetId: asset.id,
+    iteration: ctx.run.iteration,
+    attempt,
+    rawImages: kept,
+    written: check.written,
+    failures: check.failures,
+    warnings: check.warnings,
+    summary,
+    imagePath,
+  });
 }
 
 /**
@@ -400,16 +253,11 @@ async function recordVersion(pool: pg.Pool, ctx: WorkflowContext, asset: Asset, 
  * Asset was never rejected. When the Artist is about to start over (`starting`), the rejected file is cleared from the
  * target path, so that a missing file means nothing was written this time.
  */
-async function rejectedBefore(pool: pg.Pool, ctx: WorkflowContext, asset: Asset, starting: boolean): Promise<Rejected | undefined> {
-  const { rows: earlier } = await pool.query(
-    `SELECT v.image_path FROM asset_versions v WHERE v.asset_id = $1 AND v.iteration < $2 AND ${PASSING} AND v.image_path IS NOT NULL
-     ORDER BY v.id DESC LIMIT 1`,
-    [asset.id, ctx.run.iteration],
-  );
-  if (!earlier[0]) return undefined;
+async function rejectedBefore(store: AssetStore, ctx: WorkflowContext, asset: Asset, starting: boolean): Promise<Rejected | undefined> {
+  const imagePath = await store.earlierPassingImage(asset.id, ctx.run.iteration);
+  if (!imagePath) return undefined;
   if (starting) rmSync(join(ctx.worktreePath, asset.targetPath), { force: true });
-  const { rows } = await pool.query("SELECT feedback FROM asset_verdicts WHERE asset_id = $1 AND verdict = 'reject' ORDER BY id", [asset.id]);
-  return { imagePath: earlier[0].image_path, feedbacks: rows.map((r) => r.feedback) };
+  return { imagePath, feedbacks: await store.rejectionFeedbacks(asset.id) };
 }
 
 /**
@@ -444,17 +292,14 @@ const MAX_UNWRITTEN_ATTEMPTS = 2;
  * was tried is read from the recorded versions, so a restarted Run goes on from there. False when the Run cannot go on
  * (it paused, opened an Escalation, or was abandoned).
  */
-async function drawAsset(pool: pg.Pool, ctx: WorkflowContext, asset: Asset, artDirection: string, artReferences: string[], palette: string[] | null): Promise<boolean> {
+async function drawAsset(store: AssetStore, ctx: WorkflowContext, asset: Asset, artDirection: string, artReferences: string[], palette: string[] | null): Promise<boolean> {
   const { run, project, worktreePath } = ctx;
   const seat = ctx.agents.artist;
   if (!seat) throw new Error("Forgequor has no Runner for the Artist.");
   for (;;) {
-    const { rows: versions } = await pool.query(
-      "SELECT written, failures, summary FROM asset_versions WHERE asset_id = $1 AND iteration = $2 ORDER BY id",
-      [asset.id, run.iteration],
-    );
+    const versions = await store.attemptsIn(asset.id, run.iteration);
     const last = versions.at(-1);
-    const rejected = await rejectedBefore(pool, ctx, asset, !versions.length);
+    const rejected = await rejectedBefore(store, ctx, asset, !versions.length);
     // Only the first attempt of the Run sets the existing art aside (and clears the target): later passes must not clear
     // what the Artist just wrote, and an Iteration after a rejection finds the target cleared already. Every attempt of
     // every Iteration is still shown the Replaced Art.
@@ -476,12 +321,8 @@ async function drawAsset(pool: pg.Pool, ctx: WorkflowContext, asset: Asset, artD
       redo = last.written ? { failures: last.failures } : { unwritten: true };
     }
 
-    const { rows } = await pool.query(
-      "SELECT coalesce(max(attempt), 0) + 1 AS attempt FROM step_attempts WHERE run_id = $1 AND iteration = $2 AND asset_id = $3",
-      [run.id, run.iteration, asset.id],
-    );
-    const attempt: number = rows[0].attempt;
-    await pool.query("UPDATE assets SET status = 'generating' WHERE id = $1", [asset.id]);
+    const attempt = await store.nextStepAttempt(run.id, run.iteration, asset.id);
+    await store.setStatus(asset.id, "generating");
     ctx.changed();
 
     const done = await runAgentStep(ctx, seat, {
@@ -493,49 +334,59 @@ async function drawAsset(pool: pg.Pool, ctx: WorkflowContext, asset: Asset, artD
       images,
     });
     if (!done) return false;
-    await recordVersion(pool, ctx, asset, attempt, done.files ?? [], done.summary, checkAssetFile(worktreePath, asset, palette));
+    await recordVersion(store, ctx, asset, attempt, done.files ?? [], done.summary, checkAssetFile(worktreePath, asset, palette));
   }
-  await pool.query("UPDATE assets SET status = 'waiting' WHERE id = $1", [asset.id]);
+  await store.setStatus(asset.id, "waiting");
   ctx.changed();
   return true;
 }
 
 /** The human approved the Asset Gate: commit the Assets, open the pull request with Forgequor's own Review Brief, approve the Run. */
-async function finish(pool: pg.Pool, ctx: WorkflowContext, assets: Asset[]) {
-  const { run, worktreePath } = ctx;
-  await pool.query("UPDATE assets SET status = 'approved' WHERE run_id = $1", [run.id]);
+async function finish(store: AssetStore, ctx: WorkflowContext, assets: Asset[]) {
+  const { worktreePath, run } = ctx;
+  await store.approveAll(run.id);
   await commitPaths(worktreePath, assets.map((a) => a.targetPath), commitMessage(assets));
-  const { rows } = await pool.query(
-    "SELECT asset_id, feedback FROM asset_verdicts WHERE verdict = 'reject' AND asset_id = ANY($1) ORDER BY id",
-    [assets.map((a) => a.id)],
-  );
-  const feedbacks = new Map<number, string[]>();
-  for (const r of rows) feedbacks.set(Number(r.asset_id), [...(feedbacks.get(Number(r.asset_id)) ?? []), r.feedback]);
+  const feedbacks = await store.rejectionFeedbacksOf(assets.map((a) => a.id));
   const pr = await ctx.publishPullRequest(() => reviewBrief(assets, feedbacks));
   if (!pr) return;
   await ctx.approve();
 }
 
+/**
+ * The `artist` Step type's launch input: the Asset Requests. Validated when the Run is launched and stored with it, so
+ * the Run is refused before any Quota is spent.
+ */
+function launchAssetRequests(store: AssetStore, input: unknown): Pick<RunPlan, "check" | "store"> & { requests: AssetRequest[] } {
+  const requests = validateAssetRequests(input);
+  return {
+    requests,
+    // What the requests would overwrite or lean on must be right on the default branch as it is on the remote now.
+    check: ({ project, exists }) => checkAgainstRepository(requests, project.artFolder, exists),
+    store: (client, runId, project) => store.insertRequests(client, runId, requests, (a) => assetTargetPath(project.artFolder, a.kind, a.name)),
+  };
+}
+
 /** The `assets` Workflow: the Artist draws each Asset in turn, the human judges them at the Asset Gate, then the pull request opens. */
-export function createAssetsWorkflow(pool: pg.Pool): Workflow {
+export function createAssetsWorkflow(store: AssetStore): Workflow {
   return {
   name: "assets",
+  inputs: ["assets"],
 
   plan(input: RunInput): RunPlan {
-    const assets = validateAssetRequests(input.assets);
+    const { requests: assets, ...launch } = launchAssetRequests(store, input.assets);
     const lines = assets.map((a) => `- ${a.name}: ${a.kind} ${describeSize(a)}. ${a.description}`);
     const names = assets.map((a) => a.name).join(", ");
     const title = names.length > 60 ? `Art: ${names.slice(0, 54).trimEnd()}...` : `Art: ${names}`;
     return {
       task: `Draw ${assets.length} ${assets.length === 1 ? "Asset" : "Assets"}:\n${lines.join("\n")}`,
       title: input.title?.trim() || title,
-      assets,
+      ...launch,
     };
   },
 
   async run(ctx) {
     const { run, project, worktreePath } = ctx;
-    const assets = await loadAssets(pool, run.id);
+    const assets = await store.load(run.id);
 
     const todo = assets.filter((a) => a.status === "pending" || a.status === "generating" || a.status === "rejected");
     if (todo.length) {
@@ -560,15 +411,63 @@ export function createAssetsWorkflow(pool: pg.Pool): Workflow {
       const palette = parsePalette(artDirection);
       const artReferences = parseReferences(artDirection);
       for (const asset of todo) {
-        if (!(await drawAsset(pool, ctx, asset, artDirection, artReferences, palette))) return;
+        if (!(await drawAsset(store, ctx, asset, artDirection, artReferences, palette))) return;
       }
     }
 
-    const { rows: gates } = await pool.query("SELECT decision FROM gates WHERE run_id = $1 AND kind = 'asset' ORDER BY id DESC LIMIT 1", [run.id]);
-    if (gates[0]?.decision === "approve") return finish(pool, ctx, assets);
+    if ((await ctx.records.lastDecision("asset")) === "approve") return finish(store, ctx, assets);
     if (!(await ctx.stillRunning())) return;
-    const waiting = (await loadAssets(pool, run.id)).filter((a) => a.status === "waiting").length;
+    const waiting = (await store.load(run.id)).filter((a) => a.status === "waiting").length;
     await ctx.openGate("asset", `${waiting} ${waiting === 1 ? "Asset is" : "Assets are"} waiting for your verdict.`);
   },
+  };
+}
+
+/**
+ * The `asset` Gate kind: the human gives a verdict for every Asset waiting for one, all at once. When all are approved
+ * the Run goes on to its commit and pull request; otherwise the next Iteration redoes the rejected Assets only.
+ */
+export function createAssetGate(store: AssetStore): GateKindModule {
+  return {
+    kind: "asset",
+    label: "An Asset Gate",
+    actions: ["judge", "abandon"],
+    async decide(gate, { action, verdicts }) {
+      if (action === "abandon") return { next: "abandon" };
+      let given;
+      try {
+        given = await store.checkVerdicts(gate.runId, verdicts);
+      } catch (e) {
+        throw e instanceof VerdictError ? new InvalidInputError(e.message) : e;
+      }
+      // The Asset Gate is not the end of its Run: approved Assets are still to be committed and sent as a pull request.
+      const rejected = given.some((v) => v.action === "reject");
+      return {
+        next: "continue",
+        decision: rejected ? "reject" : "approve",
+        nextIteration: rejected,
+        record: (client) => store.recordVerdicts(client, gate.id, given),
+      };
+    },
+  };
+}
+
+/**
+ * Everything the Forge core gets of Assets: the `assets` Workflow (its `artist` Step type), the `asset` Gate kind, the
+ * Asset rows and verdicts of a Run's detail, and Asset images. The Asset tables stay behind it.
+ */
+export function createAssetsExtension(pool: pg.Pool): Extension {
+  const store = createAssetStore(pool);
+  return {
+    workflows: [createAssetsWorkflow(store)],
+    gateKinds: [createAssetGate(store)],
+    async detail(runId, gateIds) {
+      const assets = await store.load(runId);
+      const verdicts = await store.gateVerdicts(gateIds);
+      const gates: RunDetailPart["gates"] = new Map();
+      for (const id of gateIds) gates.set(id, { verdicts: verdicts.get(id) ?? [], feedback: verdictFeedback(verdicts.get(id) ?? [], assets) });
+      return { assets, gates };
+    },
+    assetImage: (runId, assetId, which) => store.imageFile(runId, assetId, which),
   };
 }
