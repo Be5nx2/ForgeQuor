@@ -114,7 +114,7 @@ Codex **Runner**, **Artist**, an `assets` **Workflow** (Artist → asset **Gate*
     - the Run form's list of repository PNGs and the Art Direction facts it shows come from the freshly fetched default branch;
     - a replacement's commit says it replaces (e.g. `feat(art): replace 1 asset`, or add and replace counted apart), and the Review Brief marks each replaced Asset;
     - the Asset Gate shows the image being replaced beside the new version, magnified alike, so they can be compared.
-- [ ] `m2-11` **Overwrite check when an assets Run really starts**: a Run that waited in the queue cannot overwrite art merged in the meantime.
+- [x] `m2-11` **Overwrite check when an assets Run really starts**: a Run that waited in the queue cannot overwrite art merged in the meantime.
   - Spec: `docs/specs/m2-assets.md`
   - Blocked by: `m2-10`
   - Acceptance:

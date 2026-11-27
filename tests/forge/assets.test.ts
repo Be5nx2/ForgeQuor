@@ -572,6 +572,42 @@ describe("references, default size and safe replacement", () => {
     await expect(forge.assetImage(run.id, run.assets[1]!.id, "replaced")).rejects.toThrow();
   });
 
+  it("escalates, generating nothing, when a Run that waited in the queue finds a file merged at its target path meanwhile", async () => {
+    const { project, remote } = await projectWithRemote();
+    await forge.setMaxConcurrentRuns(project.id, 1);
+    artist.use(drawing());
+    const first = await startAssets(project, [grass]);
+    const queued = await forge.startRun({ projectId: project.id, workflow: "assets", assets: [hero, { ...grass, name: "tree", replace: false }] });
+    expect(queued.state).toBe("queued");
+    remote.advance(OLD, "merged meanwhile");
+    artist.steps.length = 0;
+
+    await forge.decideGate({ gateId: first.gates[0]!.id, action: "abandon" });
+    await forge.whenIdle();
+
+    const after = await forge.getRun(queued.id);
+    expect(after.state).toBe("waiting");
+    expect(after.gates.at(-1)).toMatchObject({ kind: "escalation" });
+    expect(after.gates.at(-1)!.reason).toContain(OLD);
+    expect(artist.steps).toEqual([]);
+  });
+
+  it("lets an Asset marked as replacing proceed when its file exists, and never takes the Run's own earlier attempt for existing art", async () => {
+    const { project } = await projectWithRemote({ files: { [OLD]: "old art" } });
+    let attempts = 0;
+    artist.use((step) => {
+      attempts++;
+      // First attempt fails the checks (wrong size), second passes: the file written meanwhile is the Run's own.
+      write(step, attempts === 1 ? makePng(3, 3) : makePng(...sizeOf(step)));
+    });
+
+    const run = await startAssets(project, [{ ...hero, replace: true }]);
+
+    expect(attempts).toBe(2);
+    expect(run.state).toBe("waiting");
+    expect(run.gates.at(-1)).toMatchObject({ kind: "asset" });
+  });
+
   it("refuses two Asset Requests that would produce the same file", async () => {
     const { project } = await projectWithRemote();
 

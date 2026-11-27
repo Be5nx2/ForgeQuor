@@ -118,6 +118,11 @@ export async function existsInBranch(repoRoot: string, branch: string, path: str
   return (await git(repoRoot, "cat-file", "-e", `origin/${branch}:${path}`)) !== null;
 }
 
+/** Whether `path` is in the worktree's checked-out commit (what the Run started from, before it committed anything). */
+export async function existsAtHead(worktreePath: string, path: string): Promise<boolean> {
+  return (await git(worktreePath, "cat-file", "-e", `HEAD:${path}`)) !== null;
+}
+
 /** The text of `path` on the remote's `branch` as last fetched, or null when it is not there. */
 export async function readInBranch(repoRoot: string, branch: string, path: string): Promise<string | null> {
   try {

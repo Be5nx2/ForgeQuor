@@ -7,7 +7,7 @@ import { parseReferences } from "./art-direction.js";
 import { publishPullRequest } from "./publish.js";
 import { runAgentStep } from "./step.js";
 import type { RunInput, RunPlan, Workflow, WorkflowContext } from "./workflow.js";
-import { commitPaths, RUN_NOTES_DIR, slugify } from "./workspace.js";
+import { commitPaths, existsAtHead, RUN_NOTES_DIR, slugify } from "./workspace.js";
 
 export type AssetKind = "sprite" | "tile" | "animation";
 /** Where an Asset is: not drawn yet, being drawn, drawn and waiting for the human's verdict, approved, or rejected (to be redone in the next Iteration). */
@@ -580,6 +580,16 @@ export const assetsWorkflow: Workflow = {
 
     const todo = assets.filter((a) => a.status === "pending" || a.status === "generating" || a.status === "rejected");
     if (todo.length) {
+      // The Run may have waited in the queue: what the launch check saw can have changed on the remote since.
+      const existingTargets: string[] = [];
+      for (const a of todo) if (!a.replace && (await existsAtHead(worktreePath, a.targetPath))) existingTargets.push(a.targetPath);
+      if (existingTargets.length) {
+        return ctx.openGate(
+          "escalation",
+          `${existingTargets.join(", ")} ${existingTargets.length === 1 ? "exists" : "exist"} in the repository already, so nothing was generated.`,
+          "The file was added after this Run was started. Abandon the Run, then start it again with the Asset marked as replacing that file, or under another name.",
+        );
+      }
       const artDirection = readArtDirection(worktreePath, project.artDirectionPath);
       if (artDirection === null) {
         return ctx.openGate(
