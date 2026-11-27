@@ -222,7 +222,7 @@ steps:
 
     expect(errors.map((e) => [e.path, e.message])).toEqual([
       ["steps[1].when", 'Step "draw" runs when "assets" is given, but it is neither a launch input of this Workflow nor produced by a Step it needs.'],
-      ["steps[2].when", 'Step "other" runs when "colour" is given, but it is neither a launch input of this Workflow nor produced by a Step it needs.'],
+      ["steps[2].when", 'Step "other" runs when "colour" is given, which is not an input; it must be one of task, assets.'],
     ]);
   });
 
@@ -257,6 +257,25 @@ steps:
       "steps[1].gate",
       "steps[1].needs",
     ]);
+  });
+
+  it("reports an unknown when input and a malformed Step id even when the needs are broken", () => {
+    const errors = errorsOf(`
+name: typos
+inputs: [task]
+steps:
+  - { id: "dev eloper", type: agent, agent: developer }
+  - { id: draw, type: artist, needs: [nope], when: colour }
+`);
+
+    expect(errors.map((e) => e.path)).toEqual(["steps[0].id", "steps[1].needs[0]", "steps[1].when"]);
+  });
+
+  it("returns errors instead of throwing on a YAML alias bomb", () => {
+    const bomb = ["a: &a [x, x, x, x, x, x, x, x, x, x]"];
+    for (let i = 1; i < 12; i++) bomb.push(`${String.fromCharCode(97 + i)}: &${String.fromCharCode(97 + i)} [${Array(10).fill(`*${String.fromCharCode(96 + i)}`).join(", ")}]`);
+
+    expect(errorsOf(bomb.join("\n"))).toEqual([expect.objectContaining({ path: "", message: expect.stringMatching(/YAML/) })]);
   });
 
   it("reports every error at once, each with its line and column", () => {

@@ -125,7 +125,13 @@ export function parseWorkflow(text: string, catalogue: StepCatalogue = DEFAULT_C
     errors.push({ path: formatPath(path), line: pos.line, column: pos.col, message, offset });
   };
 
-  const root = doc.toJS() as unknown;
+  let root: unknown;
+  try {
+    root = doc.toJS();
+  } catch (e) {
+    // Such as too many alias expansions: a hostile file must not crash the caller.
+    return { ok: false, errors: [{ path: "", line: 1, column: 1, message: `Invalid YAML: ${(e as Error).message}` }] };
+  }
   if (!isRecord(root)) {
     return { ok: false, errors: [{ path: "", line: 1, column: 1, message: "A Workflow must be a mapping with a name and steps." }] };
   }
@@ -172,9 +178,12 @@ export function parseWorkflow(text: string, catalogue: StepCatalogue = DEFAULT_C
       if (!STEP_KEYS.includes(key)) fail(at(key), `Unknown field "${key}" in a Step; a Step has ${list(STEP_KEYS)}.`, true);
     }
 
-    const id = typeof raw.id === "string" && raw.id.trim() ? raw.id : null;
-    if (!id) {
+    const id = typeof raw.id === "string" && NAME.test(raw.id) ? raw.id : null;
+    if (raw.id === undefined) {
       fail(at("id"), "A Step needs an id.");
+      graphSound = false;
+    } else if (!id) {
+      fail(at("id"), "A Step id is lowercase letters, digits and dashes, such as developer or review.");
       graphSound = false;
     } else if (ids.has(id)) {
       fail(at("id"), `Step id "${id}" is used by more than one Step.`);
@@ -222,10 +231,11 @@ export function parseWorkflow(text: string, catalogue: StepCatalogue = DEFAULT_C
       fail(at("max_attempts"), `${label}: max_attempts is a whole number of at least 1.`);
     }
 
-    let when: string | undefined;
+    let when: WorkflowInput | undefined;
     if (raw.when !== undefined) {
-      if (typeof raw.when !== "string") fail(at("when"), `${label}: when names one input, such as assets.`);
-      else when = raw.when;
+      if (!INPUTS.includes(raw.when as WorkflowInput)) {
+        fail(at("when"), `${label} runs when ${JSON.stringify(raw.when)} is given, which is not an input; it must be one of ${list(INPUTS)}.`);
+      } else when = raw.when as WorkflowInput;
     }
 
     const step = {
@@ -330,7 +340,7 @@ function checkGraph(
         const s = steps[k]!;
         return s.type === "agent" ? (catalogue.agents[s.agent]?.produces ?? []) : [];
       });
-      if (!inputs.includes(step.when as WorkflowInput) && !produced.includes(step.when as WorkflowInput)) {
+      if (!inputs.includes(step.when) && !produced.includes(step.when)) {
         fail(
           ["steps", i, "when"],
           `Step "${step.id}" runs when "${step.when}" is given, but it is neither a launch input of this Workflow nor produced by a Step it needs.`,
