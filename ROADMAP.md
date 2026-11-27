@@ -40,7 +40,7 @@ The engine behind every Workflow, with no change visible to the human: a deeper 
     - a Workflow declares its launch inputs, and the Step types that use one validate and store it at launch inside the core's transaction;
     - Asset Request validation, Asset rows, verdicts and Asset images live behind the `artist` Step type and the `asset` Gate kind;
     - every existing test passes unchanged.
-- [ ] `m3-03` **Workflow definitions**: a YAML Workflow turns into a validated definition or a full list of errors.
+- [x] `m3-03` **Workflow definitions**: a YAML Workflow turns into a validated definition or a full list of errors.
   - Spec: `docs/specs/m3a-workflow-engine.md`
   - Blocked by: none
   - Acceptance:
