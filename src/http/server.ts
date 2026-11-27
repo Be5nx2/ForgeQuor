@@ -128,14 +128,14 @@ export async function createServer(deps: {
     }
   });
   // An Asset's image: the ids pick what the Forge core recorded, the request never names a path.
-  app.get<{ Params: { runId: string; assetId: string }; Querystring: { version?: string } }>("/api/runs/:runId/assets/:assetId/image", async (req, reply) => {
+  app.get<{ Params: { runId: string; assetId: string }; Querystring: { version?: string; replaced?: string } }>("/api/runs/:runId/assets/:assetId/image", async (req, reply) => {
     const { runId, assetId } = req.params;
     const version = req.query.version;
     if (!/^\d{1,15}$/.test(runId) || !/^\d{1,15}$/.test(assetId) || (version !== undefined && !/^\d{1,15}$/.test(version))) {
       return reply.code(404).send({ error: "No such Asset." });
     }
     try {
-      const image = await readFile(await deps.forge.assetImage(Number(runId), Number(assetId), version === undefined ? undefined : Number(version)));
+      const image = await readFile(await deps.forge.assetImage(Number(runId), Number(assetId), req.query.replaced !== undefined ? "replaced" : version === undefined ? undefined : Number(version)));
       // An Asset's file changes between Iterations at the same URL.
       return reply.type("image/png").header("cache-control", "no-store").send(image);
     } catch (e) {

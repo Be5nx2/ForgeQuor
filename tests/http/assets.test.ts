@@ -127,6 +127,16 @@ describe("refusing bad input", () => {
     expect(decided).toMatchObject({ gateId: 5, action: "judge", verdicts });
   });
 
+  it("asks the Forge core for the art an Asset replaces", async () => {
+    const file = join(folder, "old.png");
+    writeFileSync(file, Buffer.concat([Buffer.from("89504e470d0a1a0a", "hex"), Buffer.from("old")]));
+    const asked: unknown[] = [];
+    const address = await serve({ async assetImage(...args) { asked.push(args); return file; } });
+
+    expect((await fetch(`${address}/api/runs/3/assets/1/image?replaced=1`)).status).toBe(200);
+    expect(asked).toEqual([[3, 1, "replaced"]]);
+  });
+
   it("serves a Project's Art Direction facts to the Run form", async () => {
     const info = { present: true, defaultSize: { width: 16, height: 16 }, references: [], images: ["a.png"] };
     const address = await serve({ artInfo: async (id) => (id === 2 ? info : (undefined as any)) });

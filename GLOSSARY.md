@@ -142,6 +142,10 @@ _Avoid_: Mood board, inspiration
 What the **Artist** delivered for an **Asset** in one **Iteration** (its last attempt that passed the **Asset Checks**), kept so the human can look at past versions beside the **Feedback** each got.
 _Avoid_: Revision, draft
 
+**Replaced Art**:
+The existing image an **Asset Request** marked to replace. It is set aside in the **Run Notes**, handed to the **Artist** as a **Style Reference**, and shown beside the new **Asset Version** at the **Asset Gate**; the commit and the **Review Brief** say the **Asset** replaces it.
+_Avoid_: Old asset, previous art
+
 **Art Direction**:
 The document inside a game **Project** that fixes its visual style (palette, resolution, sprite sizes) for the **Artist**.
 _Avoid_: Style guide, art bible

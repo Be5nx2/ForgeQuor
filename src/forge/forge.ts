@@ -8,6 +8,7 @@ import {
   assetTargetPath,
   AssetNotFoundError,
   checkAgainstRepository,
+  replacedCopyPath,
   checkVerdicts,
   loadAssets,
   loadGateVerdicts,
@@ -180,7 +181,7 @@ export interface Forge {
   /** Sets where a Project keeps its Art Direction document and its Assets (repository paths). Applies to Runs started afterwards; throws an InvalidInputError for a path outside the repository. */
   setArt(projectId: number, art: { artDirectionPath: string; artFolder: string }): Promise<Project>;
   /**
-   * What the Run form needs to know about a Project's art, read from its default branch as last fetched: whether the Art
+   * What the Run form needs to know about a Project's art, read from its default branch freshly fetched: whether the Art
    * Direction is there, its `Default size`, the reference images it names that exist, and every PNG of the repository.
    */
   artInfo(projectId: number): Promise<ArtInfo>;
@@ -223,7 +224,7 @@ export interface Forge {
    * for that Asset, only a PNG, only inside the Run's worktree. Throws an AssetNotFoundError otherwise; no path ever
    * comes from the caller.
    */
-  assetImage(runId: number, assetId: number, versionId?: number): Promise<string>;
+  assetImage(runId: number, assetId: number, which?: number | "replaced"): Promise<string>;
   /** Resolves once no Run is being worked on in the background. */
   whenIdle(): Promise<void>;
 }
@@ -600,6 +601,13 @@ export function createForge(deps: ForgeDeps): Forge {
     }
   }
 
+  /** Fetches the Project's remote and returns its default branch, remembered on the Project. */
+  async function freshDefaultBranch(projectId: number, localPath: string): Promise<string> {
+    const fresh = await onePerRepository(localPath, () => refreshDefaultBranch(localPath));
+    await pool.query("UPDATE projects SET default_branch = $2 WHERE id = $1", [projectId, fresh]);
+    return fresh;
+  }
+
   /** Prepares the Run's worktree, then hands the Run to its Workflow. Any failure opens an Escalation. */
   async function work(run: Run, project: Project, stop: AbortSignal) {
     try {
@@ -707,9 +715,10 @@ export function createForge(deps: ForgeDeps): Forge {
       const { rows } = await pool.query(`SELECT ${COLUMNS} FROM projects WHERE id = $1`, [projectId]);
       if (!rows[0]) throw new Error(`No Project ${projectId}.`);
       const project = toProject(rows[0]);
-      const files = await listInBranch(project.localPath, project.defaultBranch);
+      const branch = await freshDefaultBranch(projectId, project.localPath);
+      const files = await listInBranch(project.localPath, branch);
       const images = files.filter((f) => f.endsWith(".png"));
-      const text = await readInBranch(project.localPath, project.defaultBranch, project.artDirectionPath);
+      const text = await readInBranch(project.localPath, branch, project.artDirectionPath);
       if (text === null) return { present: false, defaultSize: null, references: [], images };
       return { present: true, defaultSize: parseDefaultSize(text), references: parseReferences(text).filter((p) => images.includes(p)), images };
     },
@@ -725,8 +734,10 @@ export function createForge(deps: ForgeDeps): Forge {
       const { rows: found } = await pool.query(`SELECT art_folder, local_path, default_branch FROM projects WHERE id = $1`, [projectId]);
       if (!found[0]) throw new Error(`No Project ${projectId}.`);
       const plan = flow.plan({ task, title, assets });
+      // What is checked below is what the Run will start from: the default branch as it is on the remote now.
+      const branch = plan.assets.length ? await freshDefaultBranch(projectId, found[0].local_path) : found[0].default_branch;
       // Refused now, not after a Quota-costly generation: what the Asset Requests would overwrite or lean on must be right.
-      await checkAgainstRepository(plan.assets, found[0].art_folder, (path) => existsInBranch(found[0].local_path, found[0].default_branch, path));
+      await checkAgainstRepository(plan.assets, found[0].art_folder, (path) => existsInBranch(found[0].local_path, branch, path));
       const client = await pool.connect();
       let runId: number;
       try {
@@ -905,8 +916,14 @@ export function createForge(deps: ForgeDeps): Forge {
       await forge.checkPullRequests();
     },
 
-    async assetImage(runId, assetId, versionId) {
-      const { rows } = versionId === undefined
+    async assetImage(runId, assetId, which) {
+      const versionId = which === "replaced" ? undefined : which;
+      const { rows } = which === "replaced"
+        ? await pool.query(
+            "SELECT $3::text AS path, r.worktree_path FROM assets a JOIN runs r ON r.id = a.run_id WHERE a.id = $1 AND a.run_id = $2 AND a.replace",
+            [assetId, runId, replacedCopyPath(assetId)],
+          )
+        : versionId === undefined
         ? await pool.query(
             "SELECT a.target_path AS path, r.worktree_path FROM assets a JOIN runs r ON r.id = a.run_id WHERE a.id = $1 AND a.run_id = $2",
             [assetId, runId],

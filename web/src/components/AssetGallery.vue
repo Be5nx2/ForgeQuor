@@ -15,6 +15,10 @@ const imageWidth = (a: Asset) => a.width * a.frames;
 /** Magnification that brings the longest side to about 256 screen pixels, in whole steps so pixels stay square. */
 const zoom = (a: Asset) => Math.min(16, Math.max(2, Math.floor(256 / Math.max(imageWidth(a), a.height))));
 const current = (a: Asset, i: number) => `/api/runs/${props.runId}/assets/${a.id}/image?i=${i}`;
+const replacedArt = (a: Asset) => `/api/runs/${props.runId}/assets/${a.id}/image?replaced=1`;
+/** Replaced art that could not be loaded (nothing was there to set aside) is not shown. */
+const replacedMissing = ref<Record<number, boolean>>({});
+const showReplaced = (a: Asset) => a.replace && !replacedMissing.value[a.id] && HAS_IMAGE.includes(a.status);
 const version = (a: Asset, id: number) => `/api/runs/${props.runId}/assets/${a.id}/image?version=${id}`;
 /** The versions before the current one, with the Feedback that sent each back. While an Asset is being redone it has no current version yet. */
 const past = (a: Asset) => (HAS_IMAGE.includes(a.status) ? a.versions.slice(0, -1) : a.versions);
@@ -69,9 +73,16 @@ function approveAll() {
         <ul v-if="a.warnings.length" class="warnings" aria-label="Palette warnings">
           <li v-for="w in a.warnings" :key="w" class="error">⚠ {{ w }}</li>
         </ul>
+        <div v-if="showReplaced(a)" class="muted">replaced art on the left · new version on the right</div>
+        <div class="compare">
+        <div v-if="showReplaced(a)" class="previews" :style="{ background: backdrop }">
+          <img :src="replacedArt(a)" :width="imageWidth(a)" :height="a.height" :alt="`${a.name}, the art being replaced, at real size`" class="pixels" @error="replacedMissing[a.id] = true" />
+          <img :src="replacedArt(a)" :width="imageWidth(a) * zoom(a)" :height="a.height * zoom(a)" :alt="`${a.name}, the art being replaced, magnified ${zoom(a)} times`" class="pixels" />
+        </div>
         <div v-if="HAS_IMAGE.includes(a.status)" class="previews" :style="{ background: backdrop }">
           <img :src="current(a, iteration)" :width="imageWidth(a)" :height="a.height" :alt="`${a.name} at real size`" class="pixels" />
           <img :src="current(a, iteration)" :width="imageWidth(a) * zoom(a)" :height="a.height * zoom(a)" :alt="`${a.name} magnified ${zoom(a)} times`" class="pixels" />
+        </div>
         </div>
         <details v-if="past(a).length" class="past">
           <summary>{{ past(a).length }} earlier {{ past(a).length === 1 ? "version" : "versions" }}</summary>

@@ -513,6 +513,65 @@ describe("references, default size and safe replacement", () => {
     await forge.whenIdle();
   });
 
+  it("sees a file merged on the remote since the last fetch, and refuses to overwrite it without the replace mark", async () => {
+    const { project, remote } = await projectWithRemote();
+    remote.advance(OLD, "merged on GitHub");
+
+    await expect(forge.startRun({ projectId: project.id, workflow: "assets", assets: [hero] })).rejects.toThrow(/hero-idle\.png.*replac/);
+    expect(await forge.listRuns({ projectId: project.id })).toEqual([]);
+  });
+
+  it("sees a reference merged on the remote since the last fetch", async () => {
+    const { project, remote } = await projectWithRemote();
+    remote.advance("assets/ref/new.png", "r");
+
+    await expect(forge.startRun({ projectId: project.id, workflow: "assets", assets: [{ ...hero, references: ["assets/ref/new.png"] }] })).resolves.toBeTruthy();
+    await forge.whenIdle();
+  });
+
+  it("gives the Run form the PNGs and the Art Direction facts of the freshly fetched default branch", async () => {
+    const { project, remote } = await projectWithRemote();
+    remote.advance("assets/late.png", "p");
+    remote.advance("docs/ART_DIRECTION.md", "# Art\nDefault size: 24x24\n");
+
+    const info = await forge.artInfo(project.id);
+
+    expect(info.images).toContain("assets/late.png");
+    expect(info.defaultSize).toEqual({ width: 24, height: 24 });
+  });
+
+  it("says in the commit and in the Review Brief which Assets replace existing art", async () => {
+    const { project } = await projectWithRemote({ files: { [OLD]: "old art" } });
+    artist.use(drawing());
+
+    const run = await startAssets(project, [{ ...hero, replace: true }, grass]);
+    await judge(run);
+    await forge.whenIdle();
+
+    const done = await forge.getRun(run.id);
+    expect(git(done.worktreePath!, "log", "-1", "--format=%s")).toBe("feat(art): add 1 asset and replace 1 asset");
+    const [brief] = codeHost.pullRequests[0]!.comments;
+    expect(brief).toMatch(/hero-idle\.png.*\*\*replaces\*\*/);
+    expect(brief).toMatch(/grass\.png.*new/);
+  });
+
+  it("serves the art an Asset replaces, next to its new version, and nothing for an Asset that replaces nothing", async () => {
+    const { project } = await projectWithRemote({ files: { [OLD]: "old art" } });
+    artist.use(drawing());
+    const run = await startAssets(project, [{ ...hero, replace: true }, grass]);
+
+    const copy = join(run.worktreePath!, ".forgequor/assets/replaced", `${run.assets[0]!.id}.png`);
+    expect(readFileSync(copy, "utf8")).toBe("old art");
+    // The fixture is text; the route only serves real PNGs.
+    const png = makePng(16, 16);
+    writeFileSync(copy, png);
+
+    const old = await forge.assetImage(run.id, run.assets[0]!.id, "replaced");
+
+    expect(readFileSync(old)).toEqual(png);
+    await expect(forge.assetImage(run.id, run.assets[1]!.id, "replaced")).rejects.toThrow();
+  });
+
   it("refuses two Asset Requests that would produce the same file", async () => {
     const { project } = await projectWithRemote();
 

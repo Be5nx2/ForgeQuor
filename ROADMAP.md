@@ -105,7 +105,7 @@ Codex **Runner**, **Artist**, an `assets` **Workflow** (Artist → asset **Gate*
     - abandoning the Run kills the running Codex process group;
     - the Run detail shows progress live, Asset by Asset.
     - tests cover resuming a `developer` Run in the middle of a Feedback Iteration (after a Quota pause and after a restart), and a rejection racing an abandon (left untested by m2-02).
-- [ ] `m2-10` **Launch checks on fresh repository state**: what is validated at launch is what the Run will start from (found in the final real M2 test).
+- [x] `m2-10` **Launch checks on fresh repository state**: what is validated at launch is what the Run will start from (found in the final real M2 test).
   - Spec: `docs/specs/m2-assets.md`
   - Blocked by: `m2-08`
   - Acceptance:

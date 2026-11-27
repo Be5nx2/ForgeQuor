@@ -1,5 +1,5 @@
 import { copyFileSync, existsSync, mkdirSync, rmSync, openSync, readFileSync, readSync, closeSync, realpathSync, statSync } from "node:fs";
-import { join, resolve, sep } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import type pg from "pg";
 import { describeDuration } from "../duration.js";
 import { checkAssetFile, parsePalette, type AssetCheckResult } from "./asset-checks.js";
@@ -267,6 +267,10 @@ export async function loadGateVerdicts(pool: pg.Pool, gateIds: number[]): Promis
 
 const PNG_SIGNATURE = Buffer.from("89504e470d0a1a0a", "hex");
 
+/** Where the art an Asset replaces is kept in the Run Notes, as `<asset id>.png`, relative to the worktree. */
+const REPLACED_DIR = `${RUN_NOTES_DIR}/assets/replaced`;
+export const replacedCopyPath = (assetId: number) => `${REPLACED_DIR}/${assetId}.png`;
+
 /**
  * The file of an Asset's current version, only when it is a PNG that really lives inside the worktree (a link leading
  * out of it does not count). Null otherwise.
@@ -358,16 +362,25 @@ function readArtDirection(worktreePath: string, path: string): string | null {
   return existsSync(file) && statSync(file).isFile() ? readFileSync(file, "utf8") : null;
 }
 
+/** `feat(art): add 2 assets`, `feat(art): replace 1 asset`, or both counted apart. */
+export function commitMessage(assets: Asset[]): string {
+  const replaced = assets.filter((a) => a.replace).length;
+  const added = assets.length - replaced;
+  const count = (n: number, verb: string) => `${verb} ${n} ${n === 1 ? "asset" : "assets"}`;
+  return `feat(art): ${[added && count(added, "add"), replaced && count(replaced, "replace")].filter(Boolean).join(" and ")}`;
+}
+
 /** The Review Brief of an `assets` Run: Forgequor writes it from what it stored, no Agent is involved. */
 function reviewBrief(assets: Asset[], feedbacks: Map<number, string[]>): string {
-  const rows = assets.map((a) => `| \`${a.targetPath}\` | ${a.name} | ${a.kind} | ${describeSize(a)} |`);
+  const replaced = assets.some((a) => a.replace);
+  const rows = assets.map((a) => `| \`${a.targetPath}\` | ${a.name} | ${a.kind} | ${describeSize(a)} |${replaced ? ` ${a.replace ? "**replaces** the existing file" : "new"} |` : ""}`);
   const lines = [
     "## Assets",
     "",
     `${assets.length} ${assets.length === 1 ? "Asset" : "Assets"} drawn by the Artist and approved by the human at the Asset Gate.`,
     "",
-    "| Path | Name | Kind | Size |",
-    "|---|---|---|---|",
+    `| Path | Name | Kind | Size |${replaced ? " Change |" : ""}`,
+    `|---|---|---|---|${replaced ? "---|" : ""}`,
     ...rows,
     "",
   ];
@@ -437,12 +450,12 @@ async function rejectedBefore(ctx: WorkflowContext, asset: Asset, starting: bool
  * only look the copy up). Returns the copy's path relative to the worktree. A restarted Run keeps the first copy.
  */
 function setAsideReplaced(ctx: WorkflowContext, asset: Asset, clear: boolean): string | undefined {
-  const copy = `${RUN_NOTES_DIR}/assets/replaced/${asset.id}.png`;
+  const copy = replacedCopyPath(asset.id);
   const target = join(ctx.worktreePath, asset.targetPath);
   if (!existsSync(join(ctx.worktreePath, copy))) {
     // Only the file that was there before the Artist started is the existing art: later, the target holds the Artist's own work.
     if (!clear || !existsSync(target)) return undefined;
-    mkdirSync(join(ctx.worktreePath, RUN_NOTES_DIR, "assets", "replaced"), { recursive: true });
+    mkdirSync(dirname(join(ctx.worktreePath, copy)), { recursive: true });
     copyFileSync(target, join(ctx.worktreePath, copy));
   }
   if (clear) rmSync(target, { force: true });
@@ -533,8 +546,7 @@ async function drawAsset(ctx: WorkflowContext, asset: Asset, artDirection: strin
 async function finish(ctx: WorkflowContext, assets: Asset[]) {
   const { pool, run, worktreePath } = ctx;
   await pool.query("UPDATE assets SET status = 'approved' WHERE run_id = $1", [run.id]);
-  const n = assets.length;
-  await commitPaths(worktreePath, assets.map((a) => a.targetPath), `feat(art): add ${n} ${n === 1 ? "asset" : "assets"}`);
+  await commitPaths(worktreePath, assets.map((a) => a.targetPath), commitMessage(assets));
   const { rows } = await pool.query(
     "SELECT asset_id, feedback FROM asset_verdicts WHERE verdict = 'reject' AND asset_id = ANY($1) ORDER BY id",
     [assets.map((a) => a.id)],
