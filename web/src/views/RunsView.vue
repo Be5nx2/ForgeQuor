@@ -47,11 +47,28 @@ const assets = ref<AssetDraft[]>([newAsset()]);
 const sizeOf = (a: AssetDraft) => (a.size === "custom" ? { width: a.width, height: a.height } : { width: Number(a.size.split("x")[0]), height: Number(a.size.split("x")[1]) });
 const error = ref("");
 
+/** False until the first list arrives, so an empty page never reads as "No Run" while it is loading. */
+const loaded = ref(false);
+const loadError = ref("");
+/** Loads overlap when Runs change quickly or a filter changes: only the latest may write, so an older answer never hides a Run. */
+let latest = 0;
+
 async function load() {
+  const mine = ++latest;
   const q = new URLSearchParams();
   if (filterProject.value) q.set("projectId", filterProject.value);
   if (filterState.value) q.set("state", filterState.value);
-  runs.value = await getJson(`/api/runs?${q}`);
+  try {
+    // Projects come along, so a Run of a Project registered since is named, not shown as a bare id.
+    const [found, known] = await Promise.all([getJson<Run[]>(`/api/runs?${q}`), getJson<Project[]>("/api/projects")]);
+    if (mine !== latest) return;
+    runs.value = found;
+    projects.value = known;
+    loaded.value = true;
+    loadError.value = "";
+  } catch (e: any) {
+    if (mine === latest) loadError.value = `Could not load the Runs: ${e.message}`;
+  }
 }
 
 async function start() {
@@ -74,16 +91,20 @@ async function start() {
   }
 }
 
-const projectName = (id: number) => projects.value.find((p) => p.id === id)?.name ?? `#${id}`;
-// Same-named Projects are told apart by their local path.
+// Same-named Projects are told apart by their local path, in the menus and in the list: two Projects called alike once
+// made a Run look missing from its Project.
 const projectLabel = (p: Project) => `${p.name} (${p.localPath})`;
+const projectName = (id: number) => {
+  const p = projects.value.find((p) => p.id === id);
+  if (!p) return `Project #${id}`;
+  return projects.value.some((o) => o.id !== p.id && o.name === p.name) ? projectLabel(p) : p.name;
+};
 
 let stopFollowing: () => void;
 onMounted(async () => {
-  projects.value = await getJson("/api/projects");
-  form.value.projectId = String(projects.value[0]?.id ?? "");
-  await load();
   stopFollowing = followRuns((u) => u.type === "changed" && load(), load);
+  await load();
+  form.value.projectId ||= String(projects.value[0]?.id ?? "");
 });
 onUnmounted(() => stopFollowing?.());
 watch([filterProject, filterState], load);
@@ -167,7 +188,9 @@ watch(
       <option v-for="s in STATES" :key="s" :value="s">{{ s }}</option>
     </select>
   </form>
-  <p v-if="!runs.length" class="muted">No Run.</p>
+  <p v-if="loadError" class="error">{{ loadError }}</p>
+  <p v-if="!loaded" class="muted">Loading the Runs…</p>
+  <p v-else-if="!runs.length" class="muted">No Run{{ filterProject || filterState ? " matches these filters" : "" }}.</p>
   <ul>
     <li v-for="r in runs" :key="r.id" class="clickable" @click="emit('open', r.id)">
       <strong>{{ r.title }}</strong> <span class="badge">{{ r.state }}</span>
