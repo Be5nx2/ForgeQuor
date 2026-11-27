@@ -6,12 +6,22 @@ Milestones are specified one at a time with `/to-spec`, then split into items wi
 
 ## Now
 
-### M3 Full loop
+### M3a Workflow engine
 
-YAML **Workflows** with parallel **Steps**, Griller with chat, Spec Writer, Architect, solo or duo review (chosen at Run launch) with **Consolidator** (an unsettled reviewer disagreement opens a **Gate** with its recommendation), **Escalation**, configurable iteration limit (default 3), default `feature` and `bugfix` Workflows.
+The engine behind every Workflow, with no change visible to the human: a deeper Workflow seam, YAML **Workflows** with parallel **Steps**, a configurable iteration limit (default 3), **Escalation** with more choices than abandon, and the `developer` and `assets` Workflows rewritten as YAML with unchanged behaviour.
 
 - Spec: to write after the M3 grilling.
-- Prefactor first (M2 branch review): deepen the Workflow seam. The core imports a dozen asset helpers and `startRun` writes asset rows itself, `WorkflowContext` has ~17 members, and Step-result handling is copied in both Workflows; YAML Workflows need a seam where adding one touches no core code.
+- Prefactor in M3a (M2 branch review): deepen the Workflow seam. The core imports a dozen asset helpers and `startRun` writes asset rows itself, `WorkflowContext` has ~17 members, and Step-result handling is copied in both Workflows; YAML Workflows need a seam where adding one touches no core code.
+- [ ] `m3-00a` **Approved Runs free their slot**: a Run releases its Project slot as soon as it is Approved, and Approved Runs stay easy to find until merged (from the M2 real tests, where open sandbox PRs blocked the queue twice).
+  - Blocked by: none
+- [ ] `m3-00b` **M2 review follow-ups**: the small gaps the M2 branch review found (listed below under "M2 review follow-ups").
+  - Blocked by: `m3-00a`
+
+### M3b The team
+
+Griller with a **Conversation Gate** (it writes the Project's glossary and ADRs and produces Asset Requests), Spec Writer, Architect, solo or duo review (chosen at Run launch) with **Consolidator** (an unsettled reviewer disagreement opens a **Gate** with its recommendation), and the default `feature` and `bugfix` Workflows. `feature`: Griller ⇄ human → spec Gate → Spec Writer → Gate → Architect → Artist → Asset Gate (skipped without Asset Requests) → Developer → Checks → Reviewer(s) + Consolidator ⇄ Developer → pull request + Review Brief → final Gate.
+
+- Spec: after M3a.
 
 ## Next
 
@@ -43,8 +53,8 @@ YAML **Workflows** with parallel **Steps**, Griller with chat, Spec Writer, Arch
 ## Icebox
 
 - Child Runs: a feature Run splitting its spec into one Run per ticket (ADR 0001).
-- Verifier Agent: a Step that runs the real app and the opt-in smoke tests and checks each acceptance criterion before the final Gate (green unit tests missed m1-03's undecidable Gates). To grill.
-- Conductor Agent (the sprint manager): reads the roadmap, computes the frontier, spots hidden dependencies and parallel-safe items, proposes the next Runs; advisory first, then driving Child Runs. Touches ADR 0001. To grill.
+- Verifier Agent (M5 candidate, decided in the M3 grilling): a Step that runs the real app and the opt-in smoke tests and checks each acceptance criterion before the final Gate (green unit tests missed m1-03's undecidable Gates). To think through later.
+- Conductor Agent (the sprint manager), after M3: reads the roadmap, computes the frontier, spots hidden dependencies and parallel-safe items, proposes the next Runs; advisory first, then driving Child Runs. Touches ADR 0001.
 - Runner fallback when a Quota is exhausted.
 - Competing Runs: the same Step on two Runners, then pick.
 - Codecks sync: import cards, update status.
@@ -63,9 +73,8 @@ YAML **Workflows** with parallel **Steps**, Griller with chat, Spec Writer, Arch
 - Tileset atlas: an Asset Request for N tiles delivered as one atlas image (Godot TileSet), instead of one file per tile (M2 grilling).
 - Produce a Run's Asset Requests in parallel instead of one after the other (image generation burns Quota 3-5x faster, so sequential first).
 - Animated preview of an Animation Strip in the gallery (frames played in a loop, larger than the 4x a 64 px strip gets today), to judge the motion (real strip test, m2-07).
-- Should an Approved Run keep its Project slot until its pull request is merged? It uses no Quota any more, but holds the queue while the human has not merged (real strip test, m2-07). To grill.
 
-- M2 review follow-ups (2026-11-27), small:
+- M2 review follow-ups (2026-11-27), small, to fix in `m3-00b`:
   - the `assets` Review Brief omits palette warnings (spec story 46);
   - Gates do not record their Iteration, so an `assets` Iteration shows no Feedback in the Run detail;
   - a read Run does not expose each attempt's Asset Check failures;
