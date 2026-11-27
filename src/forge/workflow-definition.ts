@@ -29,7 +29,7 @@ export type StepType = "agent" | "conversation" | "checks" | "gate" | "publish" 
 const STEP_TYPES: readonly StepType[] = ["agent", "conversation", "checks", "gate", "publish", "artist", "review"];
 
 /** The Gate kinds a Workflow can place; Escalations are opened by Forgequor, never declared. */
-export type WorkflowGateKind = Exclude<GateKind, "escalation">;
+export type WorkflowGateKind = Exclude<GateKind, "escalation" | "review">;
 const GATE_KINDS: readonly WorkflowGateKind[] = ["final", "asset"];
 
 /** Automatic loop-backs a Step allows when it does not say (1 try + 2 more). */

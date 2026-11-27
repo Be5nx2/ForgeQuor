@@ -114,7 +114,7 @@ onUnmounted(() => stopFollowing?.());
     <p v-if="!run.gates.length" class="muted">None yet.</p>
     <ul>
       <li v-for="g in run.gates" :key="g.id">
-        <strong>{{ g.kind === "final" ? "Final Gate" : g.kind === "asset" ? "Asset Gate" : "Escalation" }}</strong> · iteration {{ g.iteration }}:
+        <strong>{{ g.kind === "final" ? "Final Gate" : g.kind === "asset" ? "Asset Gate" : g.kind === "review" ? "Review Gate" : "Escalation" }}</strong> · iteration {{ g.iteration }}:
         {{ g.kind === "asset" && g.decidedAt ? `${g.verdicts.length} ${g.verdicts.length === 1 ? "Asset" : "Assets"} judged.` : g.reason }}
         <pre v-if="g.evidence">{{ g.evidence }}</pre>
         <div v-if="g.decidedAt" class="muted">

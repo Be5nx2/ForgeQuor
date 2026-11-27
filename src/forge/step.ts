@@ -12,6 +12,8 @@ export interface AgentStep {
   assetId?: number;
   instructions: string;
   prompt: string;
+  /** Who an Escalation names when it fails ("Reviewer A (reviewer-a)"); by default "The" and the name capitalised. */
+  title?: string;
   /** The Step must not change the worktree: the Runner is asked to keep it read-only. */
   readonly?: boolean;
   /** Images shown to the Agent with the prompt (absolute paths). */
@@ -67,14 +69,14 @@ export async function runAgentStep(ctx: WorkflowContext, seat: AgentSeat, step: 
   ctx.changed();
 
   if (!(await ctx.stillRunning())) return null;
-  const agent = step.name.charAt(0).toUpperCase() + step.name.slice(1);
+  const agent = step.title ?? `The ${step.name.charAt(0).toUpperCase()}${step.name.slice(1)}`;
   // A Step that finished on its own just as the timeout fired keeps its real result.
   if (timedOut && result.status === "failed") {
-    await ctx.openGate("escalation", `The ${agent}'s Step timed out after ${describeDuration(stepTimeoutMs)} and was killed.`);
+    await ctx.openGate("escalation", `${agent}'s Step timed out after ${describeDuration(stepTimeoutMs)} and was killed.`);
     return null;
   }
   if (result.status === "failed") {
-    await ctx.openGate("escalation", `The ${agent} failed.`, result.error);
+    await ctx.openGate("escalation", `${agent} failed.`, result.error);
     return null;
   }
   if (result.status === "quota_exhausted") {

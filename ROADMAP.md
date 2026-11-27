@@ -122,7 +122,7 @@ Griller with a **Conversation Gate** (it writes the Project's glossary and ADRs 
     - changes requested loops back to the Developer, capped by `max_attempts`, then an Escalation;
     - `bugfix` takes a bug description; the Developer uses `diagnosing-bugs` and writes a failing test first; then Checks, review, pull request, final Gate;
     - the Run form offers solo or duo review, solo by default for `bugfix`.
-- [ ] `m3-12` **Duo review and Consolidator**: two models review, one review reaches the Developer.
+- [x] `m3-12` **Duo review and Consolidator**: two models review, one review reaches the Developer.
   - Spec: `docs/specs/m3b-the-team.md`
   - Blocked by: `m3-11`, `m3-06`
   - Acceptance:

@@ -61,7 +61,7 @@ export interface WorkflowList {
 }
 
 export type RunState = "queued" | "running" | "waiting" | "paused" | "approved" | "merged" | "closed" | "abandoned";
-export type GateKind = "final" | "escalation" | "asset" | "conversation";
+export type GateKind = "final" | "escalation" | "asset" | "review" | "conversation";
 /** What a Gate records as decided. */
 export type GateDecision = "approve" | "reject" | "abandon" | "retry" | "go_back" | "answer" | "confirm";
 /** `judge` is the verdicts of an Asset Gate: its decision is recorded as approve when every Asset was approved, reject when any was not. */
@@ -183,8 +183,8 @@ export interface StepState {
   attempts: number;
 }
 
-/** A Review's verdict: the change passes, or the Developer must rework it. */
-export type ReviewVerdict = "pass" | "changes requested";
+/** A Review's verdict: the change passes, or the Developer must rework it; only the Consolidator can find a disagreement it cannot settle. */
+export type ReviewVerdict = "pass" | "changes requested" | "disagreement";
 
 /** One Review written during a Run, as kept in its Run Notes. */
 export interface Review {

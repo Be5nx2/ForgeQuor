@@ -146,7 +146,7 @@ watch(
     <fieldset v-if="asks('review')" class="review-choice">
       <legend>Review</legend>
       <label><input v-model="form.review" type="radio" value="solo" aria-label="Solo review" /> Solo: one Reviewer</label>
-      <label><input v-model="form.review" type="radio" value="duo" aria-label="Duo review" /> Duo: two Reviewers, one consolidated Review (Consolidator arrives in m3-12, runs solo for now)</label>
+      <label><input v-model="form.review" type="radio" value="duo" aria-label="Duo review" /> Duo: two Reviewers, one consolidated Review</label>
     </fieldset>
     <template v-if="asks('assets')">
       <fieldset v-for="(a, i) in assets" :key="i" class="stack asset-request">
