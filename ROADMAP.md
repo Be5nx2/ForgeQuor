@@ -11,9 +11,14 @@ Milestones are specified one at a time with `/to-spec`, then split into items wi
 The engine behind every Workflow, with no change visible to the human: a deeper Workflow seam, YAML **Workflows** with parallel **Steps**, a configurable iteration limit (default 3), **Escalation** with more choices than abandon, and the `developer` and `assets` Workflows rewritten as YAML with unchanged behaviour.
 
 - Spec: to write after the M3 grilling.
+- Decided in the grilling: built-in Workflows live in Forgequor, a Project adds or overrides one in `forgequor/workflows/` at its root; a Run freezes the Workflow it started with; an invalid YAML is not offered at launch; Escalations offer retry (optional Feedback), go back to an earlier Step (with Feedback) or abandon; order: m3-00a, m3-00b, seam, engine, `developer` then `assets` in YAML with existing tests unchanged, richer Escalations.
 - Prefactor in M3a (M2 branch review): deepen the Workflow seam. The core imports a dozen asset helpers and `startRun` writes asset rows itself, `WorkflowContext` has ~17 members, and Step-result handling is copied in both Workflows; YAML Workflows need a seam where adding one touches no core code.
 - [ ] `m3-00a` **Approved Runs free their slot**: a Run releases its Project slot as soon as it is Approved, and Approved Runs stay easy to find until merged (from the M2 real tests, where open sandbox PRs blocked the queue twice).
   - Blocked by: none
+  - Acceptance:
+    - an Approved Run no longer counts against its Project's concurrency limit, and becoming Approved starts the next Queued Run;
+    - "Waiting for you" gains a "Waiting for your merge" list: every Approved Run, all Projects, with its pull-request link, until merged or closed;
+    - the Runs list shows every Run in every state (the human once could not find a Run there; check it by hand and fix what hides one).
 - [ ] `m3-00b` **M2 review follow-ups**: the small gaps the M2 branch review found (listed below under "M2 review follow-ups").
   - Blocked by: `m3-00a`
 
