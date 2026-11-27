@@ -59,6 +59,23 @@ export function createQuotaKeeper(deps: QuotaKeeperDeps): QuotaKeeper {
     await record(vendor, { ...r, fiveHour: window(r.fiveHour, before?.fiveHour), weekly: window(r.weekly, before?.weekly) });
   }
 
+  /**
+   * A Quota pause: whatever else a Runner said, the vendor is exhausted until the reset time it named. That time belongs to
+   * the weekly window when that one is the full one, else to the five-hour one; the percents last read are kept.
+   */
+  async function recordPause(vendor: QuotaVendor, resetsAt: Date | null, own?: QuotaReading) {
+    const { rows } = await pool.query("SELECT * FROM quota_readings WHERE vendor = $1", [vendor]);
+    const before = rows[0] ? toReading(rows[0]) : null;
+    const merged = (now: QuotaReading["fiveHour"] | undefined, was: QuotaReading["fiveHour"] | undefined) => ({ percentUsed: now?.percentUsed ?? was?.percentUsed ?? null, resetsAt: now?.resetsAt ?? was?.resetsAt ?? null });
+    const fiveHour = merged(own?.fiveHour, before?.fiveHour);
+    const weekly = merged(own?.weekly, before?.weekly);
+    if (resetsAt) {
+      if ((weekly.percentUsed ?? 0) >= 100 && (fiveHour.percentUsed ?? 0) < 100) weekly.resetsAt = resetsAt;
+      else fiveHour.resetsAt = resetsAt;
+    }
+    await record(vendor, { fiveHour, weekly, exhausted: true, readAt: now() });
+  }
+
   async function record(vendor: QuotaVendor, r: QuotaReading) {
     await pool.query(
       `INSERT INTO quota_readings (vendor, five_hour_percent, five_hour_resets_at, weekly_percent, weekly_resets_at, exhausted, read_at)
@@ -102,7 +119,8 @@ export function createQuotaKeeper(deps: QuotaKeeperDeps): QuotaKeeper {
         async run(step, onEvent) {
           const result = await runner.run(step, onEvent);
           try {
-            if (result.quota) await recordStep(vendor, result.quota);
+            if (result.status === "quota_exhausted") await recordPause(vendor, result.resetsAt, result.quota);
+            else if (result.quota) await recordStep(vendor, result.quota);
           } catch (e) {
             console.error(`Could not record the ${vendor} Quota:`, e);
           }

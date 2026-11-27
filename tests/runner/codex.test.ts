@@ -1,4 +1,4 @@
-import { mkdtempSync, realpathSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -289,5 +289,59 @@ describe("Codex Runner", () => {
     const result = await createCodexRunner({ env: fake.env }).run({ ...step(), session: { start: true } }, () => {});
 
     expect(result).toMatchObject({ status: "failed", error: expect.stringContaining("cannot keep a session") });
+  });
+
+  describe("Quota reading", () => {
+    const limits = (primary: number, secondary: number) => ({
+      limit_id: "codex",
+      primary: { used_percent: primary, window_minutes: 300, resets_at: 1795832327 },
+      secondary: { used_percent: secondary, window_minutes: 10080, resets_at: 1796118612 },
+      rate_limit_reached_type: null,
+    });
+    const tokenCount = (rate_limits: unknown) => line({ type: "event_msg", payload: { type: "token_count", info: null, rate_limits } });
+    const rollout = (home: string, ...lines: string[]) => {
+      const dir = join(home, "sessions", "2026", "11", "27");
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, `rollout-2026-11-27T10-00-00-${THREAD}.jsonl`), lines.join("\n") + "\n");
+    };
+    const stdout = [started, message("ok"), completed];
+    const now = () => new Date("2026-11-27T10:00:00Z");
+
+    async function runWith(prepare: (home: string) => void, script = stdout) {
+      const home = realpathSync(mkdtempSync(join(tmpdir(), "forgequor-codex-home-")));
+      prepare(home);
+      const fake = createFakeCli({ stdout: script }, "codex");
+      return createCodexRunner({ env: { ...fake.env, CODEX_HOME: home }, now }).run(step(), () => {});
+    }
+
+    it("reads the last token_count of the thread's session file: primary is five-hour, secondary weekly", async () => {
+      const result = await runWith((home) => rollout(home, tokenCount(limits(1, 5)), line({ type: "event_msg", payload: { type: "agent_message" } }), tokenCount(limits(3, 11))));
+
+      expect(result.status).toBe("succeeded");
+      expect(result.quota).toEqual({
+        fiveHour: { percentUsed: 3, resetsAt: new Date(1795832327 * 1000) },
+        weekly: { percentUsed: 11, resetsAt: new Date(1796118612 * 1000) },
+        exhausted: false,
+        readAt: now(),
+      });
+    });
+
+    it("says exhausted when a window is full", async () => {
+      const result = await runWith((home) => rollout(home, tokenCount(limits(100, 40))));
+      expect(result.quota?.exhausted).toBe(true);
+    });
+
+    it("gives no reading without a session file, with an unreadable one, or without rate limits", async () => {
+      expect((await runWith(() => {})).quota).toBeUndefined();
+      expect((await runWith((home) => rollout(home, "not json", "{"))).quota).toBeUndefined();
+      expect((await runWith((home) => rollout(home, tokenCount(null)))).quota).toBeUndefined();
+      expect((await runWith((home) => rollout(home, tokenCount(limits(1, 2))), [message("no thread")])).quota).toBeUndefined();
+    });
+
+    it("also carries the reading when the Step ran out of Quota", async () => {
+      const result = await runWith((home) => rollout(home, tokenCount(limits(100, 20))), [started, failed("You've hit your usage limit. Try again later.")]);
+      expect(result.status).toBe("quota_exhausted");
+      expect(result.quota?.fiveHour.percentUsed).toBe(100);
+    });
   });
 });
