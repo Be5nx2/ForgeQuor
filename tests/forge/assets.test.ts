@@ -16,6 +16,8 @@ let forge: Forge;
 let pool: pg.Pool;
 let drop: () => Promise<void>;
 let worktrees: string;
+/** The Forge's clock; the real time when null. */
+let fakeNow: Date | null = null;
 let scratch: string;
 const developer = createFakeRunner();
 const artist = createFakeRunner();
@@ -44,6 +46,7 @@ function forgeWith() {
     artistModel: "gpt-test",
     codeHost,
     worktreesRoot: worktrees,
+    now: () => fakeNow ?? new Date(),
   });
   others.push(created);
   return created;
@@ -54,7 +57,10 @@ afterAll(async () => {
   rmSync(worktrees, { recursive: true, force: true });
   rmSync(scratch, { recursive: true, force: true });
 });
-afterEach(() => {
+afterEach(async () => {
+  // Paused Runs of one test must not be resumed by another test's clock.
+  await pool.query("UPDATE runs SET state = 'abandoned' WHERE state = 'paused'");
+  fakeNow = null;
   developer.use(() => {});
   developer.steps.length = 0;
   artist.use(() => {});
@@ -928,5 +934,118 @@ describe("the human's verdicts at the Asset Gate", () => {
     const run = await forge.decideGate({ gateId: waiting.gates.at(-1)!.id, action: "abandon" });
 
     expect(run.state).toBe("abandoned");
+  });
+});
+
+describe("an assets Run cut short", () => {
+  const RESET = new Date("2030-01-01T12:00:00Z");
+
+  it("pauses when Codex's Quota runs out on an Asset, then resumes at that Asset without redoing the others", async () => {
+    const { project } = await projectWithRemote();
+    fakeNow = new Date("2030-01-01T10:00:00Z");
+    artist.use((step) => (artist.steps.length === 2 ? { status: "quota_exhausted", resetsAt: RESET } : drawing()(step)));
+    const first = await startAssets(project);
+    const heroBytes = readFileSync(join(first.worktreePath!, "assets/art/sprites/hero-idle.png"));
+
+    expect(first.state).toBe("paused");
+    expect(first.resumeAt).toEqual(RESET);
+    expect(first.assets.map((a) => a.status)).toEqual(["waiting", "generating"]);
+
+    fakeNow = new Date("2030-01-01T12:00:01Z");
+    artist.use(drawing());
+    await forge.resumePausedRuns();
+    await forge.whenIdle();
+
+    const run = await forge.getRun(first.id);
+    expect(run.state).toBe("waiting");
+    expect(artist.steps.map(targetOf)).toEqual(["assets/art/sprites/hero-idle.png", "assets/art/tiles/grass.png", "assets/art/tiles/grass.png"]);
+    expect(run.attempts.map((a) => [a.attempt, a.status])).toEqual([[1, "succeeded"], [1, "quota_exhausted"], [2, "succeeded"]]);
+    expect(readFileSync(join(run.worktreePath!, "assets/art/sprites/hero-idle.png"))).toEqual(heroBytes);
+    expect(run.gates).toMatchObject([{ kind: "asset", decision: null }]);
+  });
+
+  it("picks up at its current Asset after a restart of Forgequor, keeping the Assets already produced", async () => {
+    const { project } = await projectWithRemote();
+    let release!: () => void;
+    const hold = new Promise<void>((r) => (release = r));
+    let inGrass!: () => void;
+    const reachedGrass = new Promise<void>((r) => (inGrass = r));
+    artist.use(async (step) => {
+      if (artist.steps.length < 2) return drawing()(step);
+      inGrass();
+      await hold;
+      return { status: "failed", error: "the old process is gone" };
+    });
+    const started = await forge.startRun({ projectId: project.id, workflow: "assets", assets: [hero, grass] });
+    await reachedGrass;
+    const heroPath = join((await forge.getRun(started.id)).worktreePath!, "assets/art/sprites/hero-idle.png");
+    const heroBytes = readFileSync(heroPath);
+
+    // The process dies here: a new Forgequor starts and recovers what was Running.
+    artist.use(drawing());
+    const restarted = forgeWith();
+    await restarted.recoverAfterRestart();
+    await restarted.whenIdle();
+
+    const run = await restarted.getRun(started.id);
+    expect(run.state).toBe("waiting");
+    expect(artist.steps.map(targetOf)).toEqual(["assets/art/sprites/hero-idle.png", "assets/art/tiles/grass.png", "assets/art/tiles/grass.png"]);
+    expect(run.attempts.map((a) => a.status)).toEqual(["succeeded", "failed", "succeeded"]);
+    expect(run.attempts[1]!.error).toMatch(/restart/i);
+    expect(readFileSync(heroPath)).toEqual(heroBytes);
+    expect(run.assets.map((a) => a.status)).toEqual(["waiting", "waiting"]);
+    expect(run.gates).toMatchObject([{ kind: "asset", decision: null }]);
+    release();
+    await forge.whenIdle();
+  });
+
+  it("kills the running Artist as soon as the Run is abandoned", async () => {
+    const { project } = await projectWithRemote();
+    let cancelled!: () => void;
+    const wasCancelled = new Promise<void>((r) => (cancelled = r));
+    let inStep!: () => void;
+    const started = new Promise<void>((r) => (inStep = r));
+    artist.use(
+      (step) =>
+        new Promise((resolve) => {
+          inStep();
+          step.signal!.addEventListener("abort", () => {
+            cancelled();
+            resolve({ status: "failed", error: "killed" });
+          });
+        }),
+    );
+    const { id } = await forge.startRun({ projectId: project.id, workflow: "assets", assets: [hero, grass] });
+    await started;
+
+    await forge.abandonRun(id);
+
+    await wasCancelled;
+    await forge.whenIdle();
+    const run = await forge.getRun(id);
+    expect(run.state).toBe("abandoned");
+    expect(run.gates).toEqual([]);
+    expect(artist.steps).toHaveLength(1);
+    expect(codeHost.pullRequests).toEqual([]);
+  });
+
+  it("reports its progress live, Asset by Asset", async () => {
+    const { project } = await projectWithRemote();
+    artist.use((step, emit) => {
+      emit({ kind: "text", summary: `Drawing ${targetOf(step)}`, raw: "" });
+      drawing()(step);
+    });
+    const heard: Array<{ type: string; summary?: string; attemptId?: number }> = [];
+    const unsubscribe = forge.subscribe((u) => heard.push(u as any));
+
+    const run = await startAssets(project);
+    unsubscribe();
+
+    const progress = heard.filter((u) => u.type === "progress");
+    expect(progress.map((u) => u.summary)).toEqual(["Drawing assets/art/sprites/hero-idle.png", "Drawing assets/art/tiles/grass.png"]);
+    // Each event names the Step attempt it belongs to, and that attempt names its Asset.
+    expect(progress.map((u) => run.attempts.find((a) => a.id === u.attemptId)!.assetId)).toEqual(run.assets.map((a) => a.id));
+    // The Run announces every Asset's change of status: each Asset starts and ends separately.
+    expect(heard.filter((u) => u.type === "changed").length).toBeGreaterThanOrEqual(4);
   });
 });

@@ -28,7 +28,7 @@ export async function runAgentStep(
      VALUES ($1, $2, $3, $4, $5, $6, 'running', $7) RETURNING id`,
     [run.id, run.iteration, step.name, step.attempt, seat.runnerName, seat.model ?? null, step.assetId ?? null],
   );
-  const attemptId = rows[0].id;
+  const attemptId = Number(rows[0].id);
   const log: string[] = [];
   ctx.changed();
 

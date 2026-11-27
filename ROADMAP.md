@@ -96,7 +96,7 @@ Codex **Runner**, **Artist**, an `assets` **Workflow** (Artist → asset **Gate*
     - an Asset Request can be marked as replacing an existing file;
     - starting a Run is refused, before anything is generated, when a file would be overwritten without that mark, when two Asset Requests would produce the same file, or when a reference does not exist;
     - the README documents the Art Direction contract (Palette heading, Default size line, reference images).
-- [ ] `m2-09` **Resilient, live assets Runs**: an `assets` Run survives limits and restarts, and shows its progress.
+- [x] `m2-09` **Resilient, live assets Runs**: an `assets` Run survives limits and restarts, and shows its progress.
   - Spec: `docs/specs/m2-assets.md`
   - Blocked by: `m2-04`
   - Acceptance:

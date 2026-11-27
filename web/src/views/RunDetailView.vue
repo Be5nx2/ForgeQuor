@@ -38,6 +38,10 @@ const live = ref<{ attemptId: number; kind: "text" | "tool" | "other"; summary: 
 const LIVE_LINES = 100;
 const runningAttempt = computed(() => run.value?.attempts.find((a) => a.status === "running"));
 const liveNow = computed(() => live.value.filter((l) => l.attemptId === runningAttempt.value?.id));
+/** For an `assets` Run: how far the batch is, and the Asset the Artist is drawing now. */
+const DRAWN = ["waiting", "approved"];
+const drawnCount = computed(() => run.value?.assets.filter((a) => DRAWN.includes(a.status)).length ?? 0);
+const drawing = computed(() => run.value?.assets.find((a) => a.id === runningAttempt.value?.assetId));
 
 let stopFollowing: () => void;
 onMounted(() => {
@@ -71,6 +75,10 @@ onUnmounted(() => stopFollowing?.());
 
     <template v-if="run.assets.length">
       <h3>Assets</h3>
+      <p class="progress" aria-label="Progress">
+        {{ drawnCount }} of {{ run.assets.length }} drawn<span v-if="drawing"> · the Artist is drawing <strong>{{ drawing.name }}</strong> (Asset {{ drawing.position + 1 }}, attempt {{ runningAttempt?.attempt }})</span>
+      </p>
+      <p v-if="drawing" class="muted">The Artist's live events are listed under Steps.</p>
       <AssetGallery
         :run-id="run.id"
         :iteration="run.iteration"

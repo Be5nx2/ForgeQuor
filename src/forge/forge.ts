@@ -520,19 +520,20 @@ export function createForge(deps: ForgeDeps): Forge {
     let run: Run;
     try {
       await client.query("BEGIN");
-      // Guarded on decided_at and on the Run still waiting, so a racing decision or abandon cannot also win.
-      const decided = await client.query(
-        "UPDATE gates SET decided_at = now(), decision = $2, feedback = $3 WHERE id = $1 AND decided_at IS NULL RETURNING run_id",
-        [gate.id, decision.action, decision.feedback ?? null],
+      // The Run row is locked before the Gate row, the order `settle` uses too, so a decision racing an abandon cannot
+      // deadlock. Guarded on the Run still waiting and the Gate undecided, so a racing decision or abandon cannot also win.
+      const moved = await client.query(
+        `UPDATE runs SET state = 'running', iteration = iteration + $2::int, brief_posted = brief_posted AND $2::int = 0, updated_at = now()
+         WHERE id = $1 AND state = 'waiting' RETURNING ${RUN_COLUMNS}`,
+        [gate.runId, decision.nextIteration ? 1 : 0],
       );
-      const moved = decided.rowCount
+      const decided = moved.rowCount
         ? await client.query(
-            `UPDATE runs SET state = 'running', iteration = iteration + $2::int, brief_posted = brief_posted AND $2::int = 0, updated_at = now()
-             WHERE id = $1 AND state = 'waiting' RETURNING ${RUN_COLUMNS}`,
-            [gate.runId, decision.nextIteration ? 1 : 0],
+            "UPDATE gates SET decided_at = now(), decision = $2, feedback = $3 WHERE id = $1 AND decided_at IS NULL RETURNING run_id",
+            [gate.id, decision.action, decision.feedback ?? null],
           )
         : null;
-      if (!moved?.rowCount) {
+      if (!decided?.rowCount) {
         await client.query("ROLLBACK");
         throw new GateError(`Gate ${gate.id} is already decided.`);
       }
@@ -840,19 +841,16 @@ export function createForge(deps: ForgeDeps): Forge {
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
-        // Guarded on decided_at so two decisions racing for the same Gate cannot both win.
-        const decided = await client.query(
-          "UPDATE gates SET decided_at = now(), decision = $2 WHERE id = $1 AND decided_at IS NULL RETURNING run_id",
-          [gateId, action],
-        );
-        if (!decided.rowCount) {
+        // The Run row first, as in `settle`, so that approving while the human abandons cannot deadlock; guarded on the Run
+        // still waiting and the Gate undecided, so two decisions racing for the same Gate cannot both win.
+        const moved = await client.query("UPDATE runs SET state = 'approved', updated_at = now() WHERE id = $1 AND state = 'waiting'", [gate.runId]);
+        const decided = moved.rowCount
+          ? await client.query("UPDATE gates SET decided_at = now(), decision = $2 WHERE id = $1 AND decided_at IS NULL RETURNING run_id", [gateId, action])
+          : null;
+        if (!decided?.rowCount) {
           await client.query("ROLLBACK");
           throw new GateError(`Gate ${gateId} is already decided.`);
         }
-        await client.query("UPDATE runs SET state = $2, updated_at = now() WHERE id = $1", [
-          gate.runId,
-          action === "approve" ? "approved" : "abandoned",
-        ]);
         await client.query("COMMIT");
       } catch (e) {
         if (!(e instanceof GateError)) await client.query("ROLLBACK").catch(() => {});
