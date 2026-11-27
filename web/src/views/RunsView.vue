@@ -74,6 +74,8 @@ async function load() {
     if (mine !== latest) return;
     runs.value = found;
     projects.value = known;
+    // Whichever load wins sets the form's default Project: the first one may be superseded before it gets here.
+    form.value.projectId ||= String(known[0]?.id ?? "");
     loaded.value = true;
     loadError.value = "";
   } catch (e: any) {
@@ -113,7 +115,6 @@ let stopFollowing: () => void;
 onMounted(async () => {
   stopFollowing = followRuns((u) => u.type === "changed" && load(), load);
   await load();
-  form.value.projectId ||= String(projects.value[0]?.id ?? "");
 });
 onUnmounted(() => stopFollowing?.());
 watch([filterProject, filterState], load);
@@ -121,11 +122,12 @@ watch([filterProject, filterState], load);
 watch(
   () => form.value.projectId,
   async (id) => {
-    const none: ArtInfo = { present: false, defaultSize: null, references: [], images: [] };
-    const fetched = id ? await getJson<ArtInfo>(`/api/projects/${id}/art-info`).catch(() => none) : none;
+    // Shown before any request: reading the Project's art facts already fetches its remote.
     workflows.value = [];
     workflowsProblem.value = "";
     workflowsLoading.value = !!id;
+    const none: ArtInfo = { present: false, defaultSize: null, references: [], images: [] };
+    const fetched = id ? await getJson<ArtInfo>(`/api/projects/${id}/art-info`).catch(() => none) : none;
     const noWorkflows: WorkflowList = { workflows: [], problem: null };
     const list = id ? await getJson<WorkflowList>(`/api/projects/${id}/workflows`).catch((e): WorkflowList => ({ workflows: [], problem: `Could not load the Workflows: ${e.message}` })) : noWorkflows;
     // A quicker switch to another Project already moved on: drop this answer.
