@@ -258,7 +258,7 @@ Griller with a **Conversation Gate** (it writes the Project's glossary and ADRs 
     - a `shared` Skill that first proposes reusing or adjusting a close existing Workflow, otherwise writes `<name>.yaml` in the Project's Workflows folder from the real Step types, validates it through `POST /api/workflows/validate` (configurable address, local default) and fixes it, or tells the human to open the Workflows page when Forgequor does not answer;
     - it carries a reference of the Step types and the built-in Workflows; a test checks both match the code;
     - `skills/README.md` lists it.
-- [ ] `m4-11` **M4 BA scenarios**: archiving and Quota readings checked for real.
+- [x] `m4-11` **M4 BA scenarios**: archiving and Quota readings checked for real.
   - Spec: `docs/specs/m4-comfort.md`
   - Blocked by: `m4-02`, `m4-05`
   - Acceptance:
