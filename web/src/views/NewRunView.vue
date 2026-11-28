@@ -85,7 +85,7 @@ async function loadSeats() {
   seatDrafts.value = Object.fromEntries((t?.seats ?? []).map((s) => [s.seat, { runner: s.runner.value ?? "", model: s.model.value ?? "" }]));
 }
 
-const offeredModels = (s: TeamSeat) => team.value?.models[seatDrafts.value[s.seat]!.runner] ?? [];
+const offeredModels = (s: TeamSeat) => team.value?.catalog[seatDrafts.value[s.seat]!.runner]?.models.map((m) => m.id) ?? [];
 const lockedBy = (s: TeamSeat) => [s.runner.variable, s.model.variable].filter(Boolean).join(", ");
 
 function exhaustion(s: TeamSeat): string {
@@ -306,7 +306,7 @@ watch(
             <label>
               Runner
               <select v-model="seatDrafts[s.seat]!.runner" :disabled="s.runner.source === 'env'" :aria-label="`Runner of ${s.seat} for this Run`">
-                <option v-for="r in Object.keys(team.models)" :key="r" :value="r">{{ r }}</option>
+                <option v-for="r in Object.keys(team.catalog)" :key="r" :value="r">{{ r }}</option>
               </select>
             </label>
             <label>

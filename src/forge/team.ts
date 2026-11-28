@@ -1,12 +1,7 @@
 import type pg from "pg";
+import type { RunnerCatalog } from "../runner/catalog.js";
 import { InvalidInputError, InvalidSeatError, SeatLockedError } from "./errors.js";
 import { DEFAULT_RUNNERS, RUNNER_NAMES, SEAT_NAMES, seatVariable, type RunnerName, type SeatName, type SeatSetting, type SeatSettings } from "./seats.js";
-
-/** The model aliases the Team page offers per Runner. Any other identifier is accepted as typed. */
-export const MODEL_ALIASES: Record<RunnerName, string[]> = {
-  claude: ["opus", "sonnet", "haiku"],
-  codex: ["gpt-6.2-sol", "gpt-6.2-astra", "gpt-6-luna"],
-};
 
 export type SettingSource = "env" | "team" | "default";
 
@@ -26,8 +21,8 @@ export interface TeamSeat {
 
 export interface Team {
   seats: TeamSeat[];
-  /** The aliases offered per Runner. */
-  models: Record<RunnerName, string[]>;
+  /** What each Runner offers: its models and effort levels, and whether the list is the built-in one (the CLI could not be read). */
+  catalog: RunnerCatalog;
 }
 
 /** What the Team page changes: a field left out stays as it is, null or empty clears it. */
@@ -100,13 +95,13 @@ export function settingsOf(seats: TeamSeat[]): SeatSettings {
 export interface TeamStore {
   /** Each seat's effective Runner and model, read now. */
   effective(): Promise<TeamSeat[]>;
-  /** The effective seats with the aliases on offer. */
+  /** The effective seats with the Runner Catalog on offer. */
   team(): Promise<Team>;
   /** Saves a seat's Runner and/or model; refuses an unknown seat or Runner, and a field the environment holds. */
   change(seat: string, change: TeamChange): Promise<Team>;
 }
 
-export function createTeamStore(pool: pg.Pool, env: SeatSettings): TeamStore {
+export function createTeamStore(pool: pg.Pool, env: SeatSettings, catalog: RunnerCatalog): TeamStore {
   async function saved(): Promise<SeatSettings> {
     const { rows } = await pool.query("SELECT seat, runner, model FROM team_seats");
     const settings: SeatSettings = {};
@@ -114,7 +109,7 @@ export function createTeamStore(pool: pg.Pool, env: SeatSettings): TeamStore {
     return settings;
   }
   const effective = async () => effectiveSeats(env, await saved());
-  const team = async (): Promise<Team> => ({ seats: await effective(), models: MODEL_ALIASES });
+  const team = async (): Promise<Team> => ({ seats: await effective(), catalog });
 
   async function change(seatName: string, change: TeamChange): Promise<Team> {
     if (!SEAT_NAMES.includes(seatName as SeatName)) throw new InvalidInputError(`"${seatName}" is not a seat; the seats are ${SEAT_NAMES.join(", ")}.`);

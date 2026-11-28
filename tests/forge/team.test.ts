@@ -6,6 +6,7 @@ import type pg from "pg";
 import { createForge, InvalidInputError, SeatLockedError, type Forge, type ForgeDeps, type Project, type RunDetail } from "../../src/forge/forge.js";
 import { seatSettingsFromEnv } from "../../src/forge/seats.js";
 import { effectiveSeats } from "../../src/forge/team.js";
+import { fallbackCatalog } from "../../src/runner/catalog.js";
 import type { StepRequest, StepResult } from "../../src/runner/runner.js";
 import { createTestDatabase } from "../harness/database.js";
 import { createFakeCodeHost } from "../harness/fake-codehost.js";
@@ -91,13 +92,24 @@ describe("effectiveSeats", () => {
 });
 
 describe("the Team", () => {
-  it("lists every seat with its default Runner, and the model aliases per Runner", async () => {
+  it("lists every seat with its default Runner, and the built-in Catalog when none was read", async () => {
     const team = await forgeWith().team();
 
     expect(team.seats).toHaveLength(8);
     expect(seat(team, "reviewer-b").runner).toEqual({ value: "codex", source: "default" });
-    expect(team.models.claude).toEqual(["opus", "sonnet", "haiku"]);
-    expect(team.models.codex.length).toBeGreaterThan(0);
+    expect(team.catalog.claude.models.map((m) => m.id)).toEqual(["opus", "sonnet", "haiku"]);
+    expect(team.catalog.claude.fallback).toBe(true);
+    expect(team.catalog.codex.fallback).toBe(true);
+  });
+
+  it("carries the Catalog the Forge was given, kept as read", async () => {
+    const catalog = fallbackCatalog();
+    catalog.codex = { models: [{ id: "gpt-6.1-terra", efforts: ["low", "high"], defaultEffort: "low" }], defaultModel: "gpt-6.1-terra", efforts: ["low", "high"], fallback: false };
+
+    const team = await forgeWith({ catalog }).team();
+
+    expect(team.catalog).toEqual(catalog);
+    expect((await forgeWith({ catalog }).changeSeat("developer", { model: "x" })).catalog).toEqual(catalog);
   });
 
   it("keeps a saved setting across Forges (a restart), and clears a field with null", async () => {

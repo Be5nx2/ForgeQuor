@@ -53,6 +53,19 @@ export interface TeamField {
   /** The environment variable that holds the field, when it does (the field is then locked). */
   variable?: string;
 }
+export interface CatalogModel {
+  id: string;
+  efforts: string[];
+  defaultEffort: string | null;
+}
+export interface CatalogEntry {
+  models: CatalogModel[];
+  defaultModel: string | null;
+  /** The levels of the default model and of a model the list does not know. */
+  efforts: string[];
+  /** True when the CLI could not be read and the list is the built-in one. */
+  fallback: boolean;
+}
 export interface TeamSeat {
   seat: string;
   runner: TeamField;
@@ -60,8 +73,8 @@ export interface TeamSeat {
 }
 export interface Team {
   seats: TeamSeat[];
-  /** The model aliases offered per Runner. */
-  models: Record<string, string[]>;
+  /** What each Runner offers, read from its CLI at startup. */
+  catalog: Record<string, CatalogEntry>;
 }
 
 export async function putJson<T>(url: string, body: unknown): Promise<T> {

@@ -14,7 +14,7 @@ Nothing in progress.
 
 Each Seat gains an effort level next to its Runner and model, picked from the Runner's own levels (read from the CLIs at startup), set by environment, Team page or New Run, recorded on each Step attempt. Source: Dogfood Note #2. Spec: `docs/specs/seat-effort.md`.
 
-- [ ] `eff-01` **Runner Catalog and real Codex models**: Forgequor learns each Runner's models and effort levels from the CLIs at startup, and the Team page offers the Codex models the installed Codex really serves.
+- [x] `eff-01` **Runner Catalog and real Codex models**: Forgequor learns each Runner's models and effort levels from the CLIs at startup, and the Team page offers the Codex models the installed Codex really serves.
   - Spec: `docs/specs/seat-effort.md`
   - Blocked by: none
   - Acceptance: a Runner Catalog read once at startup, kept in memory: Codex through `codex app-server` (`initialize`, `initialized`, `model/list`; per model its `supportedReasoningEfforts` and `defaultReasoningEffort`, the `isDefault` model, hidden models skipped; timeout and process group always killed, like the Quota reading), Claude Code from the `--effort` line of `claude --help`; a failing, slow or garbled reading falls back to the built-in list (Claude `low, medium, high, xhigh, max`; Codex `low, medium, high, xhigh, max, ultra`), logged once and flagged; no Quota spent; `GET /api/team` carries the Catalog (models, default model, levels per model, fallback flag) instead of the hand-written aliases; the Team page's model suggestions come from it and the model field stays free text; the fallback is flagged on the Team page; Catalog tests on a recorded `model/list` answer and a fake `claude --help`, one real reading of each in the smoke tests; checked in a browser.

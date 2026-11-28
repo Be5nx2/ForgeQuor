@@ -35,19 +35,24 @@ export interface AppServerCall {
   timeoutMs: number;
 }
 
+/** Sends one request to the app-server and resolves with its whole answer (an error answer too). */
+export type AppServerRequest = (method: string, params?: object) => Promise<any>;
+
 /**
- * Asks `codex app-server` for the account's rate limits (JSON-RPC, one message per line): `initialize`, then, once that is
- * answered, `initialized` and `account/rateLimits/read`. It calls no model, so it costs no Quota. Resolves with the answer
- * to the read, or rejects when the server cannot start, ends, answers too late, or answers the handshake with an error. The
- * process is always ended.
+ * Starts `codex app-server` (JSON-RPC, one message per line), does the handshake (`initialize`, then `initialized` once
+ * that is answered) and hands `work` a way to send requests. Resolves with what `work` returns, or rejects when the server
+ * cannot start, ends, answers too late, answers the handshake with an error, or `work` throws. Other lines (notifications,
+ * anything that is not an answer to a request) are ignored. The process is always ended, whatever happens.
  */
-export function readRateLimits({ env, timeoutMs }: AppServerCall): Promise<unknown> {
+export function withAppServer<T>({ env, timeoutMs }: AppServerCall, work: (request: AppServerRequest) => Promise<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     const child = spawn("codex", ["app-server"], { cwd: tmpdir(), env: env ?? process.env, detached: true, stdio: ["pipe", "pipe", "pipe"] });
     trackProcessGroup(child.pid);
     let buffer = "";
     let stderr = "";
     let done = false;
+    let nextId = 1;
+    const pending = new Map<number, (answer: any) => void>();
     const finish = (settle: () => void) => {
       if (done) return;
       done = true;
@@ -59,6 +64,12 @@ export function readRateLimits({ env, timeoutMs }: AppServerCall): Promise<unkno
     const fail = (message: string) => finish(() => reject(new Error(message)));
     const timer = setTimeout(() => fail(`codex app-server did not answer within ${timeoutMs} ms`), timeoutMs);
     const send = (m: object) => child.stdin.write(`${JSON.stringify(m)}\n`);
+    const request: AppServerRequest = (method, params) =>
+      new Promise((answered) => {
+        const id = nextId++;
+        pending.set(id, answered);
+        send(params ? { method, id, params } : { method, id });
+      });
 
     child.on("error", (e: NodeJS.ErrnoException) => fail(e.code === "ENOENT" ? "codex CLI not found on PATH" : `could not start codex app-server: ${e.message}`));
     child.on("close", (code, signal) => fail(`codex app-server ended (${signal ?? `code ${code}`}) before answering${stderr.trim() ? `: ${stderr.trim()}` : ""}`));
@@ -83,13 +94,23 @@ export function readRateLimits({ env, timeoutMs }: AppServerCall): Promise<unkno
         if (msg?.id === 0) {
           if (msg.error) return fail(`codex app-server refused to initialize: ${msg.error.message ?? "unknown error"}`);
           send({ method: "initialized", params: {} });
-          send({ method: "account/rateLimits/read", id: 1 });
-        } else if (msg?.id === 1) {
-          return finish(() => resolve(msg));
+          work(request).then(
+            (value) => finish(() => resolve(value)),
+            (e) => fail(e instanceof Error ? e.message : String(e)),
+          );
+        } else if (typeof msg?.id === "number" && pending.has(msg.id)) {
+          const answered = pending.get(msg.id)!;
+          pending.delete(msg.id);
+          answered(msg);
         }
       }
     });
 
     send({ method: "initialize", id: 0, params: { clientInfo: { name: "forgequor", version: "1.0" } } });
   });
+}
+
+/** Asks `codex app-server` for the account's rate limits (`account/rateLimits/read`). It calls no model, so it costs no Quota. */
+export function readRateLimits(call: AppServerCall): Promise<unknown> {
+  return withAppServer(call, (request) => request("account/rateLimits/read"));
 }

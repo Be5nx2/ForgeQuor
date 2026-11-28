@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { getJson, putJson, type Team, type TeamField, type TeamSeat } from "../api";
 import ErrorState from "../components/ErrorState.vue";
 import LoadingState from "../components/LoadingState.vue";
@@ -26,7 +26,8 @@ async function load() {
 }
 
 /** Offered models for the Runner picked in the draft. */
-const offered = (s: TeamSeat) => team.value?.models[drafts.value[s.seat]!.runner] ?? [];
+const offered = (s: TeamSeat) => team.value?.catalog[drafts.value[s.seat]!.runner]?.models.map((m) => m.id) ?? [];
+const builtIn = computed(() => Object.entries(team.value?.catalog ?? {}).filter(([, e]) => e.fallback).map(([r]) => r));
 const where = (f: TeamField) => (f.source === "env" ? `locked by ${f.variable}` : f.source === "team" ? "set here" : "default");
 
 async function save(s: TeamSeat) {
@@ -55,14 +56,17 @@ onMounted(load);
   <p v-if="error" class="banner" role="alert">{{ error }}</p>
   <ErrorState v-if="loadError" title="Could not load the Team" text="The Forgequor server did not answer. Check that it is running, then retry." :details="loadError" @retry="load" />
   <LoadingState v-else-if="!team" what="the Team" />
-  <ul v-else class="seats">
+  <p v-else-if="builtIn.length" class="banner" role="status">
+    Forgequor could not read {{ builtIn.join(" and ") }} at startup: the model and effort lists for {{ builtIn.length > 1 ? "them are" : "it is" }} the built-in ones and may be out of date.
+  </p>
+  <ul v-if="team" class="seats">
     <li v-for="s in team.seats" :key="s.seat">
       <form @submit.prevent="save(s)">
         <h3>{{ s.seat }}</h3>
         <label class="field">
           <span class="label">Runner</span>
           <select v-model="drafts[s.seat]!.runner" :disabled="s.runner.source === 'env'" :aria-label="`Runner of ${s.seat}`">
-            <option v-for="r in Object.keys(team.models)" :key="r" :value="r">{{ r }}</option>
+            <option v-for="r in Object.keys(team.catalog)" :key="r" :value="r">{{ r }}</option>
           </select>
           <span class="hint" :class="{ locked: s.runner.source === 'env' }">{{ where(s.runner) }}</span>
         </label>

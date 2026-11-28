@@ -1,10 +1,7 @@
-import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createCodexRunner } from "../../src/runner/codex.js";
 import { parseRateLimits } from "../../src/runner/codex-quota.js";
-import { until } from "../harness/wait.js";
+import { fakeAppServer as fakeServer, stopped } from "../harness/fake-app-server.js";
 
 const READ_AT = new Date("2026-11-28T10:00:00Z");
 
@@ -23,6 +20,9 @@ const ANSWER = {
     },
   },
 };
+
+/** A fake `codex app-server` that can answer with the recorded Quota answer. */
+const fakeAppServer = (body: string) => fakeServer(body, ANSWER);
 
 const withLimits = (limits: object) => ({ id: 1, result: { rateLimits: { ...ANSWER.result.rateLimits, ...limits } } });
 
@@ -65,56 +65,6 @@ describe("parseRateLimits", () => {
     expect(parseRateLimits({ id: 1, result: {} }, READ_AT)).toBeNull();
   });
 });
-
-/** A `codex` that speaks the app-server protocol from a script (`body` runs for each request `m`). */
-function fakeAppServer(body: string) {
-  const dir = mkdtempSync(join(tmpdir(), "forgequor-fake-appserver-"));
-  const bin = join(dir, "codex");
-  const script = join(dir, "server.cjs");
-  // A shell records the pid and becomes node (same pid): the pid is known as soon as the process exists, however long node takes to start.
-  writeFileSync(bin, `#!/bin/sh\necho $$ > ${JSON.stringify(join(dir, "pid"))}\nexec node ${JSON.stringify(script)} "$@"\n`);
-  writeFileSync(
-    script,
-    `
-const fs = require("node:fs");
-const log = (m) => fs.appendFileSync(${JSON.stringify(join(dir, "seen.log"))}, JSON.stringify(m) + "\\n");
-fs.writeFileSync(${JSON.stringify(join(dir, "args.json"))}, JSON.stringify(process.argv.slice(2)));
-const send = (o) => process.stdout.write(JSON.stringify(o) + "\\n");
-const ANSWER = ${JSON.stringify(ANSWER)};
-let buf = "";
-process.stdin.on("data", (c) => {
-  buf += c;
-  let i;
-  while ((i = buf.indexOf("\\n")) >= 0) {
-    const m = JSON.parse(buf.slice(0, i));
-    buf = buf.slice(i + 1);
-    log(m.method ?? m);
-    ${body}
-  }
-});
-`,
-  );
-  chmodSync(bin, 0o755);
-  return {
-    env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
-    seen: (): string[] => readFileSync(join(dir, "seen.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l)),
-    args: (): string[] => JSON.parse(readFileSync(join(dir, "args.json"), "utf8")),
-    /** The server's pid; null when it was stopped before it ran at all (a loaded machine can be slower than the short wait of a test). */
-    pid: (): number | null => (existsSync(join(dir, "pid")) ? Number(readFileSync(join(dir, "pid"), "utf8")) : null),
-  };
-}
-
-const alive = (pid: number) => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-/** Waits until the fake server's process is gone (what only the operating system can tell). */
-const stopped = (fake: { pid: () => number | null }) => until(() => expect(fake.pid() === null || !alive(fake.pid()!)).toBe(true));
 
 const HAPPY = `
 if (m.method === "initialize") send({ id: m.id, result: { userAgent: "fake" } });

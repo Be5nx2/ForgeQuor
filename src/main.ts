@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { createGhCodeHost } from "./codehost/gh.js";
 import { createForge } from "./forge/forge.js";
 import { notifierFromEnv } from "./forge/notifier.js";
+import { readCatalog } from "./runner/catalog.js";
 import { createClaudeRunner } from "./runner/claude.js";
 import { createCodexRunner } from "./runner/codex.js";
 import { createServer } from "./http/server.js";
@@ -36,6 +37,10 @@ console.log(applied.length ? `Applied migrations: ${applied.join(", ")}` : "Data
 
 const tools = await checkTools();
 for (const t of tools) console.log(`${t.status === "ok" ? "✓" : "✗"} ${t.tool}: ${t.detail}`);
+
+// What each Runner's CLI offers (models, effort levels), read once; a failing reading falls back to the built-in list.
+const catalog = await readCatalog();
+for (const [runner, entry] of Object.entries(catalog)) console.log(`${runner}: ${entry.models.length} models, efforts ${entry.efforts.join(", ")}${entry.fallback ? " (built-in list)" : ""}`);
 
 /** A setting in minutes as milliseconds; unset leaves the default, and a bad value is refused. */
 function minutesAsMs(name: string): number | undefined {
@@ -71,6 +76,7 @@ const forge = createForge({
   worktreesRoot: process.env.FORGEQUOR_WORKTREES ?? join(homedir(), ".forgequor", "worktrees"),
   // FORGEQUOR_<SEAT>_RUNNER and FORGEQUOR_<SEAT>_MODEL per Agent seat, such as FORGEQUOR_DEVELOPER_MODEL or FORGEQUOR_REVIEWER_B_RUNNER.
   seats: seatSettingsFromEnv(process.env),
+  catalog,
   stepTimeoutMs: minutesAsMs("FORGEQUOR_STEP_TIMEOUT_MINUTES"),
   checkTimeoutMs: minutesAsMs("FORGEQUOR_CHECK_TIMEOUT_MINUTES"),
   // Archived Runs are deleted after FORGEQUOR_ARCHIVE_DAYS days (default 60).

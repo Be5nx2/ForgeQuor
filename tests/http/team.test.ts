@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { InvalidInputError, SeatLockedError, type Forge } from "../../src/forge/forge.js";
+import { fallbackCatalog } from "../../src/runner/catalog.js";
 import { createServer } from "../../src/http/server.js";
 
 let close: (() => Promise<void>) | undefined;
@@ -17,7 +18,7 @@ const put = (address: string, seat: string, body: unknown) =>
   fetch(`${address}/api/team/${seat}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
 describe("the Team routes", () => {
-  const team = { seats: [], models: { claude: ["opus"], codex: ["gpt"] } };
+  const team = { seats: [], catalog: fallbackCatalog() };
 
   it("GET /api/team returns the Forge's Team", async () => {
     const address = await serve({ team: async () => team });
