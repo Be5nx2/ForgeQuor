@@ -4,6 +4,7 @@ import { getJson, postJson, putJson, type Project } from "../api";
 import EmptyState from "../components/EmptyState.vue";
 import ErrorState from "../components/ErrorState.vue";
 import LoadingState from "../components/LoadingState.vue";
+import { purgeAllOffer, purgedMessage, purgeProjectOffer } from "../projectDanger";
 import { changedSections, commandsOf, draftOf, projectSubtitle, selectProject, type Draft, type Section } from "../projectsForm";
 
 /** The Project the URL names (/projects/:id); without one, the first Project is shown. */
@@ -21,6 +22,11 @@ const saving = ref(false);
 const offeredPacks = ref<string[]>([]);
 /** What is being edited, by Project id. */
 const drafts = ref<Record<number, Draft>>({});
+
+/** Which purge awaits its confirmation, and the result of the last one. */
+const confirmingPurge = ref<"all" | "project" | null>(null);
+const purging = ref(false);
+const notice = ref("");
 
 const selected = computed(() => selectProject(projects.value, props.id));
 const draft = computed(() => (selected.value ? drafts.value[selected.value.id] : undefined));
@@ -107,6 +113,33 @@ async function register() {
   }
 }
 
+const allOffer = computed(() => purgeAllOffer(projects.value));
+const projectOffer = computed(() => (selected.value ? purgeProjectOffer(selected.value) : null));
+
+/** Purges now (every Project, or the selected one), then refreshes only the Archived counts so unsaved edits stay. */
+async function purgeNow(scope: "all" | "project") {
+  error.value = "";
+  notice.value = "";
+  purging.value = true;
+  try {
+    const body = scope === "project" && selected.value ? { projectId: selected.value.id } : {};
+    const { deleted } = await postJson<{ deleted: number }>("/api/archived-runs/purge", body);
+    notice.value = purgedMessage(deleted);
+    confirmingPurge.value = null;
+    const fresh = await getJson<Project[]>("/api/projects");
+    for (const p of projects.value) p.archivedRuns = fresh.find((f) => f.id === p.id)?.archivedRuns ?? 0;
+  } catch (e: any) {
+    error.value = e.message;
+  } finally {
+    purging.value = false;
+  }
+}
+
+function askPurge(scope: "all" | "project") {
+  notice.value = "";
+  confirmingPurge.value = confirmingPurge.value === scope ? null : scope;
+}
+
 function addRow(rows: string[]) {
   rows.push("");
 }
@@ -124,7 +157,15 @@ onMounted(load);
       <h1>Projects</h1>
       <p class="lede">Git repositories Forgequor works on</p>
     </div>
-    <button class="btn btn-primary" type="button" :aria-expanded="registering" @click="registering = !registering">+ Register Project</button>
+    <div class="head-actions">
+      <button class="btn" type="button" :disabled="allOffer.disabled || purging" :aria-expanded="confirmingPurge === 'all'" @click="askPurge('all')">{{ allOffer.disabled ? allOffer.label : "Purge Archived Runs" }}</button>
+      <button class="btn btn-primary" type="button" :aria-expanded="registering" @click="registering = !registering">+ Register Project</button>
+    </div>
+  </div>
+
+  <div v-if="confirmingPurge === 'all' && !allOffer.disabled" class="panel confirm" role="alertdialog" aria-label="Confirm purging every Archived Run">
+    <p>{{ allOffer.question }}</p>
+    <div class="actions"><button class="btn btn-ghost" type="button" :disabled="purging" @click="confirmingPurge = null">Cancel</button><button class="btn btn-danger-solid" type="button" :disabled="purging" @click="purgeNow('all')">Delete</button></div>
   </div>
 
   <form v-if="registering" class="panel register" @submit.prevent="register">
@@ -136,6 +177,7 @@ onMounted(load);
     <div class="actions"><button class="btn btn-ghost" type="button" @click="registering = false">Cancel</button><button class="btn btn-primary" type="submit">Register</button></div>
   </form>
   <p v-if="error" class="error" role="alert">{{ error }}</p>
+  <p v-if="notice" class="notice" role="status">{{ notice }}</p>
 
   <ErrorState v-if="loadError" title="Could not load the Projects" text="The Forgequor server did not answer. Check that it is running, then retry." :details="loadError" @retry="load" />
   <LoadingState v-else-if="!loaded" what="Projects" />
@@ -202,6 +244,21 @@ onMounted(load);
         <button class="btn btn-ghost" type="button" :disabled="!dirty || saving" @click="discard">Discard</button>
         <button class="btn btn-primary" type="submit" :disabled="!dirty || saving">Save</button>
       </div>
+
+      <section v-if="projectOffer" class="danger" aria-label="Danger zone">
+        <h2>Danger zone</h2>
+        <div class="danger-row">
+          <div>
+            <strong>Purge its Archived Runs now</strong>
+            <span class="hint">Deletes this Project's Archived Runs at once, without waiting for the delay. Active and finished Runs are never touched.</span>
+          </div>
+          <button class="btn btn-danger-outline" type="button" :disabled="projectOffer.disabled || purging" :aria-expanded="confirmingPurge === 'project'" @click="askPurge('project')">{{ projectOffer.disabled ? projectOffer.label : "Purge its Archived Runs now" }}</button>
+        </div>
+        <div v-if="confirmingPurge === 'project' && !projectOffer.disabled" class="danger-confirm" role="alertdialog" aria-label="Confirm purging this Project's Archived Runs">
+          <p>{{ projectOffer.question }}</p>
+          <div class="actions"><button class="btn btn-ghost" type="button" :disabled="purging" @click="confirmingPurge = null">Cancel</button><button class="btn btn-danger-solid" type="button" :disabled="purging" @click="purgeNow('project')">Delete</button></div>
+        </div>
+      </section>
     </form>
     <EmptyState v-else title="Project not found" text="No Project has this address. Pick one from the list." />
   </div>
@@ -211,7 +268,20 @@ onMounted(load);
 .head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-4); flex-wrap: wrap; margin-bottom: var(--sp-5); }
 h1 { font: 700 var(--fs-xl)/1.2 var(--font-brand); letter-spacing: 0.03em; }
 .lede { color: var(--text-muted); font-size: var(--fs-sm); margin: var(--sp-1) 0 0; }
+.head-actions { display: flex; gap: var(--sp-3); flex-wrap: wrap; }
 .error { margin: 0 0 var(--sp-4); }
+.notice { margin: 0 0 var(--sp-4); color: var(--st-ok); font-size: var(--fs-sm); }
+.confirm { margin-bottom: var(--sp-5); max-width: 40rem; gap: var(--sp-3); }
+.confirm p { margin: 0; font-size: var(--fs-sm); }
+
+.danger { border: 1px solid var(--st-bad); border-radius: var(--radius-md); padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-3); }
+.danger h2 { margin: 0; font: 700 var(--fs-sm)/1.2 var(--font-ui); color: var(--st-bad); text-transform: uppercase; letter-spacing: 0.06em; }
+.danger-row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); flex-wrap: wrap; }
+.danger-row > div { display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--fs-sm); max-width: 32rem; }
+.danger-confirm { display: flex; flex-direction: column; gap: var(--sp-3); }
+.danger-confirm p { margin: 0; font-size: var(--fs-sm); }
+.btn-danger-outline { color: var(--st-bad); border-color: var(--st-bad); }
+.btn-danger-solid { background: var(--st-bad); border-color: var(--st-bad); color: #1a0508; }
 
 .split2 { display: grid; grid-template-columns: 17rem 1fr; gap: var(--sp-5); align-items: start; }
 .plist { display: grid; gap: var(--sp-2); }

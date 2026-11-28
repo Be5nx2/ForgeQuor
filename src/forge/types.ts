@@ -24,6 +24,8 @@ export interface Project {
   artFolder: string;
   /** The Skill Packs picked on top of `shared`, in the order they are placed. */
   skillPacks: string[];
+  /** How many of its Runs are Archived (what "purge now" would delete). */
+  archivedRuns: number;
 }
 
 /** The Art Direction facts of a Project and the images a Run form can offer as references. */

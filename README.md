@@ -98,6 +98,17 @@ All settings are optional environment variables. Set them in the shell that runs
 | `FORGEQUOR_DOGFOOD_FOLDER` | `docs/dogfood` | Where a Dogfood Export is written (relative to the Forgequor checkout; created when missing; git-ignored) |
 | `FORGEQUOR_CHECK_TIMEOUT_MINUTES` | `10` | A Check command running longer is killed and counts as failed |
 
+### Starting over
+
+The app has no "reset everything" button, on purpose. To wipe Forgequor entirely (every Project, Run and Dogfood Note), do it by hand:
+
+1. Stop Forgequor (and any running Run).
+2. Drop its database. With the bundled Docker Compose, `docker compose down -v` stops PostgreSQL and deletes its volume (`forgequor_pgdata`); with your own PostgreSQL, drop the `forgequor` database.
+3. Empty the worktrees folder (`~/.forgequor/worktrees` unless `FORGEQUOR_WORKTREES` says otherwise). If a Run left a worktree attached to one of your repositories, run `git worktree prune` there afterwards.
+4. Start Forgequor again: the migrations rebuild an empty database.
+
+To clear only old history, use **Purge Archived Runs** on the Projects screen instead (all Projects at once, or per Project in its Danger zone).
+
 ### Tests
 
 ```bash
