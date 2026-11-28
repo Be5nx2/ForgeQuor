@@ -69,7 +69,7 @@ The comment a **Run** posts on its pull request for the final **Gate**: what the
 _Avoid_: PR summary, PR description, review comment
 
 **Archive**:
-What remains of a **Run** once it is **Archived**: its **Run Notes**, reviews, **Gates**, transcripts, attempts and metadata, kept for a limited time. Its worktree and local branch are gone.
+What remains of a **Run** once it is **Archived**: its **Run Notes** (the text ones, copied into the database before the worktree is removed; binary files and files over 1 MB are not kept), reviews, **Gates**, transcripts, attempts and metadata, kept for a limited time. Its worktree and local branch are gone.
 _Avoid_: Backup, snapshot
 
 **Iteration**:

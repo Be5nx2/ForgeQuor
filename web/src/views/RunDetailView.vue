@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { followRuns, getJson, postJson, type RunDetail } from "../api";
+import { followRuns, getJson, postJson, type RunDetail, type RunNote } from "../api";
 import AssetGallery from "../components/AssetGallery.vue";
 import GateActions from "../components/GateActions.vue";
 import Markdown from "../components/Markdown.vue";
@@ -14,6 +14,17 @@ const error = ref("");
 async function load() {
   try {
     run.value = await getJson(`/api/runs/${props.id}`);
+  } catch (e: any) {
+    error.value = e.message;
+  }
+}
+
+/** The kept Run Note the human opened (clicking it again closes it). */
+const note = ref<RunNote | null>(null);
+async function openNote(path: string) {
+  if (note.value?.path === path) return void (note.value = null);
+  try {
+    note.value = await getJson(`/api/runs/${props.id}/notes?path=${encodeURIComponent(path)}`);
   } catch (e: any) {
     error.value = e.message;
   }
@@ -139,6 +150,21 @@ onUnmounted(() => stopFollowing?.());
         <GateActions v-else :gate="g" @decided="load" />
       </li>
     </ul>
+
+    <template v-if="run.runNotes.length">
+      <h3>Run Notes</h3>
+      <p class="muted">Kept from the removed worktree.</p>
+      <ul aria-label="Run Notes">
+        <li v-for="n in run.runNotes" :key="n.path">
+          <a href="#" @click.prevent="openNote(n.path)"><code>{{ n.path }}</code></a>
+          <span class="muted"> · {{ n.size }} bytes</span>
+          <template v-if="note?.path === n.path">
+            <Markdown v-if="/\.(md|markdown)$/i.test(n.path)" :text="note.content" />
+            <pre v-else>{{ note.content }}</pre>
+          </template>
+        </li>
+      </ul>
+    </template>
 
     <template v-if="run.reviews.length">
       <h3>Reviews</h3>

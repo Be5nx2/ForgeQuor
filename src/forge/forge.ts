@@ -4,6 +4,7 @@ import { isDeepStrictEqual } from "node:util";
 import type pg from "pg";
 import type { Runner } from "../runner/runner.js";
 import { bugfixAgent, bugfixWorkflow, developerAgent, developerWorkflow } from "./developer.js";
+import { createRunNotes, readRunNotes } from "./run-notes.js";
 import { createConversationRecords } from "./conversation-records.js";
 import { createConversationGate, conversationStepType, type ConversationAgent } from "./conversation.js";
 import { featureWorkflow, grillerAgent } from "./feature.js";
@@ -42,6 +43,7 @@ import type {
   QuotaStatus,
   Run,
   RunDetail,
+  RunNote,
   RunState,
   RunUpdate,
   ReviewMode,
@@ -101,6 +103,8 @@ export interface Forge {
    */
   startRun(input: RunInput & { projectId: number; trackerRef?: string; workflow?: string; seats?: SeatSettings }): Promise<Run>;
   getRun(id: number): Promise<RunDetail>;
+  /** One of an Archived Run's kept Run Notes, by its path; throws a RunNotFoundError when the Run has no such note. */
+  getRunNote(runId: number, path: string): Promise<RunNote>;
   listRuns(filter?: { projectId?: number; state?: RunState }): Promise<Run[]>;
   /** Every Gate still waiting for the human, across all Projects. */
   listOpenGates(): Promise<OpenGate[]>;
@@ -329,6 +333,7 @@ export function createForge(deps: ForgeDeps): Forge {
   const skillsRoot = deps.skillsRoot ?? SKILLS_ROOT;
   /** The Workflows a Run can follow, by name. */
   const extensions = deps.extensions ?? builtInExtensions(pool);
+  const runNotes = createRunNotes(pool);
   const workflows = new Map<string, Workflow>([developerWorkflow, bugfixWorkflow, featureWorkflow, ...extensions.flatMap((e) => e.workflows)].map((w) => [w.name, w]));
   /** How each built-in Workflow's pull request is made, when it is not the default. */
   const publications = new Map<string, Publication>([...workflows.values()].flatMap((w) => (w.publication ? [[w.name, w.publication] as const] : [])));
@@ -560,6 +565,16 @@ export function createForge(deps: ForgeDeps): Forge {
       // Only a folder Forgequor made for this Run is ever deleted.
       const worktreePath: string | null = row.worktree_path && basename(row.worktree_path) === `run-${runId}` ? row.worktree_path : null;
       if (row.worktree_path && !worktreePath) log("worktree", new Error(`${row.worktree_path} is not a Run folder, left alone`));
+      if (worktreePath) {
+        try {
+          // The worktree is the only place most Run Notes live, so they are copied before it goes.
+          const { notes, skipped } = await readRunNotes(worktreePath);
+          await runNotes.keep(runId, notes);
+          if (skipped.length) console.warn(`Run ${runId}: Run Notes not kept: ${skipped.join(", ")}.`);
+        } catch (e) {
+          log("Run Notes", e);
+        }
+      }
       try {
         for (const problem of await removeRunWorktree({ repoRoot: row.local_path, worktreePath, branch: row.branch })) log("local files", new Error(problem));
       } catch (e) {
@@ -1083,10 +1098,17 @@ export function createForge(deps: ForgeDeps): Forge {
         iterations,
         attempts: attempts.rows.map(toAttempt),
         checks: checks.rows.map(toCheck),
+        runNotes: await runNotes.list(id),
         reviews: (await pool.query("SELECT * FROM reviews WHERE run_id = $1 ORDER BY id", [id])).rows.map(toReview),
         conversation: await createConversationRecords(pool, id).all(),
         gates: await Promise.all(gates.rows.map(async (g) => withRedo({ ...(await gateOf(g)), verdicts: verdictsOf(Number(g.id)) }))),
       };
+    },
+
+    async getRunNote(runId, path) {
+      const note = await runNotes.get(runId, path);
+      if (!note) throw new RunNotFoundError(`Run ${runId} has no kept Run Note ${path}.`);
+      return note;
     },
 
     async listRuns(filter = {}) {
