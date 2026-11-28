@@ -5,6 +5,7 @@ All notable changes to Forgequor. Format: [Keep a Changelog](https://keepachange
 ## [Unreleased]
 
 ### Added
+- `/dogfood-triage` skill: reads a Dogfood Export, groups its notes by theme, proposes a roadmap item, a spec, the Icebox or dismissal per group, writes nothing until the human agrees, and ends with the note IDs to mark triaged or dismissed in the Inbox; "Dogfooding" section in `skills/README.md` (dogfood-04).
 - Export selected notes: tick notes in the Inbox (or select all shown) and **Export** writes one Markdown Dogfood Export, `export_forgequor_<date>_<time>.md`, with a header and a section per target, into `docs/dogfood/` (`FORGEQUOR_DOGFOOD_FOLDER`, created when missing, git-ignored) and offers it for download; no status changes; `POST /api/dogfood-notes/export` (dogfood-03).
 - Review notes in the Dogfood Inbox: an Inbox tab lists the notes newest first with status, nature and target filters and a badge counting the new ones; a note can be triaged (with an optional reference), dismissed, or brought back to new; `PUT /api/dogfood-notes/:id/status` (dogfood-02).
 - Jot a Dogfood Note: a floating **+ Note** button on every tab opens a popup (nature, target pre-selected from the tab, text) and records the note with its tab, Run or Project and date; `POST` and `GET /api/dogfood-notes`; glossary entries for Dogfood Note, Inbox and Export (dogfood-01).
