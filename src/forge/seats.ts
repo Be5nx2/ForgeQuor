@@ -1,3 +1,4 @@
+import { effortProblem, type RunnerCatalog } from "../runner/catalog.js";
 import type { Runner } from "../runner/runner.js";
 import type { AgentSeat, WorkflowContext } from "./workflow.js";
 
@@ -43,6 +44,25 @@ export function seatSettingsFromEnv(env: NodeJS.ProcessEnv): SeatSettings {
     if (runner || model || effort) settings[seat] = { runner: runner?.toLowerCase() || undefined, model: model || undefined, effort: effort || undefined };
   }
   return settings;
+}
+
+/**
+ * The faults of the efforts the environment holds, for the startup check: one message per `FORGEQUOR_<SEAT>_EFFORT` the
+ * Seat cannot run, naming the variable and the accepted levels; empty when all is fine. Each is checked against the Seat's
+ * Runner and model from the environment and the defaults only (the Team is saved in the database and was validated when
+ * written). A Seat whose environment Runner is not a known Runner is skipped: that keeps today's Escalation when a Step needs it.
+ */
+export function envEffortFaults(env: SeatSettings, catalog: RunnerCatalog): string[] {
+  const faults: string[] = [];
+  for (const seat of SEAT_NAMES) {
+    const setting = env[seat];
+    if (!setting?.effort) continue;
+    const runner = setting.runner ?? DEFAULT_RUNNERS[seat];
+    if (!RUNNER_NAMES.includes(runner as RunnerName)) continue;
+    const problem = effortProblem(catalog, runner, setting.model, setting.effort);
+    if (problem) faults.push(`${seatVariable(seat, "EFFORT")}: ${problem}`);
+  }
+  return faults;
 }
 
 /** The seats a Run's Agents work through, and why each seat that has no usable Runner has none. */

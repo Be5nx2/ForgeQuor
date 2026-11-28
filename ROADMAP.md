@@ -26,7 +26,7 @@ Each Seat gains an effort level next to its Runner and model, picked from the Ru
   - Spec: `docs/specs/seat-effort.md`
   - Blocked by: `eff-02`
   - Acceptance: `POST /api/runs` accepts `effort` in each Seat override, checked by the same rule (400 invalid, 409 locked); New Run's Seats section offers the same closed select through the shared logic module, sends only what differs from the Team, and keeps an environment-held effort locked; the override is frozen with the Run's Seats at start, so a later Team change leaves the Run alone; Forge and route tests on overrides, checked in a browser.
-- [ ] `eff-04` **Refuse to start on an invalid effort variable**: Forgequor stops at startup when a `FORGEQUOR_<SEAT>_EFFORT` holds a level its Seat cannot run.
+- [x] `eff-04` **Refuse to start on an invalid effort variable**: Forgequor stops at startup when a `FORGEQUOR_<SEAT>_EFFORT` holds a level its Seat cannot run.
   - Spec: `docs/specs/seat-effort.md`
   - Blocked by: `eff-02`
   - Acceptance: after the Catalog is read and before the server listens, each environment-held effort is checked against its Seat's effective Runner and model; a failure stops Forgequor with a message naming the variable and the accepted levels; a pure function from environment settings and Catalog to "fine" or the list of faults, tested directly, `main` only acts on its answer; invalid environment Runners and models keep today's behaviour.

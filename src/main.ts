@@ -10,7 +10,7 @@ import { createClaudeRunner } from "./runner/claude.js";
 import { createCodexRunner } from "./runner/codex.js";
 import { createServer } from "./http/server.js";
 import { killAllProcessGroups } from "./process-group.js";
-import { seatSettingsFromEnv } from "./forge/seats.js";
+import { envEffortFaults, seatSettingsFromEnv } from "./forge/seats.js";
 import { loadEnvFile } from "./startup/env.js";
 import { checkTools } from "./startup/preflight.js";
 import { createPool, DEFAULT_DATABASE_URL, migrate } from "./store/db.js";
@@ -41,6 +41,14 @@ for (const t of tools) console.log(`${t.status === "ok" ? "✓" : "✗"} ${t.too
 // What each Runner's CLI offers (models, effort levels), read once; a failing reading falls back to the built-in list.
 const catalog = await readCatalog();
 for (const [runner, entry] of Object.entries(catalog)) console.log(`${runner}: ${entry.models.length} models, efforts ${entry.efforts.join(", ")}${entry.fallback ? " (built-in list)" : ""}`);
+
+// An effort the environment holds that its Seat cannot run is refused now, not halfway through a Run.
+const envSeats = seatSettingsFromEnv(process.env);
+const faults = envEffortFaults(envSeats, catalog);
+if (faults.length) {
+  for (const fault of faults) console.error(fault);
+  process.exit(1);
+}
 
 /** A setting in minutes as milliseconds; unset leaves the default, and a bad value is refused. */
 function minutesAsMs(name: string): number | undefined {
@@ -75,7 +83,7 @@ const forge = createForge({
   notifier: notifierFromEnv(process.env),
   worktreesRoot: process.env.FORGEQUOR_WORKTREES ?? join(homedir(), ".forgequor", "worktrees"),
   // FORGEQUOR_<SEAT>_RUNNER and FORGEQUOR_<SEAT>_MODEL per Agent seat, such as FORGEQUOR_DEVELOPER_MODEL or FORGEQUOR_REVIEWER_B_RUNNER.
-  seats: seatSettingsFromEnv(process.env),
+  seats: envSeats,
   catalog,
   stepTimeoutMs: minutesAsMs("FORGEQUOR_STEP_TIMEOUT_MINUTES"),
   checkTimeoutMs: minutesAsMs("FORGEQUOR_CHECK_TIMEOUT_MINUTES"),
