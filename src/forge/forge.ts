@@ -1036,7 +1036,10 @@ export function createForge(deps: ForgeDeps): Forge {
       // Finished Runs not yet Archived get the usual clean-up on disk before they go (archive never throws).
       const { rows: finished } = await pool.query("SELECT id FROM runs WHERE project_id = $1 AND state = ANY($2) AND archived_at IS NULL ORDER BY id", [projectId, OVER]);
       for (const r of finished) await archive(Number(r.id));
-      const deleted = await pool.query("DELETE FROM runs WHERE project_id = $1", [projectId]);
+      // Only finished Runs go: one created after the mark (a launch that raced it) is never deleted behind its worktree's back.
+      const deleted = await pool.query("DELETE FROM runs WHERE project_id = $1 AND state = ANY($2)", [projectId, OVER]);
+      const { rows: left } = await pool.query("SELECT count(*)::int AS n FROM runs WHERE project_id = $1", [projectId]);
+      if (left[0].n) throw new RunStateError(`Project ${marked.rows[0].name} got ${left[0].n} active Run${left[0].n === 1 ? "" : "s"} while it was being removed: abandon ${left[0].n === 1 ? "it" : "them"}, then retry.`);
       await pool.query("DELETE FROM projects WHERE id = $1", [projectId]);
       const n = deleted.rowCount ?? 0;
       console.log(`Removal: Project ${marked.rows[0].name} removed, ${n} Run${n === 1 ? "" : "s"} deleted.`);

@@ -84,6 +84,9 @@ onMounted(async () => {
 onUnmounted(() => stopFollowing?.());
 // A Project registered on the Projects screen shows in the selector as soon as the human leaves it.
 watch(() => route.path, refreshProjects);
+// A Project removed on the Projects screen leaves the selector at once (an unknown choice already reads as All Projects).
+onMounted(() => window.addEventListener("projects-changed", refreshProjects));
+onUnmounted(() => window.removeEventListener("projects-changed", refreshProjects));
 </script>
 
 <template>
