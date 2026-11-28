@@ -12,7 +12,20 @@ Nothing in progress.
 
 ### Project removal and purge now
 
-Remove a **Project** from Forgequor (active Runs abandoned, every Run deleted, the human's repository untouched beyond what Archiving removes, typed-name confirmation, resumable after a failure) and purge Archived Runs on demand, per Project or for all. Source: Dogfood Note #1. Spec: `docs/specs/project-removal.md`. Items are cut with `/to-tickets`.
+Remove a **Project** from Forgequor (active Runs abandoned, every Run deleted, the human's repository untouched beyond what Archiving removes, typed-name confirmation, resumable after a failure) and purge Archived Runs on demand, per Project or for all. Source: Dogfood Note #1. Spec: `docs/specs/project-removal.md`.
+
+- [ ] `rm-01` **Purge Archived Runs now**: the human clears Archived Runs on demand, for every Project from the top of the Projects screen or for one Project from its new Danger zone, without waiting 60 days.
+  - Spec: `docs/specs/project-removal.md`
+  - Blocked by: none
+  - Acceptance: a Forge operation deletes the Archived Runs in scope (all Projects or one), whatever their age, with everything that belongs to them, and returns the count; active and finished-not-Archived Runs are never touched; the daily purge is unchanged; the log uses the daily purge's wording; an HTTP route (400 bad input, 404 unknown Project); "Purge Archived Runs" at the top of the Projects screen and a red Danger zone at the bottom of the Project form with "Purge its Archived Runs now"; a simple confirmation states the count; buttons disabled with "No Archived Run" at zero; a "Starting over" section in the README (stop Forgequor, drop the database or its Docker volume, empty the worktrees folder); Forge tests on the real database, route tests, front logic in a tested module, checked in a browser.
+- [ ] `rm-02` **Remove a Project without active Runs**: the human removes a Project from its Danger zone after typing its name; Forgequor forgets it and every Run it had, and the repository stays as it is.
+  - Spec: `docs/specs/project-removal.md`
+  - Blocked by: `rm-01`
+  - Acceptance: a removal preview read (Runs count, active Runs with their pull request, Archived count); the Project gains a removal mark (schema change); finished Runs not yet Archived go through the Archive clean-up on disk, then every Run is deleted by cascade, then the Project with its own settings (Skill Packs and other per-Project rows, by cascade); the Project's folder, its other branches and GitHub are untouched; Dogfood Notes unchanged; re-registering the same folder gives a fresh Project; a Project with an active Run is refused with a clear message (lifted by rm-03); the confirmation enables Remove only when the typed name matches exactly and shows the Runs count; the sidebar falls back to All Projects; counts logged; Forge tests on the real database with temporary repositories, route tests (404, 400, 409), front logic tested, checked in a browser.
+- [ ] `rm-03` **Abandon active Runs and resume after a failure**: removing a Project with work in progress abandons it like the Abandon button, and a removal that fails half-way can be retried.
+  - Spec: `docs/specs/project-removal.md`
+  - Blocked by: `rm-02`
+  - Acceptance: the removal abandons each Queued, Running, Waiting, Paused and Approved Run through the existing abandon (open pull request closed and remote branch deleted, a merged one ends Merged, a running Step stopped) and no longer refuses; the confirmation lists the active Runs with the pull request each will close; while the removal mark is set, launching a Run on the Project is refused and the scheduler never starts its Queued Runs; a code host failure stops the removal, keeps the Project and its mark, and names the failing step (502); the Projects screen shows "Removal interrupted" with Retry, across restarts, never resumed automatically; a retry picks up where it stopped; Forge tests with a fake code host failing then answering, route tests, checked in a browser.
 
 ### Polish
 
