@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type pg from "pg";
-import { createForge, InvalidInputError, type Forge, type Project } from "../../src/forge/forge.js";
+import { createForge, DogfoodNoteNotFoundError, DogfoodNoteTransitionError, InvalidInputError, type Forge, type Project } from "../../src/forge/forge.js";
 import { createTestDatabase } from "../harness/database.js";
 import { createFakeCodeHost } from "../harness/fake-codehost.js";
 import { createFakeRunner } from "../harness/fake-runner.js";
@@ -154,5 +154,64 @@ describe("listing Dogfood Notes", () => {
     await pool.query("UPDATE projects SET name = 'renamed' WHERE id = $1", [p.id]);
 
     expect((await forge.listDogfoodNotes()).notes[0]).toMatchObject({ id: created.id, projectName: p.name });
+  });
+});
+
+describe("reviewing Dogfood Notes", () => {
+  it("triages a note with its reference, keeps it listed, and changes nothing else", async () => {
+    const created = await forge.createDogfoodNote({ ...note, text: "  As typed.  " });
+
+    const triaged = await forge.setDogfoodNoteStatus(created.id, "triaged", " dogfood-07 ");
+
+    expect(triaged).toEqual({ ...created, status: "triaged", triageRef: "dogfood-07" });
+    const listed = await forge.listDogfoodNotes();
+    expect(listed.notes).toEqual([triaged]);
+    expect(listed.newCount).toBe(0);
+    expect((await forge.listDogfoodNotes({ status: "triaged" })).notes).toEqual([triaged]);
+  });
+
+  it("triages without a reference, and dismisses", async () => {
+    const a = await forge.createDogfoodNote(note);
+    const b = await forge.createDogfoodNote(note);
+
+    expect(await forge.setDogfoodNoteStatus(a.id, "triaged")).toMatchObject({ status: "triaged", triageRef: null });
+    expect(await forge.setDogfoodNoteStatus(b.id, "dismissed")).toMatchObject({ status: "dismissed", triageRef: null });
+    expect((await forge.listDogfoodNotes()).notes).toHaveLength(2);
+  });
+
+  it("brings a triaged or dismissed note back to new, forgetting the reference, and the count follows", async () => {
+    const a = await forge.createDogfoodNote(note);
+    const b = await forge.createDogfoodNote(note);
+    await forge.setDogfoodNoteStatus(a.id, "triaged", "m5-01");
+    await forge.setDogfoodNoteStatus(b.id, "dismissed");
+    expect((await forge.listDogfoodNotes()).newCount).toBe(0);
+
+    const backA = await forge.setDogfoodNoteStatus(a.id, "new");
+    const backB = await forge.setDogfoodNoteStatus(b.id, "new");
+
+    expect(backA).toMatchObject({ status: "new", triageRef: null });
+    expect(backB).toMatchObject({ status: "new" });
+    expect((await forge.listDogfoodNotes()).newCount).toBe(2);
+  });
+
+  it("refuses the moves the table does not allow, leaving the note as it was", async () => {
+    const created = await forge.createDogfoodNote(note);
+    await forge.setDogfoodNoteStatus(created.id, "triaged", "m5-01");
+
+    await expect(forge.setDogfoodNoteStatus(created.id, "dismissed")).rejects.toThrow(DogfoodNoteTransitionError);
+    await expect(forge.setDogfoodNoteStatus(created.id, "triaged", "other")).rejects.toThrow(DogfoodNoteTransitionError);
+    await expect(forge.setDogfoodNoteStatus((await forge.createDogfoodNote(note)).id, "new")).rejects.toThrow(DogfoodNoteTransitionError);
+
+    expect((await forge.listDogfoodNotes({ status: "triaged" })).notes[0]).toMatchObject({ id: created.id, triageRef: "m5-01" });
+  });
+
+  it("refuses an unknown status, a reference that does not fit, and an unknown note", async () => {
+    const created = await forge.createDogfoodNote(note);
+
+    await expect(forge.setDogfoodNoteStatus(created.id, "done")).rejects.toThrow(/status must be one of/);
+    await expect(forge.setDogfoodNoteStatus(created.id, "dismissed", "why")).rejects.toThrow(InvalidInputError);
+    await expect(forge.setDogfoodNoteStatus(created.id, "triaged", "x".repeat(201))).rejects.toThrow(InvalidInputError);
+    await expect(forge.setDogfoodNoteStatus(999999, "triaged")).rejects.toThrow(DogfoodNoteNotFoundError);
+    expect((await forge.listDogfoodNotes()).notes[0]).toMatchObject({ id: created.id, status: "new" });
   });
 });

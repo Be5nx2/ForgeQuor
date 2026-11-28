@@ -18,3 +18,9 @@ export class SeatLockedError extends Error {}
 
 /** A per-Run seat override naming an unknown seat or Runner, or shaped wrong: refused as the Team page refuses it. */
 export class InvalidSeatError extends InvalidInputError {}
+
+/** No such Dogfood Note. */
+export class DogfoodNoteNotFoundError extends Error {}
+
+/** A Dogfood Note status change that is not allowed (new to triaged or dismissed, and back to new; nothing else). */
+export class DogfoodNoteTransitionError extends Error {}

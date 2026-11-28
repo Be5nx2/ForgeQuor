@@ -58,3 +58,5 @@ form.filters select { flex: 1 1 12rem; min-width: 0; max-width: 100%; }
 .quota { display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; align-items: baseline; }
 .quota.unknown { opacity: 0.6; }
 .quota.exhausted strong { color: #ff8c24; }
+
+.badge { margin-left: 0.4rem; padding: 0 0.45rem; border-radius: 999px; background: #ff8c24; color: #080f19; font-size: 0.8em; font-weight: 700; }
