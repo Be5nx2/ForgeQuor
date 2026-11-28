@@ -52,7 +52,7 @@ Every item must match its mockup in `docs/specs/ui-refresh/` (same layout, compo
   - Spec: `docs/specs/ui-refresh/README.md`
   - Blocked by: `ui-03`
   - Acceptance: Workflow choice, subject, solo or duo review, seats (with locked fields shown as locked); a preview of the Steps and of the Gates that will need the human; the Quota hint when both vendors are read; launching opens the new Run's URL; matches `new-run.html`.
-- [ ] `ui-11` **Projects**: the Projects screen looks like `projects.html`.
+- [x] `ui-11` **Projects**: the Projects screen looks like `projects.html`.
   - Spec: `docs/specs/ui-refresh/README.md`
   - Blocked by: `ui-03`
   - Acceptance: list of Projects with Checks, Setup, slots, Art Direction and Skill Packs; each Project has its own URL; the system warning banner appears when a required tool is missing; matches `projects.html`.

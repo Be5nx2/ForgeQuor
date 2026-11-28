@@ -5,6 +5,7 @@ All notable changes to Forgequor. Format: [Keep a Changelog](https://keepachange
 ## [Unreleased]
 
 ### Added
+- Projects as the mockup: a list of Projects (each with its own URL, `/projects/:id`) beside the selected Project's form (Checks, Setup, slots, Art Direction, Skill Packs) with one Save that applies only what changed, Discard, and "+ Register Project"; the missing-tool warning banner shows above it (ui-11).
 - New Run as the mockup: Workflow choice cards, subject, solo or duo review (labelled with the seats' Runners), Seats with env-locked fields shown as locked, and a "What will happen" panel listing the Steps and the Gates that will need you, with the Quota hint when both vendors are read; `?project=` preselects the Project, and launching opens the new Run (ui-10).
 - Workflows, Team, Dogfood Inbox and the note popup follow the shell's design system (page head, panels, forms, chips, buttons); no behaviour change, and the popup stays fully on screen at any window height (ui-12).
 - Run detail as the mockup: header (Project, Workflow, branch, pull request), a Step rail (state, Iteration, Runner; the Agents of a review as sub-Steps) with the selected Step beside it (live log with `aria-live`, output, Feedback, Run Notes, seats used), kept in the URL as `?step=`; the Gate bar stays fixed at the top while a Gate is open, and a review Gate shows remarks, each Reviewer's vote and the Consolidator's recommendation (ui-07).

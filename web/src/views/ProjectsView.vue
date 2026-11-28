@@ -1,31 +1,30 @@
 <script setup lang="ts">
-import { nextTick, onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { getJson, postJson, putJson, type Project } from "../api";
 import EmptyState from "../components/EmptyState.vue";
 import ErrorState from "../components/ErrorState.vue";
 import LoadingState from "../components/LoadingState.vue";
+import { changedSections, commandsOf, draftOf, projectSubtitle, selectProject, type Draft, type Section } from "../projectsForm";
 
-/** The Project the URL names (/projects/:id): scrolled into view once the list is loaded. */
+/** The Project the URL names (/projects/:id); without one, the first Project is shown. */
 const props = defineProps<{ id?: number }>();
 
 const projects = ref<Project[]>([]);
 const path = ref("");
+const registering = ref(false);
 const error = ref("");
 /** Why the list could not load (a failed save stays in `error`, above the list). */
 const loadError = ref("");
 /** False until the first list arrives, so an empty page never reads as "No Project" while it is loading. */
 const loaded = ref(false);
-/** Check commands being edited, one per line, by Project id. */
-const drafts = ref<Record<number, string>>({});
-/** Setup commands being edited, one per line, by Project id. */
-const setupDrafts = ref<Record<number, string>>({});
-/** Max concurrent Runs being edited, by Project id. */
-const limits = ref<Record<number, number>>({});
-/** Art Direction path and art folder being edited, by Project id. */
+const saving = ref(false);
 const offeredPacks = ref<string[]>([]);
-/** Skill Packs being edited, by Project id. */
-const packChoices = ref<Record<number, string[]>>({});
-const arts = ref<Record<number, { artDirectionPath: string; artFolder: string }>>({});
+/** What is being edited, by Project id. */
+const drafts = ref<Record<number, Draft>>({});
+
+const selected = computed(() => selectProject(projects.value, props.id));
+const draft = computed(() => (selected.value ? drafts.value[selected.value.id] : undefined));
+const dirty = computed(() => (selected.value && draft.value ? changedSections(selected.value, draft.value).length > 0 : false));
 
 async function load() {
   try {
@@ -39,67 +38,61 @@ async function load() {
 
 async function fetchAll() {
   projects.value = await getJson("/api/projects");
-  drafts.value = Object.fromEntries(projects.value.map((p) => [p.id, p.checks.join("\n")]));
-  setupDrafts.value = Object.fromEntries(projects.value.map((p) => [p.id, p.setup.join("\n")]));
-  limits.value = Object.fromEntries(projects.value.map((p) => [p.id, p.maxConcurrentRuns]));
   offeredPacks.value = (await getJson<{ offered: string[] }>("/api/skill-packs")).offered;
-  packChoices.value = Object.fromEntries(projects.value.map((p) => [p.id, [...p.skillPacks]]));
-  arts.value = Object.fromEntries(projects.value.map((p) => [p.id, { artDirectionPath: p.artDirectionPath, artFolder: p.artFolder }]));
+  drafts.value = Object.fromEntries(projects.value.map((p) => [p.id, draftOf(p)]));
 }
 
-async function savePacks(p: Project) {
-  error.value = "";
-  try {
-    const saved = await putJson<Project>(`/api/projects/${p.id}/skill-packs`, { packs: packChoices.value[p.id] });
-    p.skillPacks = saved.skillPacks;
-  } catch (e) {
-    error.value = (e as Error).message;
-  }
-}
-
-async function saveArt(p: Project) {
-  error.value = "";
-  try {
-    const saved = await putJson<Project>(`/api/projects/${p.id}/art`, arts.value[p.id]);
+/** One save per section, each its own API call; the draft then shows what the server kept. */
+const savers: Record<Section, (p: Project, d: Draft) => Promise<void>> = {
+  async checks(p, d) {
+    const saved = await putJson<Project>(`/api/projects/${p.id}/checks`, { checks: commandsOf(d.checks) });
+    p.checks = saved.checks;
+    d.checks = [...saved.checks];
+  },
+  async setup(p, d) {
+    const saved = await putJson<Project>(`/api/projects/${p.id}/setup`, { setup: commandsOf(d.setup) });
+    p.setup = saved.setup;
+    d.setup = [...saved.setup];
+  },
+  async concurrency(p, d) {
+    const saved = await putJson<Project>(`/api/projects/${p.id}/concurrency`, { max: Number(d.maxConcurrentRuns) });
+    p.maxConcurrentRuns = saved.maxConcurrentRuns;
+    d.maxConcurrentRuns = saved.maxConcurrentRuns;
+  },
+  async art(p, d) {
+    const saved = await putJson<Project>(`/api/projects/${p.id}/art`, { artDirectionPath: d.artDirectionPath, artFolder: d.artFolder });
     p.artDirectionPath = saved.artDirectionPath;
     p.artFolder = saved.artFolder;
-    arts.value[p.id] = { artDirectionPath: saved.artDirectionPath, artFolder: saved.artFolder };
+    d.artDirectionPath = saved.artDirectionPath;
+    d.artFolder = saved.artFolder;
+  },
+  async skillPacks(p, d) {
+    const saved = await putJson<Project>(`/api/projects/${p.id}/skill-packs`, { packs: d.skillPacks });
+    p.skillPacks = saved.skillPacks;
+    d.skillPacks = [...saved.skillPacks];
+  },
+};
+
+/** Saves every edited section in turn; stops at the first one the server refuses, keeping the rest of the draft. */
+async function save() {
+  const p = selected.value;
+  const d = draft.value;
+  if (!p || !d) return;
+  error.value = "";
+  saving.value = true;
+  try {
+    for (const section of changedSections(p, d)) await savers[section](p, d);
   } catch (e: any) {
     error.value = e.message;
+  } finally {
+    saving.value = false;
   }
 }
 
-async function saveLimit(p: Project) {
+function discard() {
+  const p = selected.value;
+  if (p) drafts.value[p.id] = draftOf(p);
   error.value = "";
-  try {
-    const saved = await putJson<Project>(`/api/projects/${p.id}/concurrency`, { max: Number(limits.value[p.id]) });
-    p.maxConcurrentRuns = saved.maxConcurrentRuns;
-    limits.value[p.id] = saved.maxConcurrentRuns;
-  } catch (e: any) {
-    error.value = e.message;
-  }
-}
-
-async function saveSetup(p: Project) {
-  error.value = "";
-  try {
-    const saved = await putJson<Project>(`/api/projects/${p.id}/setup`, { setup: setupDrafts.value[p.id]!.split("\n") });
-    p.setup = saved.setup;
-    setupDrafts.value[p.id] = saved.setup.join("\n");
-  } catch (e: any) {
-    error.value = e.message;
-  }
-}
-
-async function saveChecks(p: Project) {
-  error.value = "";
-  try {
-    const saved = await putJson<Project>(`/api/projects/${p.id}/checks`, { checks: drafts.value[p.id]!.split("\n") });
-    p.checks = saved.checks;
-    drafts.value[p.id] = saved.checks.join("\n");
-  } catch (e: any) {
-    error.value = e.message;
-  }
 }
 
 async function register() {
@@ -107,79 +100,140 @@ async function register() {
   try {
     await postJson("/api/projects", { path: path.value });
     path.value = "";
+    registering.value = false;
     await load();
   } catch (e: any) {
     error.value = e.message;
   }
 }
 
-onMounted(async () => {
-  await load();
-  await nextTick();
-  if (props.id !== undefined) document.getElementById(`project-${props.id}`)?.scrollIntoView();
-});
+function addRow(rows: string[]) {
+  rows.push("");
+}
+
+function removeRow(rows: string[], i: number) {
+  rows.splice(i, 1);
+}
+
+onMounted(load);
 </script>
 
 <template>
-  <h2>Projects</h2>
-  <form @submit.prevent="register">
-    <input v-model="path" placeholder="/path/to/local/git/repository" aria-label="Repository path" />
-    <button type="submit">Register</button>
+  <div class="head">
+    <div>
+      <h1>Projects</h1>
+      <p class="lede">Git repositories Forgequor works on</p>
+    </div>
+    <button class="btn btn-primary" type="button" :aria-expanded="registering" @click="registering = !registering">+ Register Project</button>
+  </div>
+
+  <form v-if="registering" class="panel register" @submit.prevent="register">
+    <div class="field">
+      <label for="register-path">Repository</label>
+      <input id="register-path" v-model="path" type="text" placeholder="/path/to/local/git/repository" aria-label="Repository path" />
+      <span class="hint">The local path of a git repository.</span>
+    </div>
+    <div class="actions"><button class="btn btn-ghost" type="button" @click="registering = false">Cancel</button><button class="btn btn-primary" type="submit">Register</button></div>
   </form>
-  <p v-if="error" class="error">{{ error }}</p>
+  <p v-if="error" class="error" role="alert">{{ error }}</p>
 
   <ErrorState v-if="loadError" title="Could not load the Projects" text="The Forgequor server did not answer. Check that it is running, then retry." :details="loadError" @retry="load" />
   <LoadingState v-else-if="!loaded" what="Projects" />
   <EmptyState v-else-if="!projects.length" title="No Project yet" text="Forgequor works on a git repository. Register your first Project with its local path above to start a Run." />
-  <ul>
-    <li v-for="p in projects" :key="p.id" :id="`project-${p.id}`">
-      <strong>{{ p.name }}</strong>
-      <span class="muted"> {{ p.remoteOwner }}/{{ p.remoteName }} · {{ p.defaultBranch }}</span>
-      <div class="muted">{{ p.localPath }}</div>
-      <form class="stack" @submit.prevent="saveSetup(p)">
-        <textarea
-          v-model="setupDrafts[p.id]"
-          rows="2"
-          placeholder="Setup: one shell command per line, run in a new worktree before the Developer (e.g. npm ci)"
-          :aria-label="`Setup of ${p.name}`"
-        />
-        <button type="submit">Save Setup</button>
-      </form>
-      <form class="stack" @submit.prevent="saveChecks(p)">
-        <textarea
-          v-model="drafts[p.id]"
-          rows="3"
-          placeholder="Checks: one shell command per line, run in order after the Developer (e.g. npm test)"
-          :aria-label="`Checks of ${p.name}`"
-        />
-        <button type="submit">Save Checks</button>
-      </form>
-      <form class="stack" @submit.prevent="saveArt(p)">
-        <label>
-          Art Direction document
-          <input v-model="arts[p.id]!.artDirectionPath" placeholder="docs/ART_DIRECTION.md" :aria-label="`Art Direction path of ${p.name}`" />
-        </label>
-        <label>
-          Art folder
-          <input v-model="arts[p.id]!.artFolder" placeholder="assets/art" :aria-label="`Art folder of ${p.name}`" />
-        </label>
-        <button type="submit">Save art settings</button>
-      </form>
-      <form v-if="offeredPacks.length" class="stack" @submit.prevent="savePacks(p)">
-        <span>Skill Packs (on top of shared)</span>
-        <label v-for="pack in offeredPacks" :key="pack">
-          <input v-model="packChoices[p.id]" type="checkbox" :value="pack" :aria-label="`${pack} Skill Pack of ${p.name}`" />
-          {{ pack }}
-        </label>
-        <button type="submit">Save Skill Packs</button>
-      </form>
-      <form @submit.prevent="saveLimit(p)">
-        <label>
-          Max concurrent Runs
-          <input v-model.number="limits[p.id]" type="number" min="1" step="1" :aria-label="`Max concurrent Runs of ${p.name}`" />
-        </label>
-        <button type="submit">Save limit</button>
-      </form>
-    </li>
-  </ul>
+  <div v-else class="split2">
+    <div class="plist" role="list">
+      <router-link v-for="p in projects" :key="p.id" :id="`project-${p.id}`" :to="`/projects/${p.id}`" class="p" role="listitem" :aria-current="selected?.id === p.id ? 'true' : undefined">
+        <strong>{{ p.name }}</strong>
+        <small>{{ projectSubtitle(p) }}</small>
+      </router-link>
+    </div>
+
+    <form v-if="selected && draft" class="panel" @submit.prevent="save">
+      <div class="field">
+        <label :for="`path-${selected.id}`">Repository</label>
+        <input :id="`path-${selected.id}`" type="text" :value="selected.localPath" readonly />
+        <span class="hint">{{ selected.remoteOwner }}/{{ selected.remoteName }} · default branch <code>{{ selected.defaultBranch }}</code></span>
+      </div>
+
+      <div class="field">
+        <span class="label">Checks <span class="muted note">a Run cannot reach its final Gate while one fails</span></span>
+        <div v-for="(_, i) in draft.checks" :key="i" class="cmdrow">
+          <input v-model="draft.checks[i]" type="text" class="mono" :aria-label="`Check ${i + 1} of ${selected.name}`" placeholder="npm test" />
+          <button class="btn btn-ghost" type="button" @click="removeRow(draft.checks, i)">Remove</button>
+        </div>
+        <div><button class="btn" type="button" @click="addRow(draft.checks)">+ Add Check</button></div>
+      </div>
+
+      <div class="field">
+        <span class="label">Setup <span class="muted note">prepares each new worktree, before the Developer</span></span>
+        <div v-for="(_, i) in draft.setup" :key="i" class="cmdrow">
+          <input v-model="draft.setup[i]" type="text" class="mono" :aria-label="`Setup command ${i + 1} of ${selected.name}`" placeholder="npm ci" />
+          <button class="btn btn-ghost" type="button" @click="removeRow(draft.setup, i)">Remove</button>
+        </div>
+        <div><button class="btn" type="button" @click="addRow(draft.setup)">+ Add Setup command</button></div>
+      </div>
+
+      <div class="field narrow">
+        <label :for="`slots-${selected.id}`">Max concurrent Runs</label>
+        <input :id="`slots-${selected.id}`" v-model.number="draft.maxConcurrentRuns" type="number" min="1" step="1" :aria-label="`Max concurrent Runs of ${selected.name}`" />
+      </div>
+
+      <div class="field">
+        <label :for="`art-${selected.id}`">Art Direction</label>
+        <input :id="`art-${selected.id}`" v-model="draft.artDirectionPath" type="text" class="mono" placeholder="docs/ART_DIRECTION.md" :aria-label="`Art Direction path of ${selected.name}`" />
+        <span class="hint">Palette, resolution, sprite sizes, read by the Artist.</span>
+      </div>
+      <div class="field">
+        <label :for="`folder-${selected.id}`">Art folder</label>
+        <input :id="`folder-${selected.id}`" v-model="draft.artFolder" type="text" class="mono" placeholder="assets/art" :aria-label="`Art folder of ${selected.name}`" />
+      </div>
+
+      <div v-if="offeredPacks.length" class="field">
+        <span class="label">Skill Packs <span class="muted note">on top of shared</span></span>
+        <div class="packs">
+          <label v-for="pack in offeredPacks" :key="pack" class="pack">
+            <input v-model="draft.skillPacks" type="checkbox" :value="pack" :aria-label="`${pack} Skill Pack of ${selected.name}`" />
+            {{ pack }}
+          </label>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="btn btn-ghost" type="button" :disabled="!dirty || saving" @click="discard">Discard</button>
+        <button class="btn btn-primary" type="submit" :disabled="!dirty || saving">Save</button>
+      </div>
+    </form>
+    <EmptyState v-else title="Project not found" text="No Project has this address. Pick one from the list." />
+  </div>
 </template>
+
+<style scoped>
+.head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-4); flex-wrap: wrap; margin-bottom: var(--sp-5); }
+h1 { font: 700 var(--fs-xl)/1.2 var(--font-brand); letter-spacing: 0.03em; }
+.lede { color: var(--text-muted); font-size: var(--fs-sm); margin: var(--sp-1) 0 0; }
+.error { margin: 0 0 var(--sp-4); }
+
+.split2 { display: grid; grid-template-columns: 17rem 1fr; gap: var(--sp-5); align-items: start; }
+.plist { display: grid; gap: var(--sp-2); }
+.plist .p { display: block; padding: 0.7rem 0.9rem; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: var(--fs-sm); background: rgb(8 15 25 / 0.5); color: var(--text); text-decoration: none; }
+.plist .p[aria-current="true"] { border-color: var(--ai); box-shadow: 0 0 14px rgb(56 189 248 / 0.18); }
+.plist .p small { display: block; color: var(--text-muted); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+
+.panel { background: linear-gradient(180deg, rgb(23 40 61 / 0.85), rgb(16 29 45 / 0.85)); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); padding: var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-5); margin: 0; box-shadow: 0 0 0 1px rgb(56 189 248 / 0.06), 0 12px 40px rgb(0 0 0 / 0.35); }
+.register { margin-bottom: var(--sp-5); max-width: 40rem; }
+
+.field { display: flex; flex-direction: column; gap: var(--sp-2); }
+.field.narrow { max-width: 16rem; }
+.field > label, .label { font-size: var(--fs-sm); font-weight: 600; }
+.note { font-weight: 400; }
+.hint { font-size: var(--fs-xs); color: var(--text-muted); }
+.field input[type="text"], .field input[type="number"] { flex: none; width: 100%; box-sizing: border-box; background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--radius-md); padding: 0.65rem 0.75rem; font: var(--fs-sm) var(--font-ui); }
+.field input.mono { font-family: var(--font-mono); }
+.field input[readonly] { color: var(--text-muted); }
+.cmdrow { display: grid; grid-template-columns: 1fr auto; gap: var(--sp-2); align-items: center; }
+.packs { display: flex; gap: var(--sp-4); flex-wrap: wrap; }
+.pack { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); }
+.pack input { flex: none; width: auto; }
+.actions { display: flex; gap: var(--sp-3); justify-content: flex-end; }
+.btn:disabled { opacity: 0.5; cursor: default; }
+</style>
