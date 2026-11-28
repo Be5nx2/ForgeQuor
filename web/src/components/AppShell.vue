@@ -60,7 +60,7 @@ body { background:
 .btn-primary { box-shadow: 0 0 18px rgb(255 140 36 / 0.35); }
 .nav a[aria-current="page"] { box-shadow: inset 2px 0 0 var(--ai); background: linear-gradient(90deg, rgb(56 189 248 / 0.14), transparent); }
 .app main { padding: var(--sp-5) var(--sp-6); min-width: 0; display: flex; flex-direction: column; gap: var(--sp-4); overflow-wrap: anywhere; }
-.app .content { max-width: 56rem; width: 100%; }
+.app .content { width: 100%; }
 .banner { border: 1px solid var(--highlight); background: rgb(255 197 107 / 0.08); border-radius: var(--radius-md); padding: var(--sp-3) var(--sp-4); font-size: var(--fs-sm); color: var(--highlight); }
 @media (max-width: 720px) {
   .app { grid-template-columns: 1fr; }
