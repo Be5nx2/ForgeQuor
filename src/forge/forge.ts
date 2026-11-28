@@ -304,6 +304,7 @@ function toAttempt(r: Record<string, any>): StepAttempt {
     attempt: r.attempt,
     runner: r.runner,
     model: r.model,
+    effort: r.effort,
     assetId: r.asset_id === null ? null : Number(r.asset_id),
     status: r.status,
     startedAt: r.started_at,

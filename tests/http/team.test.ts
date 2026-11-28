@@ -39,6 +39,16 @@ describe("the Team routes", () => {
     expect(calls).toEqual([["developer", { runner: "codex", model: "gpt" }]]);
   });
 
+  it("PUT /api/team/:seat passes the effort on, null included", async () => {
+    const calls: unknown[] = [];
+    const address = await serve({ changeSeat: async (seat, change) => (calls.push([seat, change]), team) });
+
+    await put(address, "developer", { effort: "high" });
+    await put(address, "developer", { effort: null });
+
+    expect(calls).toEqual([["developer", { effort: "high" }], ["developer", { effort: null }]]);
+  });
+
   it("answers 400 for an unknown seat or Runner, and 409 for a seat the environment holds", async () => {
     const address = await serve({
       changeSeat: async (seat) => {

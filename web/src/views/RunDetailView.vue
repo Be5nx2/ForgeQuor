@@ -5,7 +5,7 @@ import { getJson, postJson, type Project, type RunDetail, type RunNote } from ".
 import { chatOf } from "../conversation";
 import { liveEvents } from "../liveEvents";
 import { approveAllOf, draftsFor, gateSummary, isComplete, verdictsOf, waitingKey, type VerdictDraft, type VerdictDrafts } from "../assetGate";
-import { gateTitle, railOf, resolveSelection, stepViewOf } from "../runDetail";
+import { gateTitle, railOf, runnerLabel, resolveSelection, stepViewOf } from "../runDetail";
 import AssetGallery from "../components/AssetGallery.vue";
 import ConversationReply from "../components/ConversationReply.vue";
 import ErrorState from "../components/ErrorState.vue";
@@ -182,7 +182,7 @@ onUnmounted(() => stopFollowing?.());
         <div class="panel-head">
           <h2>{{ view.item.label }}</h2>
           <StatusChip :status="view.item.status" />
-          <span v-if="view.item.runner" class="runner">{{ view.item.runner }}<template v-if="view.item.model"> · {{ view.item.model }}</template></span>
+          <span v-if="view.item.runner" class="runner">{{ runnerLabel(view.item) }}</span>
           <span class="muted note">{{ view.item.note }}</span>
         </div>
 
@@ -290,8 +290,8 @@ onUnmounted(() => stopFollowing?.());
         <div v-if="view.seats.length">
           <h2>Seats used</h2>
           <ul class="plain seats" aria-label="Seats used">
-            <li v-for="s in view.seats" :key="`${s.agent}-${s.runner}-${s.model}`">
-              {{ s.agent }} <span class="runner">{{ s.runner }}<template v-if="s.model"> · {{ s.model }}</template></span>
+            <li v-for="s in view.seats" :key="`${s.agent}-${s.runner}-${s.model}-${s.effort}`">
+              {{ s.agent }} <span class="runner">{{ runnerLabel(s) }}</span>
               <span class="muted"> · {{ s.attempts }} {{ s.attempts === 1 ? "attempt" : "attempts" }}</span>
             </li>
           </ul>

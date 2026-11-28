@@ -109,8 +109,16 @@ The AI tool that actually executes an **Agent**'s work, such as Claude Code or C
 _Avoid_: Provider, backend, engine
 
 **Seat**:
-The place where one **Agent**'s **Runner** and model are set (`developer`, `reviewer-a`, `reviewer-b`, `artist`...), by default or through an environment variable. A seat whose **Runner** cannot be started opens an **Escalation** naming it when a **Step** needs it.
+The place where one **Agent**'s **Runner**, model and **Effort** are set (`developer`, `reviewer-a`, `reviewer-b`, `artist`...), by default, on the Team page or through an environment variable. A seat whose **Runner** cannot be started opens an **Escalation** naming it when a **Step** needs it.
 _Avoid_: Slot, assignment
+
+**Effort**:
+A **Seat**'s setting for how hard its **Runner**'s model reasons, one of the Runner's own levels (Claude Code's `--effort`, Codex's reasoning effort); left empty, the Runner applies its own default. Recorded on each **Step** attempt. No scale is shared between Runners.
+_Avoid_: Reasoning level, thinking budget, intensity
+
+**Runner Catalog**:
+What each **Runner**'s CLI says it offers (its models and the **Effort** levels each accepts), read once when Forgequor starts; a built-in list stands in, and is flagged, when a CLI cannot be read.
+_Avoid_: Model list, capabilities
 
 **Consolidator**:
 The **Agent** that merges two Reviewers' reviews into one and checks each remark against the code; a disagreement it cannot settle opens a **Gate** carrying its recommendation.

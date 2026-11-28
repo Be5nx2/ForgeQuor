@@ -70,6 +70,8 @@ export interface TeamSeat {
   seat: string;
   runner: TeamField;
   model: TeamField;
+  /** A null value is the Runner's own default effort. */
+  effort: TeamField;
 }
 export interface Team {
   seats: TeamSeat[];

@@ -141,6 +141,8 @@ export interface StepAttempt {
   attempt: number;
   runner: string;
   model: string | null;
+  /** The effort the attempt ran with; null for the Runner's default, and for attempts from before efforts were recorded. */
+  effort: string | null;
   /** The Asset an Artist attempt worked on. */
   assetId: number | null;
   status: "running" | "succeeded" | "failed" | "quota_exhausted";

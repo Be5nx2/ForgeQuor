@@ -14,6 +14,8 @@ export interface StepRequest {
   /** Directory the Agent works in (the Run's worktree). */
   cwd: string;
   model?: string;
+  /** The Runner's own effort level for this Step; absent leaves the CLI's default. */
+  effort?: string;
   /** Images to show the Agent with the prompt (absolute paths), for Runners that can take them (Codex); others ignore them. */
   images?: string[];
   /**

@@ -51,6 +51,17 @@ export function effortLevels(catalog: RunnerCatalog, runner: CatalogRunner, mode
   return entry.models.find((m) => m.id === model)?.efforts ?? entry.efforts;
 }
 
+/**
+ * Why this effort cannot run on this Runner and model, naming the accepted levels; null when it can (or when it is unset).
+ * The one validation rule: the Team change, and later the per-Run overrides and the startup check, all use it.
+ */
+export function effortProblem(catalog: RunnerCatalog, runner: string, model: string | null | undefined, effort: string | null | undefined): string | null {
+  if (!effort || (runner !== "claude" && runner !== "codex")) return null;
+  const levels = effortLevels(catalog, runner, model);
+  if (levels.includes(effort)) return null;
+  return `"${effort}" is not an effort level of ${runner}${model ? ` with model ${model}` : ""}; it accepts ${levels.join(", ")}.`;
+}
+
 const isLevel = (x: unknown): x is string => typeof x === "string" && /^[a-z][a-z0-9_-]*$/i.test(x);
 
 /**

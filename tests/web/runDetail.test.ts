@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RunDetail } from "../../web/src/api.js";
-import { defaultSelection, itemsUnder, neighbour, railOf, remarksOf, resolveSelection, stepLabel, stepViewOf } from "../../web/src/runDetail.js";
+import { defaultSelection, itemsUnder, neighbour, railOf, remarksOf, resolveSelection, runnerLabel, stepLabel, stepViewOf } from "../../web/src/runDetail.js";
 
 type Step = RunDetail["steps"][number];
 const step = (id: string, type: Step["type"], detail: string | null, status: Step["status"], extra: Partial<Step> = {}): Step => ({
@@ -14,7 +14,7 @@ const step = (id: string, type: Step["type"], detail: string | null, status: Ste
   ...extra,
 });
 const attempt = (stepId: string, name: string, runner: string, status: RunDetail["attempts"][number]["status"] = "succeeded") =>
-  ({ id: Math.random(), iteration: 1, step: name, stepId, attempt: 1, runner, model: null, assetId: null, status, startedAt: "", endedAt: null, summary: null, error: null, quotaResetsAt: null, eventLog: "" }) as RunDetail["attempts"][number];
+  ({ id: Math.random(), iteration: 1, step: name, stepId, attempt: 1, runner, model: null, effort: null, assetId: null, status, startedAt: "", endedAt: null, summary: null, error: null, quotaResetsAt: null, eventLog: "" }) as RunDetail["attempts"][number];
 const gate = (stepId: string | null, kind: RunDetail["gates"][number]["kind"]) =>
   ({ id: 1, runId: 1, iteration: 1, stepId, kind, reason: "r", evidence: null, actions: ["approve"], redo: null, feedback: null, verdicts: [], openedAt: "", decidedAt: null, decision: null }) as RunDetail["gates"][number];
 const review = (author: string, body: string, extra: Partial<RunDetail["reviews"][number]> = {}) =>
@@ -105,13 +105,40 @@ describe("selection", () => {
   });
 });
 
+describe("the effort in the Run detail", () => {
+  const withEffort = (name: string, effort: string | null, stepId = "dev") => ({ ...attempt(stepId, name, "claude"), model: "opus", effort });
+
+  it("follows the model on the rail, and adds nothing for the Runner default", () => {
+    const high = railOf(run({ attempts: [withEffort("developer", "high")] }));
+    const none = railOf(run({ attempts: [withEffort("developer", null)] }));
+
+    expect(runnerLabel(high[0]!)).toBe("claude · opus · high");
+    expect(runnerLabel(none[0]!)).toBe("claude · opus");
+    expect(runnerLabel({ runner: "codex", model: null, effort: "low" })).toBe("codex · low");
+  });
+
+  it("shows on each Reviewer's sub-Step too", () => {
+    const rail = railOf(run({ attempts: [withEffort("reviewer-a", "max", "review")] }));
+
+    expect(rail.find((r) => r.key === "review/reviewer-a")?.effort).toBe("max");
+  });
+
+  it("groups Seats used by Runner, model and effort, and reads an attempt from before efforts as none", () => {
+    const old = { ...attempt("dev", "developer", "claude"), model: "opus" } as any;
+    delete old.effort;
+    const v = stepViewOf(run({ attempts: [withEffort("developer", "high"), withEffort("developer", "high"), withEffort("developer", "low"), old] }), "dev")!;
+
+    expect(v.seats.map((s) => [s.effort, s.attempts])).toEqual([["high", 2], ["low", 1], [null, 1]]);
+  });
+});
+
 describe("stepViewOf", () => {
   it("collects a Step's attempts, seats used and Feedback", () => {
     const r = run({ iterations: [{ number: 1, feedback: "Fix R1" }, { number: 2, feedback: null }] as RunDetail["iterations"] });
     r.steps[0]!.iteration = 2;
     const v = stepViewOf(r, "dev")!;
     expect(v.attempts).toHaveLength(1);
-    expect(v.seats).toEqual([{ agent: "Developer", runner: "claude", model: null, attempts: 1 }]);
+    expect(v.seats).toEqual([{ agent: "Developer", runner: "claude", model: null, effort: null, attempts: 1 }]);
     expect(v.feedback.map((f) => f.feedback)).toEqual(["Fix R1"]);
   });
 

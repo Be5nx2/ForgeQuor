@@ -116,6 +116,17 @@ describe("Claude Runner", () => {
     expect(args).toContain("sonnet");
   });
 
+  it("hands the effort to the CLI as its own option, and adds none when there is no effort", async () => {
+    const fake = createFakeCli({ stdout: [resultOk] });
+    const runner = createClaudeRunner({ env: fake.env });
+
+    await runner.run({ ...step(), effort: "xhigh" }, () => {});
+    const args = fake.lastInvocation().args;
+    expect(args[args.indexOf("--effort") + 1]).toBe("xhigh");
+    await runner.run(step(), () => {});
+    expect(fake.lastInvocation().args).not.toContain("--effort");
+  });
+
   it("denies the tools that wait for a human, so a headless Step never stalls", async () => {
     const { fake } = await runStep({ stdout: [resultOk] });
     const args = fake.lastInvocation().args;

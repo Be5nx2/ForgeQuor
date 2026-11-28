@@ -25,11 +25,13 @@ export const DEFAULT_RUNNERS: Record<SeatName, RunnerName> = {
 export interface SeatSetting {
   runner?: string;
   model?: string;
+  /** One of the Runner's own effort levels; absent means the Runner's default. */
+  effort?: string;
 }
 export type SeatSettings = Partial<Record<SeatName, SeatSetting>>;
 
-/** The environment variable that sets a seat's Runner or model: `FORGEQUOR_REVIEWER_A_RUNNER`, `FORGEQUOR_DEVELOPER_MODEL`. */
-export const seatVariable = (seat: SeatName, setting: "RUNNER" | "MODEL") => `FORGEQUOR_${seat.toUpperCase().replace(/-/g, "_")}_${setting}`;
+/** The environment variable that sets a seat's Runner, model or effort: `FORGEQUOR_REVIEWER_A_RUNNER`, `FORGEQUOR_DEVELOPER_MODEL`, `FORGEQUOR_ARCHITECT_EFFORT`. */
+export const seatVariable = (seat: SeatName, setting: "RUNNER" | "MODEL" | "EFFORT") => `FORGEQUOR_${seat.toUpperCase().replace(/-/g, "_")}_${setting}`;
 
 /** The seat settings the environment holds. An empty variable counts as unset. */
 export function seatSettingsFromEnv(env: NodeJS.ProcessEnv): SeatSettings {
@@ -37,7 +39,8 @@ export function seatSettingsFromEnv(env: NodeJS.ProcessEnv): SeatSettings {
   for (const seat of SEAT_NAMES) {
     const runner = env[seatVariable(seat, "RUNNER")]?.trim();
     const model = env[seatVariable(seat, "MODEL")]?.trim();
-    if (runner || model) settings[seat] = { runner: runner?.toLowerCase() || undefined, model: model || undefined };
+    const effort = env[seatVariable(seat, "EFFORT")]?.trim();
+    if (runner || model || effort) settings[seat] = { runner: runner?.toLowerCase() || undefined, model: model || undefined, effort: effort || undefined };
   }
   return settings;
 }
@@ -64,7 +67,7 @@ export function buildSeats(runners: Partial<Record<RunnerName, Runner>>, setting
     }
     const runner = runners[name as RunnerName];
     if (!runner) problems[seat] = `Forgequor has no ${name} Runner`;
-    else agents[seat] = { runner, runnerName: name, model: setting.model };
+    else agents[seat] = { runner, runnerName: name, model: setting.model, effort: setting.effort };
   }
   return { agents, problems };
 }

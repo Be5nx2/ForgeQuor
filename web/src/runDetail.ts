@@ -22,6 +22,8 @@ export interface RailItem {
   /** The Runner that works the Step; null for a Step no Agent works. */
   runner: string | null;
   model: string | null;
+  /** The effort it ran with; null for the Runner's default (and attempts from before efforts were recorded). */
+  effort: string | null;
 }
 
 const titleCase = (s: string) => s.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -81,6 +83,7 @@ export function railOf(run: RunDetail): RailItem[] {
       note: notes.join(" · "),
       runner: step.type === "review" ? null : (last?.runner ?? null),
       model: step.type === "review" ? null : (last?.model ?? null),
+      effort: step.type === "review" ? null : (last?.effort ?? null),
     });
     if (step.type !== "review") continue;
     // Each Agent's latest attempt of the Step in its current Iteration.
@@ -88,7 +91,7 @@ export function railOf(run: RunDetail): RailItem[] {
     for (const a of attempts.filter((x) => x.iteration === step.iteration)) latest.set(a.step, a);
     for (const [name, a] of latest) {
       const s = attemptStatus(a.status);
-      items.push({ key: `${step.id}/${name}`, label: agentLabel(name, solo), sub: true, status: s, mark: MARK_OF[s.kind], note: `Attempt ${a.attempt}`, runner: a.runner, model: a.model });
+      items.push({ key: `${step.id}/${name}`, label: agentLabel(name, solo), sub: true, status: s, mark: MARK_OF[s.kind], note: `Attempt ${a.attempt}`, runner: a.runner, model: a.model, effort: a.effort ?? null });
     }
   }
   return items;
@@ -117,11 +120,15 @@ export function neighbour(rail: RailItem[], key: string, by: 1 | -1): string {
   return rail[Math.min(rail.length - 1, Math.max(0, i + by))]?.key ?? key;
 }
 
-/** One seat's use in a Step: who worked, through which Runner and model, how many attempts. */
+/** How a Runner is told in the rail and "Seats used": "claude", "claude · opus", "claude · opus · high" (nothing added for what ran by default). */
+export const runnerLabel = (u: { runner: string | null; model: string | null; effort: string | null }) => [u.runner, u.model, u.effort].filter(Boolean).join(" · ");
+
+/** One seat's use in a Step: who worked, through which Runner, model and effort, how many attempts. */
 export interface SeatUse {
   agent: string;
   runner: string;
   model: string | null;
+  effort: string | null;
   attempts: number;
 }
 
@@ -154,10 +161,10 @@ export function stepViewOf(run: RunDetail, key: string): StepView | null {
   const attempts = attemptsOf(run, step, agent ?? undefined);
   const seats = new Map<string, SeatUse>();
   for (const a of attempts) {
-    const k = `${a.step}|${a.runner}|${a.model}`;
+    const k = `${a.step}|${a.runner}|${a.model}|${a.effort ?? ""}`;
     const seen = seats.get(k);
     if (seen) seen.attempts++;
-    else seats.set(k, { agent: agentLabel(a.step, run.review === "solo"), runner: a.runner, model: a.model, attempts: 1 });
+    else seats.set(k, { agent: agentLabel(a.step, run.review === "solo"), runner: a.runner, model: a.model, effort: a.effort ?? null, attempts: 1 });
   }
   const gates = agent ? [] : run.gates.filter((g) => g.stepId === step.id);
   const agentWorks = step.type === "agent" || step.type === "artist" || step.type === "conversation";

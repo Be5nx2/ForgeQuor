@@ -12,6 +12,8 @@ export interface AgentSeat {
   runnerName: string;
   /** The Runner's default model when omitted. */
   model?: string;
+  /** The Runner's effort level; the Runner's own default when omitted. */
+  effort?: string;
 }
 
 /** What a human gives to start a Run; each Workflow reads the part that concerns it. */

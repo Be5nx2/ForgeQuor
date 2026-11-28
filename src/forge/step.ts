@@ -37,6 +37,7 @@ export async function runAgentStep(ctx: WorkflowContext, seat: AgentSeat, step: 
     attempt: step.attempt,
     runner: seat.runnerName,
     model: seat.model,
+    effort: seat.effort,
     assetId: step.assetId,
     stepId: step.stepId,
   });
@@ -55,7 +56,7 @@ export async function runAgentStep(ctx: WorkflowContext, seat: AgentSeat, step: 
   let result: StepResult;
   try {
     result = await seat.runner.run(
-      { instructions: step.instructions, prompt: step.prompt, images: step.images, readonly: step.readonly, session: step.session, cwd: worktreePath, model: seat.model, signal: abort.signal },
+      { instructions: step.instructions, prompt: step.prompt, images: step.images, readonly: step.readonly, session: step.session, cwd: worktreePath, model: seat.model, effort: seat.effort, signal: abort.signal },
       (e) => {
         if (e.raw) log.push(e.raw);
         ctx.emit({ type: "progress", runId: run.id, attemptId, kind: e.kind, summary: e.summary });
