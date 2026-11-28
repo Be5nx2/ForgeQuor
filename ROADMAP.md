@@ -14,7 +14,7 @@ Milestones are specified one at a time with `/to-spec`, then split into items wi
   - Spec: `docs/specs/dogfood-notes.md`
   - Blocked by: none
   - Acceptance: **+ Note** is visible on every tab; only the text is required and an empty text is refused with a clear message; what was typed is kept if saving fails; the tab, the Run or Project in view (shown as text, for example "Run #42") and the date are attached automatically; a note without Run or Project is accepted; an unknown Run or Project, or an invalid nature or target, is refused; notes are stored with source `internal`, status `new`, and never deleted or edited; the glossary defines **Dogfood Note**, **Dogfood Inbox** and **Dogfood Export** and says they are not a **Gate**'s **Feedback**; Forge core tests on the real database cover creation and refusals, HTTP route tests cover request shape and error mapping.
-- [ ] `dogfood-02` **Review notes in the Dogfood Inbox**: an Inbox tab lists the notes newest first, with a badge counting the new ones, filters, and buttons to triage or dismiss them.
+- [x] `dogfood-02` **Review notes in the Dogfood Inbox**: an Inbox tab lists the notes newest first, with a badge counting the new ones, filters, and buttons to triage or dismiss them.
   - Spec: `docs/specs/dogfood-notes.md`
   - Blocked by: `dogfood-01`
   - Acceptance: each note shows nature, target, text, date and origin; filters by status, nature and target; the badge counts `new` notes and updates after a change; a note can go `new` → `triaged` (with an optional free-text reference) or `dismissed`, and back to `new`; triaged and dismissed notes stay listed; only status and reference ever change; Forge core tests cover filters, the count, allowed transitions and the kept reference.

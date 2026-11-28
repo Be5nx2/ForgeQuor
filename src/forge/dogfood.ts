@@ -1,13 +1,19 @@
 import type pg from "pg";
-import { InvalidInputError } from "./errors.js";
+import { DogfoodNoteNotFoundError, DogfoodNoteTransitionError, InvalidInputError } from "./errors.js";
 import type { DogfoodNote, DogfoodNoteFilter, DogfoodNoteInput, DogfoodNoteList } from "./types.js";
 
 export const DOGFOOD_NATURES = ["feedback", "idea"] as const;
 export const DOGFOOD_TARGETS = ["workflow", "feature", "display", "other"] as const;
 export const DOGFOOD_STATUSES = ["new", "triaged", "dismissed"] as const;
 
+/** Where a note may go from each status: handled one way or the other, and back to `new` when that was a misclick. */
+const TRANSITIONS: Record<string, readonly string[]> = { new: ["triaged", "dismissed"], triaged: ["new"], dismissed: ["new"] };
+
 /** The longest origin tab name kept: the front supplies it, so it is bounded. */
 const MAX_TAB_LENGTH = 40;
+
+/** The longest triage reference kept. */
+const MAX_REF_LENGTH = 200;
 
 const COLUMNS = "id, nature, target, text, tab, run_id, run_title, project_id, project_name, source, status, triage_ref, created_at";
 
@@ -77,6 +83,30 @@ export function createDogfoodNotes(pool: pg.Pool) {
         [nature, target, input.text, tab, run?.id ?? null, run?.title ?? null, projectId],
       );
       return toNote(rows[0]);
+    },
+
+    /**
+     * Moves a note to `triaged` (with an optional free-text reference to where it went), to `dismissed`, or back to `new`
+     * (which forgets the reference). Only status and reference ever change. A status out of the list, a reference on
+     * anything but `triaged`, or a reference over the limit is an InvalidInputError; a move the table does not allow is a
+     * DogfoodNoteTransitionError; an unknown note is a DogfoodNoteNotFoundError.
+     */
+    async setStatus(id: number, status: string, triageRef?: string | null): Promise<DogfoodNote> {
+      oneOf("status", status, DOGFOOD_STATUSES);
+      const ref = typeof triageRef === "string" ? triageRef.trim() : "";
+      if (triageRef !== undefined && triageRef !== null && typeof triageRef !== "string") throw new InvalidInputError("The reference must be text.");
+      if (ref && status !== "triaged") throw new InvalidInputError("Only a triaged note keeps a reference.");
+      if (ref.length > MAX_REF_LENGTH) throw new InvalidInputError(`The reference is at most ${MAX_REF_LENGTH} characters.`);
+      const from = Object.entries(TRANSITIONS).filter(([, to]) => to.includes(status)).map(([f]) => f);
+      // One statement checks the current status and changes it, so two clicks cannot both win.
+      const { rows } = await pool.query(
+        `UPDATE dogfood_notes SET status = $2, triage_ref = $3 WHERE id = $1 AND status = ANY($4) RETURNING ${COLUMNS}`,
+        [id, status, ref || null, from],
+      );
+      if (rows[0]) return toNote(rows[0]);
+      const current = await pool.query("SELECT status FROM dogfood_notes WHERE id = $1", [id]);
+      if (!current.rows[0]) throw new DogfoodNoteNotFoundError(`No Dogfood Note ${id}.`);
+      throw new DogfoodNoteTransitionError(`A ${current.rows[0].status} note cannot become ${status}.`);
     },
 
     /** The notes matching the filters (a filter left out matches all), newest first, and the count of `new` ones. An unknown filter value is an InvalidInputError. */

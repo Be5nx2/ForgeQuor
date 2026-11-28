@@ -1,0 +1,96 @@
+<script setup lang="ts">
+import { onMounted, ref, watch } from "vue";
+import { getJson, putJson, type DogfoodNote, type DogfoodNoteList } from "../api";
+
+/** The Dogfood Inbox: every note newest first, with filters and the buttons that triage or dismiss them. */
+const props = defineProps<{
+  /** Bumped when a note was jotted elsewhere, so the list reloads. */
+  version: number;
+}>();
+const emit = defineEmits<{ count: [n: number] }>();
+
+const notes = ref<DogfoodNote[]>([]);
+const filter = ref({ status: "", nature: "", target: "" });
+const error = ref("");
+/** The reference being typed per note, kept until it is triaged. */
+const refs = ref<Record<number, string>>({});
+
+async function load() {
+  const query = new URLSearchParams(Object.entries(filter.value).filter(([, v]) => v));
+  try {
+    const list = await getJson<DogfoodNoteList>(`/api/dogfood-notes?${query}`);
+    notes.value = list.notes;
+    emit("count", list.newCount);
+    error.value = "";
+  } catch (e: any) {
+    error.value = e.message;
+  }
+}
+
+async function move(n: DogfoodNote, status: string) {
+  let failure = "";
+  try {
+    await putJson(`/api/dogfood-notes/${n.id}/status`, { status, triageRef: status === "triaged" ? refs.value[n.id] || undefined : undefined });
+    delete refs.value[n.id];
+  } catch (e: any) {
+    failure = `Not changed: ${e.message}`;
+  }
+  // Reload either way: after a refusal the list shows the note's real status.
+  await load();
+  if (failure) error.value = failure;
+}
+
+onMounted(load);
+watch(filter, load, { deep: true });
+watch(() => props.version, load);
+</script>
+
+<template>
+  <h2>Dogfood Inbox</h2>
+  <p class="muted">What you noticed while using Forgequor, newest first. Triaged and dismissed notes stay here.</p>
+  <form class="filters" @submit.prevent>
+    <select v-model="filter.status" aria-label="Status">
+      <option value="">any status</option>
+      <option value="new">new</option>
+      <option value="triaged">triaged</option>
+      <option value="dismissed">dismissed</option>
+    </select>
+    <select v-model="filter.nature" aria-label="Nature">
+      <option value="">any nature</option>
+      <option value="feedback">feedback</option>
+      <option value="idea">idea</option>
+    </select>
+    <select v-model="filter.target" aria-label="Target">
+      <option value="">any target</option>
+      <option value="workflow">workflow</option>
+      <option value="feature">feature</option>
+      <option value="display">display</option>
+      <option value="other">other</option>
+    </select>
+  </form>
+  <p v-if="error" class="error" role="alert">{{ error }}</p>
+  <p v-if="!notes.length && !error" class="muted">No notes match.</p>
+  <ul class="notes">
+    <li v-for="n in notes" :key="n.id" class="stack">
+      <div>
+        <strong>{{ n.nature }}</strong> about <strong>{{ n.target }}</strong>
+        <span class="muted"> · {{ new Date(n.createdAt).toLocaleString() }} · {{ n.origin }} · {{ n.status }}<template v-if="n.triageRef"> → {{ n.triageRef }}</template></span>
+      </div>
+      <p class="note-text">{{ n.text }}</p>
+      <div v-if="n.status === 'new'" class="gate-actions">
+        <input v-model="refs[n.id]" placeholder="Where it went (optional)" aria-label="Triage reference" maxlength="200" />
+        <button type="button" @click="move(n, 'triaged')">Triaged</button>
+        <button type="button" class="secondary" @click="move(n, 'dismissed')">Dismiss</button>
+      </div>
+      <div v-else class="gate-actions">
+        <button type="button" class="secondary" @click="move(n, 'new')">Back to new</button>
+      </div>
+    </li>
+  </ul>
+</template>
+
+<style scoped>
+.notes { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 0.75rem; }
+.notes li { border: 1px solid #1c2e45; border-radius: 6px; padding: 0.75rem; }
+.note-text { margin: 0; white-space: pre-wrap; }
+</style>

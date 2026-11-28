@@ -12,6 +12,8 @@ const props = defineProps<{
   suggestedTarget: DogfoodTarget;
 }>();
 
+const emit = defineEmits<{ saved: [] }>();
+
 const open = ref(false);
 const nature = ref<DogfoodNature>("idea");
 const target = ref<DogfoodTarget>(props.suggestedTarget);
@@ -47,6 +49,7 @@ async function save() {
     text.value = "";
     open.value = false;
     noted.value = true;
+    emit("saved");
     clearTimeout(hideNoted);
     hideNoted = setTimeout(() => (noted.value = false), 3000);
   } catch (e: any) {

@@ -5,6 +5,8 @@ import Fastify, { type FastifyInstance } from "fastify";
 import {
   AssetNotFoundError,
   GateError,
+  DogfoodNoteNotFoundError,
+  DogfoodNoteTransitionError,
   InvalidInputError,
   InvalidSeatError,
   RegistrationError,
@@ -254,6 +256,24 @@ export async function createServer(deps: {
       return await deps.forge.listDogfoodNotes({ status: req.query.status, nature: req.query.nature, target: req.query.target });
     } catch (e) {
       if (e instanceof InvalidInputError) return reply.code(400).send({ error: e.message });
+      throw e;
+    }
+  });
+  /**
+   * PUT /api/dogfood-notes/:id/status  body: { status, triageRef? }  moves a note to triaged (with an optional reference),
+   * dismissed, or back to new, and answers the note. 400 for a bad status or reference, 404 for an unknown note, 409 for a move not allowed.
+   */
+  app.put<{ Params: { id: string }; Body: { status?: unknown; triageRef?: unknown } }>("/api/dogfood-notes/:id/status", async (req, reply) => {
+    const { status, triageRef } = req.body ?? {};
+    if (typeof status !== "string") return reply.code(400).send({ error: "status is required." });
+    if (triageRef !== undefined && triageRef !== null && typeof triageRef !== "string") return reply.code(400).send({ error: "triageRef must be text." });
+    if (!/^\d+$/.test(req.params.id)) return reply.code(404).send({ error: `No Dogfood Note ${req.params.id}.` });
+    try {
+      return await deps.forge.setDogfoodNoteStatus(Number(req.params.id), status, triageRef as string | null | undefined);
+    } catch (e) {
+      if (e instanceof InvalidInputError) return reply.code(400).send({ error: e.message });
+      if (e instanceof DogfoodNoteNotFoundError) return reply.code(404).send({ error: e.message });
+      if (e instanceof DogfoodNoteTransitionError) return reply.code(409).send({ error: e.message });
       throw e;
     }
   });

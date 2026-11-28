@@ -24,7 +24,7 @@ import { reviewStepType } from "./review.js";
 import { buildSeats, type RunnerName, type SeatSettings } from "./seats.js";
 import { createTeamStore, parseSeatOverrides, settingsOf, withOverrides, type Team, type TeamChange } from "./team.js";
 import { builtInExtensions } from "./builtin.js";
-import { AssetNotFoundError, GateError, InvalidInputError, InvalidSeatError, RunNotFoundError, RunStateError, SeatLockedError } from "./errors.js";
+import { AssetNotFoundError, DogfoodNoteNotFoundError, DogfoodNoteTransitionError, GateError, InvalidInputError, InvalidSeatError, RunNotFoundError, RunStateError, SeatLockedError } from "./errors.js";
 import type { Extension, InputProducer } from "./extension.js";
 import { allows, escalationGate, finalGate, offered, refusal, reviewGate, type GateKindModule, type GateOutcome } from "./gates.js";
 import { goBackChoices, redoFailedSteps, redoSteps, redoSet, type StepRow } from "./step-states.js";
@@ -62,7 +62,7 @@ import { offeredSkillPacks, placeSkillPacks, SHARED_SKILL_PACK, SKILLS_ROOT } fr
 import { createRunWorktree, existsInBranch, inspectRepository, listInBranch, readInBranch, RegistrationError, refreshDefaultBranch, remoteHasBranch, removeRunWorktree, repositoryPath, runFoldersUnder, slugify } from "./workspace.js";
 
 export type { SeatSettings };
-export { RegistrationError, AssetNotFoundError, GateError, InvalidInputError, InvalidSeatError, RunNotFoundError, RunStateError, SeatLockedError };
+export { RegistrationError, AssetNotFoundError, DogfoodNoteNotFoundError, DogfoodNoteTransitionError, GateError, InvalidInputError, InvalidSeatError, RunNotFoundError, RunStateError, SeatLockedError };
 export type * from "./types.js";
 
 export interface Forge {
@@ -156,6 +156,12 @@ export interface Forge {
   createDogfoodNote(input: DogfoodNoteInput): Promise<DogfoodNote>;
   /** The Dogfood Notes matching the filters (status, nature, target; each optional), newest first, with the count of `new` ones. InvalidInputError for an unknown filter value. */
   listDogfoodNotes(filter?: DogfoodNoteFilter): Promise<DogfoodNoteList>;
+  /**
+   * Moves a Dogfood Note to `triaged` (with an optional free-text reference), to `dismissed`, or back to `new` (which forgets
+   * the reference). Only status and reference change. InvalidInputError for a bad status or a reference that does not fit;
+   * DogfoodNoteTransitionError for a move not allowed (triaged to dismissed, or to the same status); DogfoodNoteNotFoundError.
+   */
+  setDogfoodNoteStatus(id: number, status: string, triageRef?: string | null): Promise<DogfoodNote>;
   /** Each seat's effective Runner and model with where each comes from (environment, Team, default), and the model aliases on offer. */
   team(): Promise<Team>;
   /** Saves a seat's Runner and/or model (the Team page). Throws InvalidInputError for an unknown seat or Runner, SeatLockedError for a field the environment holds. */
@@ -1270,6 +1276,7 @@ export function createForge(deps: ForgeDeps): Forge {
     quota: () => quotas.status(),
     createDogfoodNote: (input) => dogfood.create(input),
     listDogfoodNotes: (filter) => dogfood.list(filter),
+    setDogfoodNoteStatus: (id, status, triageRef) => dogfood.setStatus(id, status, triageRef),
     team: () => teamStore.team(),
     changeSeat: (seat, change) => teamStore.change(seat, change),
     startQuotaReading: () => quotas.start(),
