@@ -574,8 +574,8 @@ describe("finding Runs", () => {
     const gates = await forge.listOpenGates();
     expect(gates).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ runTitle: "In one", projectName: one.project.name, kind: "final" }),
-        expect.objectContaining({ runTitle: "In two", projectName: two.project.name, kind: "final" }),
+        expect.objectContaining({ runTitle: "In one", projectId: one.project.id, projectName: one.project.name, kind: "final" }),
+        expect.objectContaining({ runTitle: "In two", projectId: two.project.id, projectName: two.project.name, kind: "final" }),
       ]),
     );
   });
