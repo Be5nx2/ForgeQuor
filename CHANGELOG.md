@@ -5,6 +5,7 @@ All notable changes to Forgequor. Format: [Keep a Changelog](https://keepachange
 ## [Unreleased]
 
 ### Added
+- App shell: every screen sits in a left sidebar (FORGE/QUOR logotype, **+ New Run**, "All Projects" placeholder, navigation with `aria-current`, **+ Note** at the bottom) with one Quota bar per vendor on top; design tokens from the UI refresh mockups, Orbitron/Inter/JetBrains Mono with system fallbacks, `:focus-visible` outlines (ui-02).
 - A URL per screen: `vue-router` (history mode) replaces the tab state, so `/runs`, `/runs/:id`, `/new`, `/projects/:id`, `/workflows`, `/team` and `/inbox` survive a refresh and Back/Forward work; unknown URLs show a not-found screen; the server serves the app for client routes without shadowing `/api/*` or assets; **+ Note** takes its tab and Run from the route; ADR 0008 (ui-01).
 - `/dogfood-triage` skill: reads a Dogfood Export, groups its notes by theme, proposes a roadmap item, a spec, the Icebox or dismissal per group, writes nothing until the human agrees, and ends with the note IDs to mark triaged or dismissed in the Inbox; "Dogfooding" section in `skills/README.md` (dogfood-04).
 - Export selected notes: tick notes in the Inbox (or select all shown) and **Export** writes one Markdown Dogfood Export, `export_forgequor_<date>_<time>.md`, with a header and a section per target, into `docs/dogfood/` (`FORGEQUOR_DOGFOOD_FOLDER`, created when missing, git-ignored) and offers it for download; no status changes; `POST /api/dogfood-notes/export` (dogfood-03).

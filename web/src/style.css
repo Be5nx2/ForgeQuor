@@ -1,11 +1,6 @@
-:root { color-scheme: dark; }
-body { margin: 0; font-family: Inter, system-ui, sans-serif; background: #080f19; color: #f0f5fa; }
-main { max-width: 52rem; margin: 0 auto; padding: 2rem 1rem; overflow-wrap: anywhere; }
-h1 { letter-spacing: 0.15em; }
-h1 span { color: #ff8c24; }
-h2 { color: #a5e4ff; }
-.muted { color: #94a3b8; }
-.warn { background: #3a2410; border: 1px solid #ff8c24; padding: 0.5rem 1rem; border-radius: 6px; margin-bottom: 0.5rem; }
+/* tokens.css zeroes heading and paragraph margins: the screens that predate the shell keep their spacing inside the content area. */
+.content h2 { color: var(--ice-blue); margin: 0.83em 0; }
+.content p { margin: 1em 0; }
 .error { color: #ff8c24; }
 form { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
 input { flex: 1; padding: 0.5rem; background: #101d2d; color: inherit; border: 1px solid #38bdf8; border-radius: 6px; }
@@ -15,15 +10,11 @@ button:disabled { opacity: 0.5; cursor: wait; }
 .gate-actions { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.5rem; }
 ul { list-style: none; padding: 0; }
 li { background: #101d2d; padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 0.5rem; }
-nav { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
-nav button { background: #101d2d; color: #94a3b8; border: 1px solid #101d2d; white-space: nowrap; overflow-wrap: normal; }
-nav button.active { background: #101d2d; color: #f0f5fa; border-color: #ff8c24; }
 .stack { flex-direction: column; }
 select, textarea { padding: 0.5rem; background: #101d2d; color: inherit; border: 1px solid #38bdf8; border-radius: 6px; font: inherit; }
 .clickable { cursor: pointer; }
 .badge { background: #38bdf8; color: #080f19; border-radius: 4px; padding: 0 0.4rem; font-size: 0.8rem; font-weight: 600; }
 pre { white-space: pre-wrap; background: #080f19; padding: 0.5rem; border-radius: 6px; margin: 0.5rem 0 0; }
-a { color: #a5e4ff; }
 .live { list-style: none; padding: 0; margin: 0.5rem 0 0; max-height: 14rem; overflow-y: auto; font-family: ui-monospace, monospace; font-size: 0.85rem; }
 fieldset.asset-request { display: flex; border: 1px solid #38bdf8; border-radius: 6px; gap: 0.5rem; margin: 0 0 0.5rem; }
 fieldset.asset-request legend { color: #a5e4ff; }
@@ -54,9 +45,5 @@ form.filters select { flex: 1 1 12rem; min-width: 0; max-width: 100%; }
 .markdown table { border-collapse: collapse; }
 .markdown th, .markdown td { border: 1px solid #8884; padding: 0.2rem 0.5rem; text-align: left; }
 
-.quota-bar { display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; font-size: 0.85rem; background: #101d2d; border-radius: 6px; padding: 0.4rem 0.75rem; margin-bottom: 0.5rem; }
-.quota { display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; align-items: baseline; }
-.quota.unknown { opacity: 0.6; }
-.quota.exhausted strong { color: #ff8c24; }
 
 .badge { margin-left: 0.4rem; padding: 0 0.45rem; border-radius: 999px; background: #ff8c24; color: #080f19; font-size: 0.8em; font-weight: 700; }
