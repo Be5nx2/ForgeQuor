@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { navTabs, placeOf, screens } from "../../web/src/navigation.js";
+import { navTabs, placeOf, screens, sidebarNav } from "../../web/src/navigation.js";
 
 describe("placeOf", () => {
   it("puts the home route on the Waiting tab", () => {
@@ -35,6 +35,10 @@ describe("screens", () => {
       ["team", "/team"],
       ["inbox", "/inbox"],
     ]);
+  });
+
+  it("lists the sidebar entries in order, without New Run (its own button)", () => {
+    expect(sidebarNav.map((t) => t.label)).toEqual(["Waiting for you", "Runs", "Projects", "Team", "Workflows", "Dogfood Inbox"]);
   });
 
   it("has unique names and paths", () => {

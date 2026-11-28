@@ -68,3 +68,12 @@ onUnmounted(() => {
     </span>
   </div>
 </template>
+
+<style scoped>
+.quota-bar { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); }
+.quota { flex: 1 1 18rem; display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); align-items: baseline; font-size: var(--fs-xs); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--sp-2) var(--sp-3); }
+.quota strong { font: 700 var(--fs-xs) var(--font-brand); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ice-blue); }
+.quota.unknown { opacity: 0.6; }
+.quota.exhausted { border-color: var(--action); }
+.quota.exhausted strong { color: var(--action); }
+</style>

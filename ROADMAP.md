@@ -16,7 +16,7 @@ Every item must match its mockup in `docs/specs/ui-refresh/` (same layout, compo
   - Spec: `docs/specs/ui-refresh/README.md`
   - Blocked by: none
   - Acceptance: `vue-router` replaces the tab state; every current screen is reachable by its URL and a refresh keeps it; an open Gate is reachable through its Run's URL; an unknown URL or Run shows a clear not-found message; the server serves the app for these paths; **+ Note** takes its tab and Run from the route; the look is unchanged; existing tests pass.
-- [ ] `ui-02` **Design tokens and app shell**: every screen sits in the mockups' shell: left sidebar with logotype, **+ New Run**, Project selector placeholder, navigation and **+ Note** at the bottom, the Quota bars at the top.
+- [x] `ui-02` **Design tokens and app shell**: every screen sits in the mockups' shell: left sidebar with logotype, **+ New Run**, Project selector placeholder, navigation and **+ Note** at the bottom, the Quota bars at the top.
   - Spec: `docs/specs/ui-refresh/README.md`
   - Blocked by: `ui-01`
   - Acceptance: `tokens.css` copied as is and `shell.css` turned into one layout component; sidebar matches `runs.html` (logotype FORGE/QUOR, New Run, Project button, nav Runs, Projects, Team, Workflows, Dogfood Inbox with its badge, **+ Note** at the bottom replacing the floating button); one Quota bar per vendor at the top of every screen; dark theme only; Orbitron, Inter and JetBrains Mono with system fallbacks; `aria-current` on the active entry and `:focus-visible` everywhere; existing screens render inside unchanged otherwise.

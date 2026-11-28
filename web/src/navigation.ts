@@ -11,11 +11,14 @@ export const screens = [
   { name: "project", path: "/projects/:id(\\d+)", tab: "projects", target: "feature" },
   { name: "workflows", path: "/workflows", label: "Workflows", target: "workflow" },
   { name: "team", path: "/team", label: "Team", target: "feature" },
-  { name: "inbox", path: "/inbox", label: "Inbox", target: "feature" },
+  { name: "inbox", path: "/inbox", label: "Dogfood Inbox", target: "feature" },
 ] as const satisfies readonly { name: string; path: string; label?: string; tab?: string; target: DogfoodTarget }[];
 
 /** The navigation entries, in order: the screens that have a label. */
 export const navTabs = screens.filter((s) => "label" in s);
+
+/** The sidebar's navigation, in order: "New Run" has its own button, so it is not listed here. */
+export const sidebarNav = (["waiting", "runs", "projects", "team", "workflows", "inbox"] as const).map((name) => navTabs.find((t) => t.name === name)!);
 
 export interface Place {
   /** The navigation tab to highlight, and the origin tab of a Dogfood Note. */
