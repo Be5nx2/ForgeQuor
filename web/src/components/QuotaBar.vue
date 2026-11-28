@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from "vue";
 import { getJson, type QuotaReading, type QuotaStatus } from "../api";
+import { vendorQuota } from "../quotaGauge";
 import { liveEvents } from "../liveEvents";
 
 const VENDORS = [
@@ -16,28 +17,6 @@ const clock = ref(Date.now());
 async function load() {
   const status = await getJson<QuotaStatus[]>("/api/quota").catch(() => null);
   if (status) readings.value = Object.fromEntries(status.map((s) => [s.vendor, s.reading]));
-}
-
-function age(reading: QuotaReading): string {
-  const seconds = Math.max(0, Math.round((clock.value - Date.parse(reading.readAt)) / 1000));
-  if (seconds < 60) return "just now";
-  if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`;
-  return `${Math.floor(seconds / 3600)} h ago`;
-}
-
-function percent(w: QuotaReading["fiveHour"]): string {
-  return w.percentUsed === null ? "?" : `${Math.round(w.percentUsed)}%`;
-}
-
-function resets(w: QuotaReading["fiveHour"]): string {
-  if (!w.resetsAt) return "";
-  const at = new Date(w.resetsAt);
-  const sameDay = at.toDateString() === new Date(clock.value).toDateString();
-  return `resets ${sameDay ? "" : at.toLocaleDateString([], { month: "short", day: "numeric" }) + " "}${at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
-}
-
-function known(r: QuotaReading | null | undefined): r is QuotaReading {
-  return !!r && (r.exhausted || r.fiveHour.percentUsed !== null || r.weekly.percentUsed !== null || !!r.fiveHour.resetsAt || !!r.weekly.resetsAt);
 }
 
 let stopFollowing: () => void;
@@ -57,24 +36,43 @@ onUnmounted(() => {
 
 <template>
   <div class="quota-bar">
-    <span v-for="v in VENDORS" :key="v.id" class="quota" :class="{ unknown: !known(readings[v.id]), exhausted: readings[v.id]?.exhausted }">
-      <strong>{{ v.label }}</strong>
-      <template v-if="known(readings[v.id])">
-        <span>5h {{ percent(readings[v.id]!.fiveHour) }} <span class="muted">{{ resets(readings[v.id]!.fiveHour) }}</span></span>
-        <span>week {{ percent(readings[v.id]!.weekly) }} <span class="muted">{{ resets(readings[v.id]!.weekly) }}</span></span>
-        <span v-if="readings[v.id]!.exhausted" class="badge">exhausted</span>
-        <span class="muted">{{ age(readings[v.id]!) }}</span>
+    <section v-for="v in VENDORS" :key="v.id" class="quota" :class="{ unknown: !vendorQuota(readings[v.id], clock).known, exhausted: vendorQuota(readings[v.id], clock).exhausted }" :aria-label="`${v.label} Quota`">
+      <template v-for="q in [vendorQuota(readings[v.id], clock)]" :key="v.id">
+        <header>
+          <strong>{{ v.label }}</strong>
+          <span v-if="q.exhausted" class="badge">exhausted</span>
+          <span class="muted age">{{ q.known ? q.age : "unknown" }}</span>
+        </header>
+        <div v-if="q.known" class="gauges">
+          <div v-for="g in q.gauges" :key="g.label" class="gauge" :data-level="g.level">
+            <div class="top"><span class="label">{{ g.label }}</span><span class="pct">{{ g.percent }}</span></div>
+            <div class="track" role="meter" :aria-label="`${v.label} ${g.label} used`" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="Math.round(g.fill)"><div class="fill" :style="{ width: g.fill + '%' }" /></div>
+            <div class="resets muted">{{ g.resets || "reset unknown" }}</div>
+          </div>
+        </div>
       </template>
-      <span v-else class="muted">unknown</span>
-    </span>
+    </section>
   </div>
 </template>
 
 <style scoped>
 .quota-bar { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); }
-.quota { flex: 1 1 18rem; display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); align-items: baseline; font-size: var(--fs-xs); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--sp-2) var(--sp-3); }
+.quota { flex: 1 1 22rem; font-size: var(--fs-xs); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--sp-2) var(--sp-3); }
+.quota header { display: flex; align-items: baseline; gap: var(--sp-2); margin-bottom: var(--sp-1); }
 .quota strong { font: 700 var(--fs-xs) var(--font-brand); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ice-blue); }
+.quota .age { margin-left: auto; }
+.gauges { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
+.gauge .top { display: flex; justify-content: space-between; align-items: baseline; }
+.gauge .label { color: var(--text-muted); font-weight: 600; }
+.gauge .pct { font: 700 var(--fs-sm) var(--font-ui); font-variant-numeric: tabular-nums; }
+.track { height: 6px; margin: 3px 0; border-radius: 999px; background: var(--border); overflow: hidden; }
+.fill { height: 100%; border-radius: 999px; background: var(--ai); transition: width 0.3s; }
+.gauge[data-level="warn"] .fill { background: var(--action); }
+.gauge[data-level="warn"] .pct { color: var(--action); }
+.gauge[data-level="exhausted"] .fill { background: var(--st-bad); }
+.gauge[data-level="exhausted"] .pct { color: var(--st-bad); }
 .quota.unknown { opacity: 0.6; }
-.quota.exhausted { border-color: var(--action); }
-.quota.exhausted strong { color: var(--action); }
+.quota.exhausted { border-color: var(--st-bad); }
+.quota .badge { background: var(--st-bad); color: var(--midnight-black); }
+.quota.exhausted strong { color: var(--st-bad); }
 </style>

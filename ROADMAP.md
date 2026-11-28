@@ -31,7 +31,7 @@ Remove a **Project** from Forgequor (active Runs abandoned, every Run deleted, t
 
 Small fixes found by dogfooding (Dogfood Notes triaged with `/dogfood-triage`).
 
-- [ ] `pol-01` **Readable Quota bars**: each vendor shows its five-hour and weekly windows as real gauges the human reads at a glance, instead of the compact "5h 25% resets …" text.
+- [x] `pol-01` **Readable Quota bars**: each vendor shows its five-hour and weekly windows as real gauges the human reads at a glance, instead of the compact "5h 25% resets …" text.
   - Spec: `docs/specs/m4-comfort.md` (Quota bars); Dogfood Note #3
   - Blocked by: none
   - Acceptance: one gauge per window (five-hour, week) with a clear label, the percent used and the reset time apart; the gauge colour follows the status system (orange from a threshold, red when exhausted); an unknown reading stays greyed "unknown" with its age; same data and refresh as today; checked in a browser at 1440 px.
