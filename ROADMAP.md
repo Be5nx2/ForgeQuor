@@ -56,7 +56,7 @@ Every item must match its mockup in `docs/specs/ui-refresh/` (same layout, compo
   - Spec: `docs/specs/ui-refresh/README.md`
   - Blocked by: `ui-03`
   - Acceptance: list of Projects with Checks, Setup, slots, Art Direction and Skill Packs; each Project has its own URL; the system warning banner appears when a required tool is missing; matches `projects.html`.
-- [ ] `ui-12` **Workflows, Team, Inbox and the note popup**: the screens M4 and the Dogfood Notes added follow the same design system.
+- [x] `ui-12` **Workflows, Team, Inbox and the note popup**: the screens M4 and the Dogfood Notes added follow the same design system.
   - Spec: `docs/specs/ui-refresh/README.md`
   - Blocked by: `ui-03`
   - Acceptance: Workflows, Team and Dogfood Inbox use the shell's panels, chips, forms and shared states; the note popup stays fully on screen at any window height; no behaviour changes; consistent with the round-2 mockups.
