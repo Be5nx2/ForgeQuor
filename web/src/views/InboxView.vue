@@ -86,8 +86,10 @@ watch(() => props.version, load);
 </script>
 
 <template>
-  <h2>Dogfood Inbox</h2>
-  <p class="muted">What you noticed while using Forgequor, newest first. Triaged and dismissed notes stay here.</p>
+  <div class="head">
+    <h1>Dogfood Inbox</h1>
+    <p class="lede">What you noticed while using Forgequor, newest first. Triaged and dismissed notes stay here.</p>
+  </div>
   <form class="filters" @submit.prevent>
     <select v-model="filter.status" aria-label="Status">
       <option value="">any status</option>
@@ -108,38 +110,54 @@ watch(() => props.version, load);
       <option value="other">other</option>
     </select>
   </form>
-  <div v-if="notes.length" class="gate-actions">
-    <label><input type="checkbox" :checked="allSelected" @change="toggleAll" /> Select all {{ notes.length }} shown</label>
-    <button type="button" :disabled="!selected.length || exporting" @click="exportSelected">Export {{ selected.length }} selected</button>
+  <div v-if="notes.length" class="bar">
+    <label class="selectall"><input type="checkbox" :checked="allSelected" @change="toggleAll" /> Select all {{ notes.length }} shown</label>
+    <button type="button" class="btn btn-outline-action" :disabled="!selected.length || exporting" @click="exportSelected">Export {{ selected.length }} selected</button>
   </div>
-  <p v-if="exportedAs" class="muted" role="status">{{ exportedAs }}</p>
-  <p v-if="error" class="error" role="alert">{{ error }}</p>
+  <p v-if="exportedAs" class="muted exported" role="status">{{ exportedAs }}</p>
+  <p v-if="error" class="banner" role="alert">{{ error }}</p>
   <ErrorState v-if="loadError" title="Could not load the notes" text="The Forgequor server did not answer. Check that it is running, then retry." :details="loadError" @retry="load" />
   <LoadingState v-else-if="!loaded" what="notes" />
   <EmptyState v-else-if="!notes.length && (filter.status || filter.nature || filter.target)" title="No note matches these filters" text="Change the filters to see more notes." />
   <EmptyState v-else-if="!notes.length" title="No note yet" text="Use + Note in the sidebar to jot down what you notice while using Forgequor." />
   <ul class="notes">
-    <li v-for="n in notes" :key="n.id" class="stack">
-      <div>
+    <li v-for="n in notes" :key="n.id">
+      <div class="note-head">
         <input v-model="selected" type="checkbox" :value="n.id" :aria-label="`Select note ${n.id} for export`" />
         <strong>{{ n.nature }}</strong> about <strong>{{ n.target }}</strong>
-        <span class="muted"> · {{ new Date(n.createdAt).toLocaleString() }} · {{ n.origin }} · {{ n.status }}<template v-if="n.triageRef"> → {{ n.triageRef }}</template></span>
+        <span class="chip" :data-s="n.status === 'new' ? 'waiting' : n.status === 'triaged' ? 'ok' : 'idle'">{{ n.status }}</span>
+        <span class="muted meta">{{ new Date(n.createdAt).toLocaleString() }} · {{ n.origin }}<template v-if="n.triageRef"> → {{ n.triageRef }}</template></span>
       </div>
       <p class="note-text">{{ n.text }}</p>
-      <div v-if="n.status === 'new'" class="gate-actions">
+      <div v-if="n.status === 'new'" class="actions">
         <input v-model="refs[n.id]" placeholder="Where it went (optional)" aria-label="Triage reference" maxlength="200" />
-        <button type="button" @click="move(n, 'triaged')">Triaged</button>
-        <button type="button" class="secondary" @click="move(n, 'dismissed')">Dismiss</button>
+        <button type="button" class="btn btn-primary" @click="move(n, 'triaged')">Triaged</button>
+        <button type="button" class="btn" @click="move(n, 'dismissed')">Dismiss</button>
       </div>
-      <div v-else class="gate-actions">
-        <button type="button" class="secondary" @click="move(n, 'new')">Back to new</button>
+      <div v-else class="actions">
+        <button type="button" class="btn" @click="move(n, 'new')">Back to new</button>
       </div>
     </li>
   </ul>
 </template>
 
 <style scoped>
-.notes { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 0.75rem; }
-.notes li { border: 1px solid #1c2e45; border-radius: 6px; padding: 0.75rem; }
-.note-text { margin: 0; white-space: pre-wrap; }
+.head { margin-bottom: var(--sp-5); }
+h1 { font: 700 var(--fs-xl, 1.5rem) var(--font-brand); letter-spacing: 0.06em; }
+.lede { color: var(--text-muted); font-size: var(--fs-sm); margin: var(--sp-1) 0 0; max-width: 46rem; }
+.banner { border: 1px solid var(--st-bad); background: rgb(8 15 25 / 0.5); border-radius: var(--radius-md); padding: var(--sp-3) var(--sp-4); font-size: var(--fs-sm); color: var(--st-bad); margin: 0 0 var(--sp-4); }
+.filters { display: flex; gap: var(--sp-2); flex-wrap: wrap; margin: 0 0 var(--sp-4); }
+.filters select { flex: 1 1 12rem; min-width: 0; max-width: 100%; }
+select, input:not([type="checkbox"]) { padding: 0.65rem 0.75rem; background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--radius-md); font: var(--fs-sm) var(--font-ui); }
+.bar { display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap; margin-bottom: var(--sp-4); }
+.selectall { display: flex; gap: var(--sp-2); align-items: center; font-size: var(--fs-sm); }
+.exported { font-size: var(--fs-sm); margin: 0 0 var(--sp-4); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.notes { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--sp-3); }
+.notes li { margin: 0; padding: var(--sp-4) var(--sp-5); background: linear-gradient(180deg, rgb(23 40 61 / 0.85), rgb(16 29 45 / 0.85)); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); box-shadow: 0 0 0 1px rgb(56 189 248 / 0.06), 0 12px 40px rgb(0 0 0 / 0.35); display: flex; flex-direction: column; gap: var(--sp-3); }
+.note-head { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; font-size: var(--fs-sm); }
+.meta { font-size: var(--fs-xs); }
+.note-text { margin: 0; white-space: pre-wrap; font-size: var(--fs-sm); }
+.actions { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
+.actions input { flex: 1 1 14rem; min-width: 0; }
 </style>
