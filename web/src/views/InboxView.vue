@@ -156,6 +156,7 @@ select, input:not([type="checkbox"]) { padding: 0.65rem 0.75rem; background: var
 .notes { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--sp-3); }
 .notes li { margin: 0; padding: var(--sp-4) var(--sp-5); background: linear-gradient(180deg, rgb(23 40 61 / 0.85), rgb(16 29 45 / 0.85)); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); box-shadow: 0 0 0 1px rgb(56 189 248 / 0.06), 0 12px 40px rgb(0 0 0 / 0.35); display: flex; flex-direction: column; gap: var(--sp-3); }
 .note-head { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; font-size: var(--fs-sm); }
+.note-head input[type="checkbox"] { flex: none; width: auto; margin: 0; }
 .meta { font-size: var(--fs-xs); }
 .note-text { margin: 0; white-space: pre-wrap; font-size: var(--fs-sm); }
 .actions { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
