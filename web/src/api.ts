@@ -35,6 +35,10 @@ export type ApprovedRun = Json<Server.ApprovedRun>;
 export type RunUpdate = Json<Server.RunUpdate>;
 export type QuotaReading = Json<Server.QuotaReading>;
 export type QuotaStatus = Json<Server.QuotaStatus>;
+export type DogfoodNature = Server.DogfoodNature;
+export type DogfoodTarget = Server.DogfoodTarget;
+export type DogfoodNote = Json<Server.DogfoodNote>;
+export type DogfoodNoteList = Json<Server.DogfoodNoteList>;
 
 /** Records the human's decision at a Gate and returns the updated Run. */
 export function decideGate(gateId: number, action: GateAction, feedback?: string, verdicts?: Verdict[], target?: string, message?: string): Promise<RunDetail> {

@@ -227,6 +227,36 @@ export async function createServer(deps: {
       throw e;
     }
   });
+  /**
+   * POST /api/dogfood-notes  body: { nature, target, text, tab, runId?, projectId? }  creates a Dogfood Note (201 with the note);
+   * 400 for a blank text, a bad nature or target, or an unknown Run or Project.
+   * GET /api/dogfood-notes?status=&nature=&target=  answers `{ notes, newCount }`, newest first (400 for an unknown filter value).
+   */
+  app.post<{ Body: Record<string, unknown> }>("/api/dogfood-notes", async (req, reply) => {
+    const { nature, target, text, tab, runId, projectId } = req.body ?? {};
+    for (const [name, value] of [["nature", nature], ["target", target], ["text", text], ["tab", tab]] as const) {
+      if (typeof value !== "string") return reply.code(400).send({ error: `${name} is required.` });
+    }
+    for (const [name, value] of [["runId", runId], ["projectId", projectId]] as const) {
+      if (value !== undefined && value !== null && !Number.isInteger(value)) return reply.code(400).send({ error: `${name} must be an integer.` });
+    }
+    try {
+      return reply.code(201).send(
+        await deps.forge.createDogfoodNote({ nature: nature as string, target: target as string, text: text as string, tab: tab as string, runId: (runId ?? undefined) as number | undefined, projectId: (projectId ?? undefined) as number | undefined }),
+      );
+    } catch (e) {
+      if (e instanceof InvalidInputError) return reply.code(400).send({ error: e.message });
+      throw e;
+    }
+  });
+  app.get<{ Querystring: { status?: string; nature?: string; target?: string } }>("/api/dogfood-notes", async (req, reply) => {
+    try {
+      return await deps.forge.listDogfoodNotes({ status: req.query.status, nature: req.query.nature, target: req.query.target });
+    } catch (e) {
+      if (e instanceof InvalidInputError) return reply.code(400).send({ error: e.message });
+      throw e;
+    }
+  });
   app.get("/api/gates",async () => deps.forge.listOpenGates());
   // The merge list: Approved Runs whose pull request waits for the human's merge.
   app.get("/api/approved-runs", async () => deps.forge.listApprovedRuns());

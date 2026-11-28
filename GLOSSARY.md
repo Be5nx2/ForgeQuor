@@ -181,3 +181,17 @@ _Avoid_: Style guide, art bible
 **Sprint**:
 A time box in a game **Project**'s own tracker (Codecks calls it a "run"); unrelated to a **Run**.
 _Avoid_: Run (in this sense), iteration
+
+## Dogfooding
+
+**Dogfood Note**:
+A short remark the human records while using Forgequor itself: a feedback or an idea about a **Workflow**, a feature or the display, kept with the tab and the **Run** or **Project** in view. Its text is never edited and it is never deleted; only its status changes. Not the **Feedback** of a **Gate** or an **Asset**.
+_Avoid_: Feedback, ticket, comment
+
+**Dogfood Inbox**:
+The place where **Dogfood Notes** wait to be reviewed: counted while new, kept once triaged or dismissed.
+_Avoid_: Backlog, issue tracker
+
+**Dogfood Export**:
+The single Markdown file produced from a selection of **Dogfood Notes**, to be analysed and turned into roadmap items. Exporting changes no note's status.
+_Avoid_: Report, dump

@@ -10,7 +10,7 @@ Milestones are specified one at a time with `/to-spec`, then split into items wi
 
 **Dogfood Notes** jotted from a floating **+ Note** button, a **Dogfood Inbox** tab, a Markdown **Dogfood Export** of selected notes, and a `/dogfood-triage` skill. Spec: `docs/specs/dogfood-notes.md`.
 
-- [ ] `dogfood-01` **Jot a Dogfood Note**: from any tab the human clicks **+ Note**, picks a nature (feedback or idea) and a target (workflow, feature, display, other; pre-selected from the tab), types a text and saves; the app records it with its context and closes the popup with a short "noted" message.
+- [x] `dogfood-01` **Jot a Dogfood Note**: from any tab the human clicks **+ Note**, picks a nature (feedback or idea) and a target (workflow, feature, display, other; pre-selected from the tab), types a text and saves; the app records it with its context and closes the popup with a short "noted" message.
   - Spec: `docs/specs/dogfood-notes.md`
   - Blocked by: none
   - Acceptance: **+ Note** is visible on every tab; only the text is required and an empty text is refused with a clear message; what was typed is kept if saving fails; the tab, the Run or Project in view (shown as text, for example "Run #42") and the date are attached automatically; a note without Run or Project is accepted; an unknown Run or Project, or an invalid nature or target, is refused; notes are stored with source `internal`, status `new`, and never deleted or edited; the glossary defines **Dogfood Note**, **Dogfood Inbox** and **Dogfood Export** and says they are not a **Gate**'s **Feedback**; Forge core tests on the real database cover creation and refusals, HTTP route tests cover request shape and error mapping.

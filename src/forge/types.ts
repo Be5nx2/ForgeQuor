@@ -375,3 +375,56 @@ export interface Asset extends AssetRequest {
   /** Every Artist attempt at the Asset that ended with a result to check, oldest first, across Iterations. */
   attempts: AssetAttempt[];
 }
+
+export type DogfoodNature = "feedback" | "idea";
+export type DogfoodTarget = "workflow" | "feature" | "display" | "other";
+export type DogfoodStatus = "new" | "triaged" | "dismissed";
+
+/** A short remark the human recorded while using Forgequor itself. Not the Feedback of a Gate. */
+export interface DogfoodNote {
+  id: number;
+  nature: DogfoodNature;
+  target: DogfoodTarget;
+  /** As typed. */
+  text: string;
+  /** The tab the human was on. */
+  tab: string;
+  runId: number | null;
+  /** The Run's title when the note was written. */
+  runTitle: string | null;
+  projectId: number | null;
+  /** The Project's name when the note was written. */
+  projectName: string | null;
+  source: string;
+  status: DogfoodStatus;
+  triageRef: string | null;
+  createdAt: Date;
+  /** Where it was written, as text: "Run #42 (title), Project name, tab runs". */
+  origin: string;
+}
+
+/** What the human gives for a Dogfood Note; the Forge core attaches the rest. */
+export interface DogfoodNoteInput {
+  nature: string;
+  target: string;
+  text: string;
+  /** The tab the human is on. */
+  tab: string;
+  /** The Run in view, when there is one; its Project is attached with it. */
+  runId?: number;
+  /** The Project in view, when there is one and no Run. */
+  projectId?: number;
+}
+
+export interface DogfoodNoteFilter {
+  status?: string;
+  nature?: string;
+  target?: string;
+}
+
+export interface DogfoodNoteList {
+  /** Newest first. */
+  notes: DogfoodNote[];
+  /** How many notes are `new`, whatever the filter. */
+  newCount: number;
+}

@@ -4,6 +4,7 @@ import { isDeepStrictEqual } from "node:util";
 import type pg from "pg";
 import type { Runner } from "../runner/runner.js";
 import { bugfixAgent, bugfixWorkflow, developerAgent, developerWorkflow } from "./developer.js";
+import { createDogfoodNotes } from "./dogfood.js";
 import { createRunNotes, readRunNotes } from "./run-notes.js";
 import { createConversationRecords } from "./conversation-records.js";
 import { createConversationGate, conversationStepType, type ConversationAgent } from "./conversation.js";
@@ -34,6 +35,10 @@ import type {
   ApprovedRun,
   ArtInfo,
   CheckResult,
+  DogfoodNote,
+  DogfoodNoteFilter,
+  DogfoodNoteInput,
+  DogfoodNoteList,
   Gate,
   GateAction,
   GateKind,
@@ -143,6 +148,14 @@ export interface Forge {
   assetImage(runId: number, assetId: number, which?: number | "replaced"): Promise<string>;
   /** Each vendor's latest Quota Reading with its age (a null reading for one never read), as the Quota bars show them. */
   quota(): Promise<QuotaStatus[]>;
+  /**
+   * Records a Dogfood Note: a remark about Forgequor itself, with the tab, the Run or Project in view (by name too, as written
+   * now), source `internal` and status `new`. Throws InvalidInputError for a blank text, a nature or target out of the lists,
+   * or an unknown Run or Project.
+   */
+  createDogfoodNote(input: DogfoodNoteInput): Promise<DogfoodNote>;
+  /** The Dogfood Notes matching the filters (status, nature, target; each optional), newest first, with the count of `new` ones. InvalidInputError for an unknown filter value. */
+  listDogfoodNotes(filter?: DogfoodNoteFilter): Promise<DogfoodNoteList>;
   /** Each seat's effective Runner and model with where each comes from (environment, Team, default), and the model aliases on offer. */
   team(): Promise<Team>;
   /** Saves a seat's Runner and/or model (the Team page). Throws InvalidInputError for an unknown seat or Runner, SeatLockedError for a field the environment holds. */
@@ -334,6 +347,7 @@ export function createForge(deps: ForgeDeps): Forge {
   /** The Workflows a Run can follow, by name. */
   const extensions = deps.extensions ?? builtInExtensions(pool);
   const runNotes = createRunNotes(pool);
+  const dogfood = createDogfoodNotes(pool);
   const workflows = new Map<string, Workflow>([developerWorkflow, bugfixWorkflow, featureWorkflow, ...extensions.flatMap((e) => e.workflows)].map((w) => [w.name, w]));
   /** How each built-in Workflow's pull request is made, when it is not the default. */
   const publications = new Map<string, Publication>([...workflows.values()].flatMap((w) => (w.publication ? [[w.name, w.publication] as const] : [])));
@@ -1254,6 +1268,8 @@ export function createForge(deps: ForgeDeps): Forge {
     },
 
     quota: () => quotas.status(),
+    createDogfoodNote: (input) => dogfood.create(input),
+    listDogfoodNotes: (filter) => dogfood.list(filter),
     team: () => teamStore.team(),
     changeSeat: (seat, change) => teamStore.change(seat, change),
     startQuotaReading: () => quotas.start(),
