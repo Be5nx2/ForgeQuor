@@ -40,7 +40,7 @@ Every item must match its mockup in `docs/specs/ui-refresh/` (same layout, compo
   - Spec: `docs/specs/ui-refresh/README.md`
   - Blocked by: `ui-03`, `ui-04`
   - Acceptance: the rail shows each Step's state, Iteration and Runner (sub-Steps indented); selecting a Step shows its log, output, Feedback, Run Notes and the seats it used; the Gate bar stays fixed while scrolling; the review Gate shows remarks, Runner chips and the Consolidator's disagreement; the live log has `aria-live`; abandon stays available; matches `run-detail.html`.
-- [ ] `ui-08` **Conversation and Spec Gates**: the Conversation Gate and the Spec Gate use the Run detail pattern, as in `run-gate-conversation.html` and `run-gate-spec.html`.
+- [x] `ui-08` **Conversation and Spec Gates**: the Conversation Gate and the Spec Gate use the Run detail pattern, as in `run-gate-conversation.html` and `run-gate-spec.html`.
   - Spec: `docs/specs/ui-refresh/README.md`
   - Blocked by: `ui-07`
   - Acceptance: the conversation with the Griller shows its rounds and recommended answers, an answer box and "Confirm summary"; the spec Gate renders the spec with approve or reject with Feedback; both keep the Gate bar fixed and the rail visible; match their mockups.

@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { getJson, postJson, type Project, type RunDetail, type RunNote } from "../api";
+import { chatOf } from "../conversation";
 import { liveEvents } from "../liveEvents";
 import { gateTitle, railOf, resolveSelection, stepViewOf } from "../runDetail";
 import AssetGallery from "../components/AssetGallery.vue";
+import ConversationReply from "../components/ConversationReply.vue";
 import ErrorState from "../components/ErrorState.vue";
 import GateActions from "../components/GateActions.vue";
 import LoadingState from "../components/LoadingState.vue";
@@ -84,7 +86,13 @@ const runningAttempt = computed(() => run.value?.attempts.find((a) => a.status =
 const drawing = computed(() => run.value?.assets.find((a) => a.id === runningAttempt.value?.assetId));
 const showAssets = computed(() => !!run.value?.assets.length && !!view.value && (view.value.step.type === "artist" || view.value.gates.some((g) => g.kind === "asset")));
 const turns = computed(() => (run.value && view.value?.step.type === "conversation" ? run.value.conversation.filter((t) => t.stepId === view.value!.step.id) : []));
+const openConversation = computed(() => (view.value?.openGate?.kind === "conversation" ? view.value.openGate : null));
+const openSpec = computed(() => (view.value?.openGate?.kind === "spec" ? view.value.openGate : null));
 const agentName = (stepId: string) => (run.value?.steps.find((s) => s.id === stepId)?.detail ?? "Agent").replace(/^./, (c) => c.toUpperCase());
+const chat = computed(() => (view.value ? chatOf(turns.value, agentName(view.value.step.id)) : []));
+/** The Feedback typed beside the spec: the Gate bar's "Reject with Feedback" sends it; it starts empty at each Spec Gate. */
+const specFeedback = ref("");
+watch(() => openSpec.value?.id, () => (specFeedback.value = ""));
 const time = (d: string) => new Date(d).toLocaleTimeString();
 
 let stopFollowing: () => void;
@@ -148,7 +156,7 @@ onUnmounted(() => stopFollowing?.());
           <button v-if="gateElsewhere(g.stepId)" type="button" class="link" @click="select(gateElsewhere(g.stepId)!)">Show the {{ stepName(g.stepId) }} Step</button>
           <details v-if="g.evidence && !stepName(g.stepId)"><summary>Evidence</summary><pre>{{ g.evidence }}</pre></details>
         </div>
-        <GateActions :gate="g" @decided="load" />
+        <GateActions :gate="g" :held="g.kind === 'spec' ? specFeedback : undefined" @decided="load" />
       </div>
     </div>
 
@@ -170,15 +178,20 @@ onUnmounted(() => stopFollowing?.());
           <RemarkList :table="view.remarks" />
         </div>
 
-        <div v-for="g in view.gates" :key="g.id" class="gate-record">
+        <div v-for="g in view.gates.filter((x) => x !== openConversation)" :key="g.id" class="gate-record">
           <h2>{{ gateTitle(g) }} <span class="n">Iteration {{ g.iteration }}</span></h2>
           <p class="muted">{{ g.kind === "asset" && g.decidedAt ? `${g.verdicts.length} ${g.verdicts.length === 1 ? "Asset" : "Assets"} judged.` : g.reason }}</p>
-          <Markdown v-if="g.evidence && (g.kind === 'spec' || g.kind === 'conversation')" :text="g.evidence" />
+          <article v-if="g.evidence && g === openSpec" class="doc" aria-label="Spec"><Markdown :text="g.evidence" /></article>
+          <Markdown v-else-if="g.evidence && (g.kind === 'spec' || g.kind === 'conversation')" :text="g.evidence" />
           <details v-else-if="g.evidence" :open="g.kind !== 'review'"><summary>{{ g.kind === "review" ? "What each side said" : "Evidence" }}</summary><pre>{{ g.evidence }}</pre></details>
           <p v-if="g.decidedAt" class="muted">
             <StatusChip :status="gateStatus(g.decision ?? 'abandon')" /> {{ new Date(g.decidedAt).toLocaleString() }}
           </p>
           <pre v-if="g.feedback">{{ g.feedback }}</pre>
+          <div v-if="g === openSpec && g.actions.includes('reject')" class="field">
+            <label for="spec-feedback">Feedback <span class="muted opt">(used only if you reject)</span></label>
+            <textarea id="spec-feedback" v-model="specFeedback" class="feedback" placeholder="What should change?" />
+          </div>
         </div>
 
         <div v-if="showAssets">
@@ -189,16 +202,23 @@ onUnmounted(() => stopFollowing?.());
           <AssetGallery :run-id="run.id" :iteration="run.iteration" :assets="run.assets" :files-removed="!!run.archivedAt" :gate="run.gates.find((g) => g.kind === 'asset' && !g.decidedAt)" @decided="load" />
         </div>
 
-        <div v-if="turns.length">
+        <div v-if="turns.length || openConversation" class="conversation">
           <h2>Conversation</h2>
-          <ol class="chat" aria-label="Conversation">
-            <li v-for="t in turns" :key="t.id" :class="t.author">
-              <strong>{{ t.author === "agent" ? agentName(t.stepId) : "You" }}</strong>
-              <span class="badge">{{ { questions: "questions", summary: "proposed summary", answer: "answer", confirm: "confirmed", feedback: "feedback" }[t.kind] }}</span>
-              <Markdown :text="t.body" />
-            </li>
-          </ol>
-          <p v-if="view.openGate?.kind === 'conversation'" class="muted">Reply in the Gate bar above.</p>
+          <div v-if="turns.length" class="chat" role="log" aria-live="polite" :aria-label="`Conversation with the ${agentName(view.step.id)}`">
+            <div v-for="m in chat" :key="m.id" class="msg" :class="m.author">
+              <div class="who">{{ m.who }}<span v-if="m.badge" class="badge">{{ m.badge }}</span></div>
+              <template v-if="m.round?.questions.length">
+                <Markdown v-if="m.round.intro" :text="m.round.intro" />
+                <div v-for="q in m.round.questions" :key="q.number" class="q">
+                  <b>Q{{ q.number }}</b>
+                  <Markdown :text="q.text" />
+                  <div v-if="q.recommendation" class="rec"><Markdown :text="q.recommendation" /></div>
+                </div>
+              </template>
+              <Markdown v-else :text="m.body" />
+            </div>
+          </div>
+          <ConversationReply v-if="openConversation" :gate="openConversation" @decided="load" />
         </div>
 
         <div v-if="view.step.type === 'checks'">
@@ -324,8 +344,23 @@ h1 { font: 700 var(--fs-xl)/1.2 var(--font-brand); letter-spacing: 0.03em; }
 .log { background: #050a12; border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--sp-3); font: var(--fs-xs)/1.6 var(--font-mono); color: #b9c6d6; max-height: 18rem; overflow-y: auto; }
 .log .t { color: var(--ai); }
 .log .kind { color: var(--text-muted); }
-.chat { list-style: none; padding: 0; margin: 0; font-size: var(--fs-sm); }
-.chat li { margin: var(--sp-2) 0; padding: var(--sp-3); border-radius: var(--radius-md); border: 1px solid var(--border); background: rgb(8 15 25 / 0.55); }
-.chat li.human { margin-left: 2rem; border-color: var(--border-strong); }
-.badge { margin-left: var(--sp-2); padding: 0 0.45rem; border-radius: 999px; background: var(--ai); color: var(--bg); font-size: var(--fs-xs); font-weight: 700; }
+.chat { display: flex; flex-direction: column; gap: var(--sp-4); }
+.msg { max-width: 46rem; border-radius: var(--radius-lg); padding: var(--sp-4) var(--sp-5); font-size: var(--fs-sm); border: 1px solid var(--border); }
+.msg .who { font: 700 var(--fs-xs) var(--font-brand); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: var(--sp-2); display: flex; gap: var(--sp-2); align-items: center; }
+.msg.agent { background: rgb(56 189 248 / 0.07); border-color: rgb(56 189 248 / 0.35); align-self: flex-start; }
+.msg.agent .who { color: var(--ai); }
+.msg.human { background: rgb(255 140 36 / 0.08); border-color: rgb(255 140 36 / 0.4); align-self: flex-end; }
+.msg.human .who { color: var(--action); justify-content: flex-end; }
+.q { margin-top: var(--sp-3); }
+.q b { display: block; }
+.q .rec { color: var(--ice-blue); margin-top: 2px; display: flex; gap: var(--sp-2); }
+.q .rec::before { content: "➡"; }
+.conversation { display: flex; flex-direction: column; gap: var(--sp-4); }
+.doc { max-width: 46rem; font-size: var(--fs-md); line-height: 1.65; }
+.field { display: flex; flex-direction: column; gap: var(--sp-2); }
+.field > label { font-size: var(--fs-sm); font-weight: 600; }
+.field .opt { font-weight: 400; }
+.feedback { width: 100%; min-height: 4.5rem; background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--radius-md); padding: 0.7rem; font: var(--fs-sm) var(--font-ui); resize: vertical; }
+.feedback:focus-visible { outline: 2px solid var(--ai); outline-offset: 2px; }
+.badge { padding: 0 0.45rem; border-radius: 999px; background: var(--ai); color: var(--bg); font-size: var(--fs-xs); font-weight: 700; letter-spacing: 0.02em; text-transform: none; }
 </style>
