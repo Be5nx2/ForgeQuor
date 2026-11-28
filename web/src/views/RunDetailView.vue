@@ -6,7 +6,6 @@ import GateActions from "../components/GateActions.vue";
 import Markdown from "../components/Markdown.vue";
 
 const props = defineProps<{ id: number }>();
-defineEmits<{ back: [] }>();
 
 const run = ref<RunDetail | null>(null);
 const error = ref("");
@@ -68,7 +67,7 @@ onUnmounted(() => stopFollowing?.());
 </script>
 
 <template>
-  <p><a href="#" @click.prevent="$emit('back')">&larr; Runs</a></p>
+  <p><router-link to="/runs">&larr; Runs</router-link></p>
   <p v-if="error" class="error">{{ error }}</p>
   <template v-if="run">
     <h2>{{ run.title }} <span class="badge">{{ run.state }}</span></h2>

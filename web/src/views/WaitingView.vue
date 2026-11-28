@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import { followRuns, getJson, type ApprovedRun, type OpenGate, type RunDetail } from "../api";
 import AssetGallery from "../components/AssetGallery.vue";
 import GateActions from "../components/GateActions.vue";
 import Markdown from "../components/Markdown.vue";
 
-const emit = defineEmits<{ open: [id: number] }>();
+const router = useRouter();
+const openRun = (id: number) => router.push(`/runs/${id}`);
 const gates = ref<OpenGate[]>([]);
 const runs = ref<Record<number, RunDetail>>({});
 /** The merge list: Approved Runs whose pull request waits for the human's merge. */
@@ -40,7 +42,7 @@ onUnmounted(() => stopFollowing?.());
   <h2>Waiting for you</h2>
   <p v-if="!gates.length" class="muted">Nothing is waiting for you.</p>
   <ul>
-    <li v-for="g in gates" :key="g.id" class="clickable" @click="emit('open', g.runId)">
+    <li v-for="g in gates" :key="g.id" class="clickable" @click="openRun(g.runId)">
       <strong>{{ g.runTitle }}</strong>
       <span class="badge">{{ g.kind === "final" ? "final Gate" : g.kind === "asset" ? "Asset Gate" : g.kind === "review" ? "review Gate" : g.kind === "spec" ? "spec Gate" : g.kind === "conversation" ? "Conversation Gate" : "Escalation" }}</span>
       <div class="muted">{{ g.projectName }} · {{ g.reason }}</div>
@@ -56,7 +58,7 @@ onUnmounted(() => stopFollowing?.());
   <h2>Waiting for your merge</h2>
   <p v-if="!merges.length" class="muted">No pull request is waiting for your merge.</p>
   <ul>
-    <li v-for="r in merges" :key="r.id" class="clickable" @click="emit('open', r.id)">
+    <li v-for="r in merges" :key="r.id" class="clickable" @click="openRun(r.id)">
       <strong>{{ r.title }}</strong>
       <span class="badge">approved</span>
       <div class="muted">

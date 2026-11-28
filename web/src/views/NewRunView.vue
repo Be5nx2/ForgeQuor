@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
+import { useRouter } from "vue-router";
 import { getJson, postJson, type ArtInfo, type AssetKind, type Project, type QuotaStatus, type ReviewMode, type Run, type Team, type TeamSeat, type WorkflowList, type WorkflowOption } from "../api";
 
-const emit = defineEmits<{ open: [id: number] }>();
+const router = useRouter();
 
 const projects = ref<Project[]>([]);
 const form = ref({ projectId: "", workflow: "developer", task: "", title: "", trackerRef: "", review: "solo" as ReviewMode });
@@ -127,7 +128,7 @@ async function start() {
     form.value = { ...form.value, task: "", title: "", trackerRef: "" };
     assets.value = [newAsset()];
     void loadSeats();
-    emit("open", run.id);
+    router.push(`/runs/${run.id}`);
   } catch (e: any) {
     error.value = e.message;
   }

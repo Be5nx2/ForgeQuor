@@ -1,6 +1,9 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { nextTick, onMounted, ref } from "vue";
 import { getJson, postJson, putJson, type Project } from "../api";
+
+/** The Project the URL names (/projects/:id): scrolled into view once the list is loaded. */
+const props = defineProps<{ id?: number }>();
 
 const projects = ref<Project[]>([]);
 const path = ref("");
@@ -93,7 +96,11 @@ async function register() {
   }
 }
 
-onMounted(load);
+onMounted(async () => {
+  await load();
+  await nextTick();
+  if (props.id !== undefined) document.getElementById(`project-${props.id}`)?.scrollIntoView();
+});
 </script>
 
 <template>
@@ -106,7 +113,7 @@ onMounted(load);
 
   <p v-if="!projects.length" class="muted">No Project registered yet.</p>
   <ul>
-    <li v-for="p in projects" :key="p.id">
+    <li v-for="p in projects" :key="p.id" :id="`project-${p.id}`">
       <strong>{{ p.name }}</strong>
       <span class="muted"> {{ p.remoteOwner }}/{{ p.remoteName }} · {{ p.defaultBranch }}</span>
       <div class="muted">{{ p.localPath }}</div>

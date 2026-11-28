@@ -12,7 +12,7 @@ New information architecture and cinematic restyle of the web UI (direction B): 
 
 Every item must match its mockup in `docs/specs/ui-refresh/` (same layout, components, tokens and wording): checked by a browser screenshot next to the mockup, plus the full test suite. Where M4 shipped after the mockups: Team, Workflows and Dogfood Inbox become real sidebar entries in the mockups' order; Quotas are one bar per vendor at the top of every screen (M4 decision), not a sidebar page; Skill Packs stay in Projects, since they are chosen per Project.
 
-- [ ] `ui-01` **A URL per screen**: the human can share or refresh `/runs`, `/runs/:id`, `/new`, `/projects/:id`, `/workflows`, `/team` and `/inbox` and land on the same place; Back and Forward work.
+- [x] `ui-01` **A URL per screen**: the human can share or refresh `/runs`, `/runs/:id`, `/new`, `/projects/:id`, `/workflows`, `/team` and `/inbox` and land on the same place; Back and Forward work.
   - Spec: `docs/specs/ui-refresh/README.md`
   - Blocked by: none
   - Acceptance: `vue-router` replaces the tab state; every current screen is reachable by its URL and a refresh keeps it; an open Gate is reachable through its Run's URL; an unknown URL or Run shows a clear not-found message; the server serves the app for these paths; **+ Note** takes its tab and Run from the route; the look is unchanged; existing tests pass.
