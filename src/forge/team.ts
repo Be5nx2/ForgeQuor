@@ -55,18 +55,19 @@ const lockedMessage = (seat: SeatName, field: "runner" | "model" | "effort") =>
 
 /**
  * The per-Run seat overrides a launch gives, checked like the Team page's: an unknown seat or Runner is an
- * InvalidSeatError, a field the environment holds a SeatLockedError. Returns what to keep (empty fields dropped).
+ * InvalidSeatError, a field the environment holds a SeatLockedError. An effort the seat could not run (after the override,
+ * with the Team's settings under it) is an InvalidSeatError naming the accepted levels. Returns what to keep (empty fields dropped).
  */
-export function parseSeatOverrides(env: SeatSettings, given: unknown): SeatSettings {
+export function parseSeatOverrides(env: SeatSettings, given: unknown, team: TeamSeat[], catalog: RunnerCatalog): SeatSettings {
   if (given === undefined || given === null) return {};
-  if (typeof given !== "object" || Array.isArray(given)) throw new InvalidSeatError("seats must map a seat to its runner and/or model.");
+  if (typeof given !== "object" || Array.isArray(given)) throw new InvalidSeatError("seats must map a seat to its runner, model and/or effort.");
   const kept: SeatSettings = {};
   for (const [name, value] of Object.entries(given)) {
     if (!SEAT_NAMES.includes(name as SeatName)) throw new InvalidSeatError(`"${name}" is not a seat; the seats are ${SEAT_NAMES.join(", ")}.`);
     const seat = name as SeatName;
-    if (!value || typeof value !== "object" || Array.isArray(value)) throw new InvalidSeatError(`The override of seat "${seat}" must give a runner and/or a model.`);
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new InvalidSeatError(`The override of seat "${seat}" must give a runner, a model and/or an effort.`);
     const setting: SeatSetting = {};
-    for (const field of ["runner", "model"] as const) {
+    for (const field of ["runner", "model", "effort"] as const) {
       const raw = (value as Record<string, unknown>)[field];
       if (raw !== undefined && raw !== null && typeof raw !== "string") throw new InvalidSeatError(`${field} must be text.`);
       if (!raw?.trim()) continue;
@@ -75,7 +76,12 @@ export function parseSeatOverrides(env: SeatSettings, given: unknown): SeatSetti
       if (field === "runner" && !RUNNER_NAMES.includes(text as RunnerName)) throw new InvalidSeatError(`"${text}" is not a Runner; it must be ${RUNNER_NAMES.join(" or ")}.`);
       setting[field] = text;
     }
-    if (setting.runner || setting.model) kept[seat] = setting;
+    if (!(setting.runner || setting.model || setting.effort)) continue;
+    // The seat as the Run would have it: its effort must exist for its Runner and model, whichever field the override touches.
+    const now = team.find((t) => t.seat === seat)!;
+    const problem = effortProblem(catalog, setting.runner ?? now.runner.value ?? DEFAULT_RUNNERS[seat], setting.model ?? now.model.value, setting.effort ?? now.effort.value);
+    if (problem) throw new InvalidSeatError(`Seat "${seat}": ${problem}`);
+    kept[seat] = setting;
   }
   return kept;
 }

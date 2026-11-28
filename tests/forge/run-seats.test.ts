@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type pg from "pg";
 import { createForge, InvalidSeatError, SeatLockedError, type Forge, type ForgeDeps, type Project, type RunDetail } from "../../src/forge/forge.js";
+import { fallbackCatalog } from "../../src/runner/catalog.js";
 import { seatSettingsFromEnv } from "../../src/forge/seats.js";
 import type { StepRequest, StepResult } from "../../src/runner/runner.js";
 import { createTestDatabase } from "../harness/database.js";
@@ -152,5 +153,67 @@ describe("Seats per Run", () => {
 
     const open = (await f.getRun(started.id)).gates.find((g) => g.kind === "escalation" && !g.decidedAt);
     expect(open?.reason).toMatch(/seat "developer" \(Forgequor has no codex Runner\)/);
+  });
+
+  describe("effort", () => {
+    const effortCatalog = () => {
+      const catalog = fallbackCatalog();
+      catalog.codex = {
+        models: [
+          { id: "gpt-terra", efforts: ["low", "medium", "high"], defaultEffort: "low" },
+          { id: "gpt-sol", efforts: ["low", "ultra"], defaultEffort: "low" },
+        ],
+        defaultModel: "gpt-terra",
+        efforts: ["low", "medium", "high"],
+        fallback: false,
+      };
+      return catalog;
+    };
+
+    it("gives one Run its own effort, over the Team's, reaches the CLI request and the attempt, and leaves the Team alone", async () => {
+      const f = forgeWith({ catalog: effortCatalog() });
+      const p = await project(f);
+      await f.changeSeat("developer", { effort: "low" });
+
+      const started = await f.startRun({ projectId: p.id, workflow: "bugfix", task: "The player cannot jump twice.", seats: { developer: { effort: "max" } } });
+      await f.whenIdle();
+      const run = await f.getRun(started.id);
+
+      expect(run.attempts[0]).toMatchObject({ runner: "claude", effort: "max" });
+      expect(claude.steps.find((s) => !isReviewer(s))?.effort).toBe("max");
+      expect((await pool.query("SELECT seats FROM runs WHERE id = $1", [started.id])).rows[0].seats.developer.effort).toBe("max");
+      expect((await f.team()).seats.find((s) => s.seat === "developer")?.effort.value).toBe("low");
+    });
+
+    it("freezes the effort with the Run's Seats, so a later Team change leaves the Run alone", async () => {
+      const f = forgeWith({ catalog: effortCatalog() });
+      const p = await project(f);
+      const started = await f.startRun({ projectId: p.id, workflow: "bugfix", task: "A bug.", seats: { developer: { effort: "high" } } });
+      await f.whenIdle();
+      await f.changeSeat("developer", { effort: "low" });
+      expect((await pool.query("SELECT seats FROM runs WHERE id = $1", [started.id])).rows[0].seats.developer.effort).toBe("high");
+    });
+
+    it("refuses an effort the Seat could not run, after the override, naming the accepted levels, before creating anything", async () => {
+      const f = forgeWith({ catalog: effortCatalog() });
+      const p = await project(f);
+      await f.changeSeat("developer", { effort: "max" });
+      const start = (seats: unknown) => f.startRun({ projectId: p.id, workflow: "bugfix", task: "A bug.", seats: seats as never });
+
+      await expect(start({ developer: { effort: "turbo" } })).rejects.toThrow(InvalidSeatError);
+      await expect(start({ developer: { effort: "turbo" } })).rejects.toThrow(/low, medium, high, xhigh, max/);
+      // A Runner override that strands the Team's effort is refused too; one that gives its own effort is fine.
+      await expect(start({ developer: { runner: "codex", model: "gpt-sol" } })).rejects.toThrow(/"max" is not an effort level of codex with model gpt-sol/);
+      await expect(start({ developer: { runner: "codex", model: "gpt-sol", effort: "ultra" } })).resolves.toBeTruthy();
+      expect((await pool.query("SELECT 1 FROM runs WHERE project_id = $1", [p.id])).rowCount).toBe(1);
+    });
+
+    it("refuses an effort the environment holds, as locked", async () => {
+      const f = forgeWith({ seats: seatSettingsFromEnv({ FORGEQUOR_DEVELOPER_EFFORT: "high" }), catalog: effortCatalog() });
+      const p = await project(f);
+      const start = f.startRun({ projectId: p.id, workflow: "bugfix", task: "A bug.", seats: { developer: { effort: "low" } } });
+      await expect(start).rejects.toThrow(SeatLockedError);
+      await expect(start).rejects.toThrow(/FORGEQUOR_DEVELOPER_EFFORT/);
+    });
   });
 });

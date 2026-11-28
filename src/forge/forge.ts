@@ -430,7 +430,8 @@ export function createForge(deps: ForgeDeps): Forge {
   for (const [seat, model] of [["developer", deps.developerModel], ["artist", deps.artistModel]] as const) {
     if (model && !envSettings[seat]?.model) envSettings[seat] = { ...envSettings[seat], model };
   }
-  const teamStore = createTeamStore(pool, envSettings, deps.catalog ?? fallbackCatalog());
+  const catalog = deps.catalog ?? fallbackCatalog();
+  const teamStore = createTeamStore(pool, envSettings, catalog);
   /**
    * The seats a Run works through: its frozen ones, else (its first start) the Team's as they are now with the Run's
    * overrides laid over them, frozen from then on. So a Team change applies to the next Runs without a restart, and not
@@ -1127,7 +1128,7 @@ export function createForge(deps: ForgeDeps): Forge {
 
     async startRun({ projectId, trackerRef, workflow = "developer", seats, ...input }) {
       // Refused before anything else, as the Team page refuses a bad change.
-      const seatOverrides = parseSeatOverrides(envSettings, seats);
+      const seatOverrides = parseSeatOverrides(envSettings, seats, await teamStore.effective(), catalog);
       const { rows: found } = await pool.query(`SELECT ${COLUMNS} FROM projects WHERE id = $1`, [projectId]);
       if (!found[0]) throw new Error(`No Project ${projectId}.`);
       const project = toProject(found[0]);
