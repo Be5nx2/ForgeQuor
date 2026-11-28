@@ -32,7 +32,7 @@ export function resetText(resetsAt: string | null, now: number): string {
   const today = new Date(now);
   if (at.toDateString() === today.toDateString()) return `resets ${clock(at)}`;
   const days = (at.getTime() - now) / 86_400_000;
-  const day = days > 0 && days < 7 ? at.toLocaleDateString([], { weekday: "short" }) : at.toLocaleDateString([], { month: "short", day: "numeric" });
+  const day = days > 0 && days < 7 ? at.toLocaleDateString("en-US", { weekday: "short" }) : at.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   return `resets ${day} ${clock(at)}`;
 }
 
