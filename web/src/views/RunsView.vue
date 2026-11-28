@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import { followRuns, getJson, type Project, type Run } from "../api";
+import { getJson, type Project, type Run } from "../api";
 import EmptyState from "../components/EmptyState.vue";
 import ErrorState from "../components/ErrorState.vue";
 import LoadingState from "../components/LoadingState.vue";
 import StatusChip from "../components/StatusChip.vue";
 import { runStatus } from "../status";
+import { liveEvents } from "../liveEvents";
 
 const router = useRouter();
 const openRun = (id: number) => router.push(`/runs/${id}`);
@@ -55,7 +56,7 @@ const projectName = (id: number) => {
 
 let stopFollowing: () => void;
 onMounted(async () => {
-  stopFollowing = followRuns((u) => u.type === "changed" && load(), load);
+  stopFollowing = liveEvents.follow((u) => u.type === "changed" && load(), load);
   await load();
 });
 onUnmounted(() => stopFollowing?.());

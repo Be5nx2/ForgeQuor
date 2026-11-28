@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useRoute } from "vue-router";
-import { getJson } from "./api";
+import { getJson, type OpenGate } from "./api";
 import AppShell from "./components/AppShell.vue";
 import NoteButton from "./components/NoteButton.vue";
+import { liveEvents } from "./liveEvents";
 import { placeOf, sidebarNav } from "./navigation";
 
 interface Tool {
@@ -29,19 +30,37 @@ async function refreshBadge() {
   }
 }
 
+/** How many Gates wait for the human (the Runs badge); a Run's `changed` update covers a Gate opening or closing. */
+const openGates = ref(0);
+let gatesRead = 0;
+
+async function refreshGates() {
+  const mine = ++gatesRead;
+  try {
+    const gates = await getJson<OpenGate[]>("/api/gates");
+    if (mine === gatesRead) openGates.value = gates.length;
+  } catch {
+    // The badge is a convenience: a failed read leaves the last count.
+  }
+}
+
 function noteJotted() {
   inboxVersion.value++;
   refreshBadge();
 }
 
+let stopFollowing: () => void;
 onMounted(async () => {
   refreshBadge();
+  refreshGates();
+  stopFollowing = liveEvents.follow((u) => u.type === "changed" && refreshGates(), refreshGates);
   tools.value = (await getJson<{ tools: Tool[] }>("/api/health")).tools;
 });
+onUnmounted(() => stopFollowing?.());
 </script>
 
 <template>
-  <AppShell :nav="sidebarNav" :active-tab="place.tab" :new-notes="newNotes" :warnings="warnings">
+  <AppShell :nav="sidebarNav" :active-tab="place.tab" :new-notes="newNotes" :open-gates="openGates" :warnings="warnings">
     <template #note><NoteButton @saved="noteJotted" :tab="place.tab" :run-id="place.runId" :suggested-target="place.target" /></template>
     <router-view v-slot="{ Component }">
       <!-- keyed by path so Back between /runs/1 and /runs/2 remounts the view instead of showing the stale Run -->

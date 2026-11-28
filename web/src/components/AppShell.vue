@@ -9,6 +9,8 @@ defineProps<{
   activeTab: string;
   /** New Dogfood Notes, shown as the Inbox badge. */
   newNotes: number;
+  /** Gates waiting for the human, shown as the Runs badge. */
+  openGates: number;
   /** Warnings about missing tools, shown above the screen. */
   warnings: string[];
 }>();
@@ -28,7 +30,8 @@ defineProps<{
         <router-link v-for="t in nav" :key="t.name" :to="t.path" custom v-slot="{ href, navigate }">
           <a :href="href" :aria-current="activeTab === t.name ? 'page' : undefined" @click="navigate">
             {{ t.label }}
-            <span v-if="t.name === 'inbox' && newNotes" class="count" :aria-label="`${newNotes} new notes`">{{ newNotes }}</span>
+            <span v-if="t.name === 'runs' && openGates" class="count" :aria-label="`${openGates} waiting for you`">{{ openGates }}</span>
+            <span v-if="t.name === 'inbox'&& newNotes" class="count" :aria-label="`${newNotes} new notes`">{{ newNotes }}</span>
           </a>
         </router-link>
       </nav>
