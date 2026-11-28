@@ -7,11 +7,9 @@ import ProjectsView from "./views/ProjectsView.vue";
 import RunDetailView from "./views/RunDetailView.vue";
 import RunsView from "./views/RunsView.vue";
 import TeamView from "./views/TeamView.vue";
-import WaitingView from "./views/WaitingView.vue";
 import WorkflowsView from "./views/WorkflowsView.vue";
 
 const views = {
-  waiting: WaitingView,
   new: NewRunView,
   runs: RunsView,
   run: RunDetailView,
@@ -25,6 +23,8 @@ const views = {
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
+    // The Runs home is the landing page: what waits for the human is pinned at its top.
+    { path: "/", redirect: "/runs" },
     ...screens.map((s) => ({
       name: s.name,
       path: s.path,

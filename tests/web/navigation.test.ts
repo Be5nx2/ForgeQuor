@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { navTabs, placeOf, screens, sidebarNav } from "../../web/src/navigation.js";
 
 describe("placeOf", () => {
-  it("puts the home route on the Waiting tab", () => {
-    expect(placeOf("waiting")).toEqual({ tab: "waiting", runId: null, projectId: null, target: "workflow" });
+  it("puts the Runs home on the Runs tab", () => {
+    expect(placeOf("runs")).toEqual({ tab: "runs", runId: null, projectId: null, target: "workflow" });
   });
 
   it("takes the Run from a Run route and keeps the Runs tab", () => {
@@ -27,7 +27,6 @@ describe("placeOf", () => {
 describe("screens", () => {
   it("lists the navigation in the established order, one URL each", () => {
     expect(navTabs.map((t) => [t.name, t.path])).toEqual([
-      ["waiting", "/"],
       ["new", "/new"],
       ["runs", "/runs"],
       ["projects", "/projects"],
@@ -38,7 +37,7 @@ describe("screens", () => {
   });
 
   it("lists the sidebar entries in order, without New Run (its own button)", () => {
-    expect(sidebarNav.map((t) => t.label)).toEqual(["Waiting for you", "Runs", "Projects", "Team", "Workflows", "Dogfood Inbox"]);
+    expect(sidebarNav.map((t) => t.label)).toEqual(["Runs", "Projects", "Team", "Workflows", "Dogfood Inbox"]);
   });
 
   it("has unique names and paths", () => {

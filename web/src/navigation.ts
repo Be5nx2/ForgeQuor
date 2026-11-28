@@ -1,9 +1,8 @@
 /** The targets a Dogfood Note can be about (mirrors DogfoodTarget in api.ts; this module stays free of DOM imports so the root tests can load it). */
 type DogfoodTarget = "workflow" | "feature" | "display" | "other";
 
-/** The screens of the app: the single place that says which URL shows which screen. */
+/** The screens of the app: the single place that says which URL shows which screen. The home, `/`, redirects to Runs (see router.ts). */
 export const screens = [
-  { name: "waiting", path: "/", label: "Waiting for you", target: "workflow" },
   { name: "new", path: "/new", label: "New Run", target: "workflow" },
   { name: "runs", path: "/runs", label: "Runs", target: "workflow" },
   { name: "run", path: "/runs/:id(\\d+)", tab: "runs", target: "workflow" },
@@ -18,7 +17,7 @@ export const screens = [
 export const navTabs = screens.filter((s) => "label" in s);
 
 /** The sidebar's navigation, in order: "New Run" has its own button, so it is not listed here. */
-export const sidebarNav = (["waiting", "runs", "projects", "team", "workflows", "inbox"] as const).map((name) => navTabs.find((t) => t.name === name)!);
+export const sidebarNav = (["runs", "projects", "team", "workflows", "inbox"] as const).map((name) => navTabs.find((t) => t.name === name)!);
 
 export interface Place {
   /** The navigation tab to highlight, and the origin tab of a Dogfood Note. */
