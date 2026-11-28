@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { parseRateLimits, readRateLimits } from "./codex-quota.js";
 import { runCli } from "./process.js";
 import type { QuotaReading, QuotaWindow, Runner, RunnerEvent, StepRequest, StepResult } from "./runner.js";
 
@@ -9,6 +10,8 @@ export interface CodexRunnerOptions {
   env?: NodeJS.ProcessEnv;
   /** The clock that stamps a Quota Reading. Default: the real time. */
   now?: () => Date;
+  /** How long `readQuota()` waits for `codex app-server` before giving up. Default: 15 seconds. */
+  quotaTimeoutMs?: number;
 }
 
 /** Wording of Codex's limit messages ("You've hit your usage limit", an image tool failing for its limit). */
@@ -109,6 +112,16 @@ export function createCodexRunner(options: CodexRunnerOptions = {}): Runner {
   const env = options.env ?? process.env;
   const now = options.now ?? (() => new Date());
   return {
+    async readQuota() {
+      // `codex app-server` answers from the account, with no model called: it costs no Quota. A failure keeps the last reading.
+      try {
+        return parseRateLimits(await readRateLimits({ env, timeoutMs: options.quotaTimeoutMs ?? 15_000 }), now());
+      } catch (e) {
+        console.error("Could not read the codex Quota:", e instanceof Error ? e.message : e);
+        return null;
+      }
+    },
+
     async run(step: StepRequest, onEvent): Promise<StepResult> {
       let threadId: string | null = null;
       const result = await runStep(step, onEvent, (id) => (threadId = id));

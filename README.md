@@ -125,7 +125,7 @@ The tests use the Docker PostgreSQL, so `npm test` starts it if needed. Each tes
 npm run smoke:claude
 ```
 
-The Codex Runner has its own opt-in smoke test, which generates one real 16x16 sprite (one image of your Codex Quota):
+The Codex Runner has its own opt-in smoke test, which reads the Codex Quota on demand (free) and generates one real 16x16 sprite (one image of your Codex Quota):
 
 ```bash
 npm run smoke:codex

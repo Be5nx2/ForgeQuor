@@ -24,7 +24,7 @@ Forgequor now runs a whole team, but living with it is tiring:
 - **Archive.** As soon as a Run ends (merged, closed or abandoned), Forgequor removes its worktree and local branch. The Run is then Archived: its Run Notes, reviews, Gates and transcripts stay readable. If the Run was abandoned or its pull request closed unmerged, Forgequor also deletes the remote branch it pushed. On its first start, Forgequor archives the finished Runs that still have a worktree.
 - **Purge.** An Archived Run is deleted from the database 60 days after it was archived (the number of days can be changed). The purge runs at startup, then once a day.
 - **Notifications.** Forgequor shows a macOS notification when a Run waits at a Gate, opens an Escalation, pauses on an exhausted Quota, or when its pull request is merged or closed by someone else. Notifications can be turned off.
-- **Quota bars.** A bar per vendor (Claude, Codex) at the top of the app shows the five-hour and weekly windows: percent used and reset time. Claude's figures come from its `/usage`, read at startup, after every Claude Step and every 5 minutes, which costs no Quota. Codex's come from its session file after every Codex Step. A bar with no reading is greyed "unknown", and each says how old its reading is. New Run warns next to a seat whose Runner is exhausted.
+- **Quota bars.** A bar per vendor (Claude, Codex) at the top of the app shows the five-hour and weekly windows: percent used and reset time. Claude's figures come from its `/usage`, read at startup, after every Claude Step and every 5 minutes, which costs no Quota. Codex's come from `codex app-server` (no Quota either), read the same way, and from its session file after every Codex Step. A bar with no reading is greyed "unknown", and each says how old its reading is. New Run warns next to a seat whose Runner is exhausted.
 
 **M4b, setting it up:**
 
@@ -168,10 +168,10 @@ Forgequor now runs a whole team, but living with it is tiring:
   - Text it cannot parse yields an unknown reading, never an error.
 - **Codex.**
   - After each Step, the Codex Runner finds the session file named after the thread id that `thread.started` gave, in Codex's sessions folder. It reads the last `token_count` event's `rate_limits`: `primary` is the five-hour window and `secondary` the weekly one, each with a percent used and an epoch reset time.
-  - It has no on-demand reading, since nothing found so far gives one for free.
+  - `readQuota()` starts `codex app-server`, sends `initialize`, waits for its answer, sends `initialized` then `account/rateLimits/read`, and maps the answer's `primary`/`secondary` windows to five-hour (300 min) and weekly (10080 min) by `windowDurationMins`, `resetsAt` being epoch seconds. It costs no Quota, ends the process, and times out after 15 s; a failure is logged and the last reading is kept. The session file stays as the reading right after a Step.
   - A missing or unreadable file yields no reading.
 - **Storage.** Forge core keeps the latest reading per vendor in the database (one row per vendor, replaced on each reading), so the bars survive a restart. A Quota pause also records an exhausted reading with its reset time.
-- **Refresh.** Forge core calls Claude's `readQuota()` at startup, after every Claude Step, and every 5 minutes. Codex is read after every Codex Step. Each new reading is pushed on the live-events stream.
+- **Refresh.** Forge core calls Claude's `readQuota()` at startup, after every Claude Step, and every 5 minutes. Codex is asked the same way, and its session file is read after every Codex Step. Each new reading is pushed on the live-events stream.
 - **HTTP.** `GET /api/quota` returns both vendors' readings with their age. The New Run form uses them to warn next to a seat whose Runner is exhausted, without blocking.
 - **UI.**
   - A compact bar per vendor sits at the top of the app, on every tab. It shows both windows' percent used and reset times, greyed "unknown" without a reading, and the reading's age.
@@ -252,7 +252,6 @@ Forgequor now runs a whole team, but living with it is tiring:
 
 - Clicking a notification to open the Run (needs a URL per Run, UI refresh).
 - Runner fallback on an exhausted Quota, and any blocking based on Quota (Icebox).
-- An on-demand Codex reading (no free source found; `codex app-server` untested).
 - Per-Project seat settings (global Team settings only).
 - Editing Workflows in the UI, and a graph view of Workflows (UI refresh).
 - Purging Griller sessions in the Claude data folder.

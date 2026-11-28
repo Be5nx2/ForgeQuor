@@ -9,6 +9,15 @@ import { createCodexRunner } from "../../src/runner/codex.js";
 // Opt-in: uses the real `codex` and a little of the subscription's Quota (one image).
 //   npm run smoke:codex
 describe.skipIf(!process.env.FORGEQUOR_SMOKE_CODEX)("real codex (smoke)", () => {
+  it("reads the Quota on demand, at no cost", async () => {
+    const reading = await createCodexRunner().readQuota!();
+    expect(reading).not.toBeNull();
+    expect(reading!.fiveHour.percentUsed).toBeGreaterThanOrEqual(0);
+    expect(reading!.fiveHour.resetsAt).toBeInstanceOf(Date);
+    expect(reading!.weekly.percentUsed).toBeGreaterThanOrEqual(0);
+    expect(reading!.weekly.resetsAt).toBeInstanceOf(Date);
+  }, 30_000);
+
   it("generates one 16x16 sprite and returns it as a file", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "forgequor-smoke-codex-"));
     const events: string[] = [];
