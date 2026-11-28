@@ -10,6 +10,10 @@ Nothing in progress.
 
 ## Next
 
+### Effort per Seat
+
+Each Seat gains an effort level next to its Runner and model, picked from the Runner's own levels (read from the CLIs at startup), set by environment, Team page or New Run, recorded on each Step attempt. Source: Dogfood Note #2. Spec: `docs/specs/seat-effort.md`.
+
 ### Project removal and purge now
 
 Remove a **Project** from Forgequor (active Runs abandoned, every Run deleted, the human's repository untouched beyond what Archiving removes, typed-name confirmation, resumable after a failure) and purge Archived Runs on demand, per Project or for all. Source: Dogfood Note #1. Spec: `docs/specs/project-removal.md`.
