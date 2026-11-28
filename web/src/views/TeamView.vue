@@ -27,7 +27,8 @@ async function load() {
 
 /** Offered models for the Runner picked in the draft. */
 const offered = (s: TeamSeat) => team.value?.catalog[drafts.value[s.seat]!.runner]?.models.map((m) => m.id) ?? [];
-const builtIn = computed(() => Object.entries(team.value?.catalog ?? {}).filter(([, e]) => e.fallback).map(([r]) => r));
+const builtIn = computed(() => Object.entries(team.value?.catalog ?? {}).filter(([, e]) => e.fallback).map(([r]) => RUNNER_LABELS[r] ?? r));
+const RUNNER_LABELS: Record<string, string> = { claude: "Claude Code", codex: "Codex" };
 const where = (f: TeamField) => (f.source === "env" ? `locked by ${f.variable}` : f.source === "team" ? "set here" : "default");
 
 async function save(s: TeamSeat) {
@@ -57,7 +58,7 @@ onMounted(load);
   <ErrorState v-if="loadError" title="Could not load the Team" text="The Forgequor server did not answer. Check that it is running, then retry." :details="loadError" @retry="load" />
   <LoadingState v-else-if="!team" what="the Team" />
   <p v-else-if="builtIn.length" class="banner" role="status">
-    Forgequor could not read {{ builtIn.join(" and ") }} at startup: the model and effort lists for {{ builtIn.length > 1 ? "them are" : "it is" }} the built-in ones and may be out of date.
+    Forgequor could not read {{ builtIn.join(" and ") }} at startup, so the model and effort lists shown for {{ builtIn.length > 1 ? "them" : "it" }} are built in and may be out of date. Restart Forgequor once the CLI works.
   </p>
   <ul v-if="team" class="seats">
     <li v-for="s in team.seats" :key="s.seat">
