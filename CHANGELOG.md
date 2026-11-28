@@ -87,4 +87,5 @@ All notable changes to Forgequor. Format: [Keep a Changelog](https://keepachange
 - Skill Packs per Project: a Project's page lets the human pick the Skill Packs Forgequor ships (besides `shared` and `forgequor`); a Run places `shared` then the chosen packs for Claude and Codex at its first start, never committed, a Project's own Skill winning (m4-08).
 
 ### Fixed
+- An empty Quota reading no longer erases the last one: when Claude's usage endpoint answers with no figures, the bars keep the last percents and their age grows, with one warning in the log; the Team BA looks up the Developer's attempt by its Step id (pol-04).
 - Stable tests: the full suite no longer fails at random. PostgreSQL in `docker-compose.yml` allows 500 connections (a full run opens about 40, so two suites side by side hit "too many clients"), polling waits no longer give up after 1 s, the timed purge is awaited by `whenIdle()`, and the Quota, Asset Request, parallel Steps and fake `codex app-server` tests no longer race the clock (pol-03).

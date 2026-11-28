@@ -95,7 +95,7 @@ describe.sequential("bugfix: a bug description becomes a reviewed fix (solo)", (
     expect(run.review).toBe("solo");
     const detail = await nextGate(run.id);
     expect(openGate(detail)?.kind).toBe("final");
-    expect(detail.attempts.find((a) => a.step === "developer")).toMatchObject({ effort: "low" });
+    expect(detail.attempts.find((a) => a.stepId === "developer")).toMatchObject({ effort: "low" });
     await ok("PUT", "/api/team/developer", { effort: null });
     expect(stepLine(detail)).toBe("developer:done checks:done review:done publish:done final:running");
     const reviews = (detail as any).reviews as { author: string; verdict: string }[];

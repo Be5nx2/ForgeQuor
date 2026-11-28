@@ -41,12 +41,18 @@ function toReading(r: Record<string, any>): QuotaReading {
   };
 }
 
+/** A full reading that holds no figure at all: nothing in it is worth more than what was read before. */
+const knowsNothing = (r: QuotaReading) =>
+  !r.exhausted && [r.fiveHour, r.weekly].every((w) => w.percentUsed === null && w.resetsAt === null);
+
 export function createQuotaKeeper(deps: QuotaKeeperDeps): QuotaKeeper {
   const { pool, now, every, emit } = deps;
   const askable = new Map<QuotaVendor, Runner>();
   const reading = new Map<QuotaVendor, Promise<void>>();
   /** Vendors a Step finished on while they were being read: that reading may predate it, so they are read once more. */
   const again = new Set<QuotaVendor>();
+  /** Vendors whose last full reading came back empty, so the warning is logged once per outage, not every 5 minutes. */
+  const silent = new Set<QuotaVendor>();
 
   /**
    * A Step's own reading is often partial (a reset time, no percent): what it leaves unknown keeps the value last read,
@@ -101,7 +107,14 @@ export function createQuotaKeeper(deps: QuotaKeeperDeps): QuotaKeeper {
         again.delete(vendor);
         try {
           const r = await runner.readQuota!();
-          if (r) await record(vendor, r);
+          if (r && knowsNothing(r)) {
+            // The vendor gave no figures (Claude's usage endpoint sometimes answers empty): the last reading stays, getting older.
+            if (!silent.has(vendor)) console.warn(`The ${vendor} Quota reading came back empty; keeping the last one.`);
+            silent.add(vendor);
+          } else if (r) {
+            silent.delete(vendor);
+            await record(vendor, r);
+          }
         } catch (e) {
           console.error(`Could not read the ${vendor} Quota:`, e);
         }
