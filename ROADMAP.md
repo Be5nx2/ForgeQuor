@@ -6,7 +6,49 @@ Milestones are specified one at a time with `/to-spec`, then split into items wi
 
 ## Now
 
-### UI refresh
+Nothing in progress.
+
+## Next
+
+Nothing scheduled yet.
+
+## Icebox
+
+- Child Runs: a feature Run splitting its spec into one Run per ticket (ADR 0001).
+- Verifier Agent (M5 candidate, decided in the M3 grilling): a Step that runs the real app and the opt-in smoke tests and checks each acceptance criterion before the final Gate (green unit tests missed m1-03's undecidable Gates). To think through later.
+- Conductor Agent (the sprint manager), after M3: reads the roadmap, computes the frontier, spots hidden dependencies and parallel-safe items, proposes the next Runs; advisory first, then driving Child Runs. Touches ADR 0001.
+- Runner fallback when a Quota is exhausted.
+- Competing Runs: the same Step on two Runners, then pick.
+- Codecks sync: import cards, update status.
+- Reading the human's GitHub PR comments as Feedback.
+- Automatic solo/duo review choice from diff size.
+- Visual Workflow editor.
+- Containerised or API-key Runners, multi-user studio instance.
+- Project registration accepts a GitHub remote not named `origin` (today refused as "no GitHub remote").
+- Lock migrations so two Forgequor starts at once cannot apply them twice.
+- Test the startup tool checks and the `ls-remote` default-branch fallback.
+- After a hard crash of Forgequor (kill -9, power loss), detached Runner and Check process groups survive; on restart, kill or wait for them before restarting the Step, so two Developers never share a worktree.
+- Keep the partial Check results of an interrupted attempt (marked interrupted) instead of deleting them before the Checks run again.
+- Live progress survives a page reload or reconnection mid-Step (events kept as they come, not only at the end of the Step).
+- Stream Check output live, like the Developer's events.
+- Coalesce live "changed" updates so a chatty Agent does not make the UI reload the Run on every event.
+- Tileset atlas: an Asset Request for N tiles delivered as one atlas image (Godot TileSet), instead of one file per tile (M2 grilling).
+- Produce a Run's Asset Requests in parallel instead of one after the other (image generation burns Quota 3-5x faster, so sequential first).
+- Animated preview of an Animation Strip in the gallery (frames played in a loop, larger than the 4x a 64 px strip gets today), to judge the motion (real strip test, m2-07).
+
+- M2 review follow-ups (2026-11-27), small, fixed in `m3-00b`:
+  - the `assets` Review Brief omits palette warnings (spec story 46);
+  - Gates do not record their Iteration, so an `assets` Iteration shows no Feedback in the Run detail;
+  - a read Run does not expose each attempt's Asset Check failures;
+  - Replaced Art stops being given to the Artist after the Asset's first rejection;
+  - the two retry budgets add up to 4 Artist Steps per Asset per Iteration: confirm or cap the Quota exposure;
+  - a bare Codex `error` event on an unfinished turn is read as an exhausted Quota;
+  - the UI's API types are copies of the server's and have drifted (no `rejected` Asset status); a dead "Approve all Assets" label;
+  - tests that abandon a Run by SQL instead of the Forge interface; README art path omits `animations`.
+
+## Done
+
+### UI refresh (done 2026-11-28)
 
 New information architecture and cinematic restyle of the web UI (direction B): Runs home with "Waiting for you" pinned, left sidebar with Project selector and Gate count, `vue-router` with a URL per Run, Gate and Project, Run detail as Step rail plus panel with fixed Gate actions, a status system (colour, glyph and label), shared loading, empty and error states, an accessibility floor, and design tokens as CSS variables. Desktop only, dark only. Spec and mockups: `docs/specs/ui-refresh/README.md`.
 
@@ -60,46 +102,6 @@ Every item must match its mockup in `docs/specs/ui-refresh/` (same layout, compo
   - Spec: `docs/specs/ui-refresh/README.md`
   - Blocked by: `ui-03`
   - Acceptance: Workflows, Team and Dogfood Inbox use the shell's panels, chips, forms and shared states; the note popup stays fully on screen at any window height; no behaviour changes; consistent with the round-2 mockups.
-
-## Next
-
-Nothing scheduled yet.
-
-## Icebox
-
-- Child Runs: a feature Run splitting its spec into one Run per ticket (ADR 0001).
-- Verifier Agent (M5 candidate, decided in the M3 grilling): a Step that runs the real app and the opt-in smoke tests and checks each acceptance criterion before the final Gate (green unit tests missed m1-03's undecidable Gates). To think through later.
-- Conductor Agent (the sprint manager), after M3: reads the roadmap, computes the frontier, spots hidden dependencies and parallel-safe items, proposes the next Runs; advisory first, then driving Child Runs. Touches ADR 0001.
-- Runner fallback when a Quota is exhausted.
-- Competing Runs: the same Step on two Runners, then pick.
-- Codecks sync: import cards, update status.
-- Reading the human's GitHub PR comments as Feedback.
-- Automatic solo/duo review choice from diff size.
-- Visual Workflow editor.
-- Containerised or API-key Runners, multi-user studio instance.
-- Project registration accepts a GitHub remote not named `origin` (today refused as "no GitHub remote").
-- Lock migrations so two Forgequor starts at once cannot apply them twice.
-- Test the startup tool checks and the `ls-remote` default-branch fallback.
-- After a hard crash of Forgequor (kill -9, power loss), detached Runner and Check process groups survive; on restart, kill or wait for them before restarting the Step, so two Developers never share a worktree.
-- Keep the partial Check results of an interrupted attempt (marked interrupted) instead of deleting them before the Checks run again.
-- Live progress survives a page reload or reconnection mid-Step (events kept as they come, not only at the end of the Step).
-- Stream Check output live, like the Developer's events.
-- Coalesce live "changed" updates so a chatty Agent does not make the UI reload the Run on every event.
-- Tileset atlas: an Asset Request for N tiles delivered as one atlas image (Godot TileSet), instead of one file per tile (M2 grilling).
-- Produce a Run's Asset Requests in parallel instead of one after the other (image generation burns Quota 3-5x faster, so sequential first).
-- Animated preview of an Animation Strip in the gallery (frames played in a loop, larger than the 4x a 64 px strip gets today), to judge the motion (real strip test, m2-07).
-
-- M2 review follow-ups (2026-11-27), small, fixed in `m3-00b`:
-  - the `assets` Review Brief omits palette warnings (spec story 46);
-  - Gates do not record their Iteration, so an `assets` Iteration shows no Feedback in the Run detail;
-  - a read Run does not expose each attempt's Asset Check failures;
-  - Replaced Art stops being given to the Artist after the Asset's first rejection;
-  - the two retry budgets add up to 4 Artist Steps per Asset per Iteration: confirm or cap the Quota exposure;
-  - a bare Codex `error` event on an unfinished turn is read as an exhausted Quota;
-  - the UI's API types are copies of the server's and have drifted (no `rejected` Asset status); a dead "Approve all Assets" label;
-  - tests that abandon a Run by SQL instead of the Forge interface; README art path omits `animations`.
-
-## Done
 
 ### Dogfood Notes (done 2026-11-28)
 
