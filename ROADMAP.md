@@ -48,7 +48,7 @@ Every item must match its mockup in `docs/specs/ui-refresh/` (same layout, compo
   - Spec: `docs/specs/ui-refresh/README.md`
   - Blocked by: `ui-07`
   - Acceptance: gallery at real size and magnified with pixel-sharp rendering; Asset Checks per Asset; Feedback per rejected Asset; version history; Gate bar fixed and rail visible; matches `run-gate-assets.html`.
-- [ ] `ui-10` **New Run**: launching a Run looks like `new-run.html` and shows what the Run will ask of the human.
+- [x] `ui-10` **New Run**: launching a Run looks like `new-run.html` and shows what the Run will ask of the human.
   - Spec: `docs/specs/ui-refresh/README.md`
   - Blocked by: `ui-03`
   - Acceptance: Workflow choice, subject, solo or duo review, seats (with locked fields shown as locked); a preview of the Steps and of the Gates that will need the human; the Quota hint when both vendors are read; launching opens the new Run's URL; matches `new-run.html`.

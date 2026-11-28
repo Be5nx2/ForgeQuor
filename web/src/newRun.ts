@@ -1,7 +1,7 @@
 // What the New Run screen tells the human before launching, as plain functions: the Steps a Workflow will run, which of
 // them need the human (the Gates), who does each, and what the Quota says. No DOM and no Vue, so the root tests can load it.
 import { parse } from "yaml";
-import type { GateKind, QuotaStatus, ReviewMode, WorkflowOption } from "../../src/forge/types.js";
+import type { GateKind, ReviewMode, WorkflowOption } from "../../src/forge/types.js";
 import { gateLabel } from "./runsHome.js";
 
 /** One line of "What will happen". */
@@ -76,10 +76,16 @@ export function gatesSentence(p: Preview): string {
   return `${p.conditionalGates ? "Up to " + n : n} will need you.`;
 }
 
+/** The part of a Quota status the hint reads (the API's, with its dates as strings). */
+export interface QuotaFigures {
+  vendor: string;
+  reading: { fiveHour: { percentUsed: number | null }; weekly: { percentUsed: number | null }; exhausted: boolean } | null;
+}
+
 const VENDORS = ["claude", "codex"] as const;
 const vendorName = (v: string) => title(v);
 /** How much of its Quota a vendor has used: the fuller of its two windows, null when neither is known. */
-function usedPercent(s: QuotaStatus | undefined): number | null {
+function usedPercent(s: QuotaFigures | undefined): number | null {
   const r = s?.reading;
   if (!r) return null;
   const known = [r.fiveHour.percentUsed, r.weekly.percentUsed].filter((p): p is number => p !== null);
@@ -90,7 +96,7 @@ function usedPercent(s: QuotaStatus | undefined): number | null {
  * The Quota hint: shown only when both vendors have been read. It says whether there is room or one is used up,
  * and for a duo Review that both Runners spend Quota.
  */
-export function quotaHint(statuses: QuotaStatus[]): string | null {
+export function quotaHint(statuses: QuotaFigures[]): string | null {
   const byVendor = VENDORS.map((v) => ({ v, status: statuses.find((s) => s.vendor === v) }));
   const used = byVendor.map((b) => usedPercent(b.status));
   if (used.some((u) => u === null)) return null;

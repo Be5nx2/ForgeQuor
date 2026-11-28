@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { gatesSentence, previewOf, quotaHint } from "../../web/src/newRun.js";
-import type { QuotaStatus, WorkflowOption } from "../../src/forge/types.js";
+import { gatesSentence, previewOf, quotaHint, type QuotaFigures } from "../../web/src/newRun.js";
+import type { WorkflowOption } from "../../src/forge/types.js";
 
 const yaml = (name: string) => readFileSync(`src/forge/workflows/${name}.yaml`, "utf8");
 const summary = (steps: { id: string; type: string; agent?: string; when?: string }[], text: string): Pick<WorkflowOption, "steps" | "yaml"> => ({
@@ -74,8 +74,10 @@ describe("gatesSentence", () => {
   });
 });
 
-const status = (vendor: "claude" | "codex", five: number | null, weekly: number | null = null, exhausted = false): QuotaStatus =>
-  ({ vendor, ageSeconds: 5, reading: { fiveHour: { percentUsed: five, resetsAt: null }, weekly: { percentUsed: weekly, resetsAt: null }, exhausted, readAt: "2026-01-01T00:00:00Z" } }) as unknown as QuotaStatus;
+const status = (vendor: "claude" | "codex", five: number | null, weekly: number | null = null, exhausted = false): QuotaFigures => ({
+  vendor,
+  reading: { fiveHour: { percentUsed: five }, weekly: { percentUsed: weekly }, exhausted },
+});
 
 describe("quotaHint", () => {
   it("says both Quotas have room, with the fuller window of each", () => {
@@ -83,7 +85,7 @@ describe("quotaHint", () => {
   });
   it("is absent unless both vendors were read", () => {
     expect(quotaHint([status("claude", 72)])).toBeNull();
-    expect(quotaHint([status("claude", 72), { vendor: "codex", reading: null, ageSeconds: null } as QuotaStatus])).toBeNull();
+    expect(quotaHint([status("claude", 72), { vendor: "codex", reading: null }])).toBeNull();
     expect(quotaHint([status("claude", 72), status("codex", null)])).toBeNull();
     expect(quotaHint([])).toBeNull();
   });
