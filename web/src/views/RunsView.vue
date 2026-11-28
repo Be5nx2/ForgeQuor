@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { useRouter } from "vue-router";
 import { followRuns, getJson, type Project, type Run } from "../api";
 
-const emit = defineEmits<{ open: [id: number] }>();
+const router = useRouter();
+const openRun = (id: number) => router.push(`/runs/${id}`);
 
 const STATES = ["queued", "running", "waiting", "paused", "approved", "merged", "closed", "abandoned"];
 
@@ -72,7 +74,7 @@ watch([filterProject, filterState], load);
   <p v-if="!loaded" class="muted">Loading the Runs…</p>
   <p v-else-if="!visible.length" class="muted">No Run{{ filterProject || filterState || (!showArchived && runs.length) ? " matches these filters" : "" }}.</p>
   <ul>
-    <li v-for="r in visible" :key="r.id" class="clickable" @click="emit('open', r.id)">
+    <li v-for="r in visible" :key="r.id" class="clickable" @click="openRun(r.id)">
       <strong>{{ r.title }}</strong> <span class="badge">{{ r.state }}</span> <span v-if="r.archivedAt" class="badge">archived</span>
       <div class="muted">{{ r.workflow }} · {{ projectName(r.projectId) }}<span v-if="r.trackerRef"> · {{ r.trackerRef }}</span></div>
     </li>

@@ -315,6 +315,14 @@ export async function createServer(deps: {
 
   if (deps.webRoot && existsSync(deps.webRoot)) {
     await app.register(fastifyStatic, { root: deps.webRoot });
+    // Client routes (/runs/3, /inbox...) are the app: serve index.html for a page request that matched nothing.
+    // /api/* and anything that looks like a file (a missing asset) stay a plain 404.
+    app.setNotFoundHandler((req, reply) => {
+      const path = req.url.split("?")[0] ?? "";
+      const isPage = req.method === "GET" && !path.startsWith("/api/") && !/\.[^/]+$/.test(path);
+      if (!isPage) return reply.code(404).send({ error: `Route ${req.method}:${path} not found` });
+      return reply.type("text/html").sendFile("index.html");
+    });
   }
   return app;
 }
