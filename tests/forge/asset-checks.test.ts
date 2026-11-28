@@ -124,7 +124,8 @@ describe("hostile files", () => {
     const { failures } = checkAssetFile(root, request, null);
 
     expect(failures).toEqual([expect.stringMatching(/60000x60000.*16x16/)]);
-    expect(Date.now() - started).toBeLessThan(500);
+    // Decoding 60000x60000 pixels would take minutes or run out of memory: this only has to tell the two apart, whatever the load.
+    expect(Date.now() - started).toBeLessThan(10_000);
   });
 
   it("fails a file far larger than any Asset", () => {

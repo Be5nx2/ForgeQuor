@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type pg from "pg";
 import { createForge, type Forge, type ForgeDeps, type Project, type QuotaReading, type RunUpdate } from "../../src/forge/forge.js";
 import type { Runner } from "../../src/runner/runner.js";
@@ -9,6 +9,7 @@ import { createTestDatabase } from "../harness/database.js";
 import { createFakeCodeHost } from "../harness/fake-codehost.js";
 import { createFakeRunner, type FakeRunner } from "../harness/fake-runner.js";
 import { createRepoWithBareRemote, type TempRemote, type TempRepo } from "../harness/git.js";
+import { until } from "../harness/wait.js";
 
 let pool: pg.Pool;
 let drop: () => Promise<void>;
@@ -216,13 +217,18 @@ describe("Quota readings", () => {
       return first();
     };
     const forge = forgeWith(claude);
+    // The first reading is asked as soon as this is called, and stays under way until released.
     const starting = forge.startQuotaReading();
-    await new Promise((r) => setTimeout(r, 20));
+    expect(calls).toBe(1);
 
-    const p = await project(forge);
-    const run = await forge.startRun({ projectId: p.id, task: "Do the thing." });
-    await vi.waitFor(async () => expect((await forge.getRun(run.id)).state).toBe("waiting"));
-    release();
+    try {
+      const p = await project(forge);
+      const run = await forge.startRun({ projectId: p.id, task: "Do the thing." });
+      // Not `whenIdle()`: that waits for the reading, which waits for this.
+      await until(async () => expect((await forge.getRun(run.id)).state).toBe("waiting"));
+    } finally {
+      release();
+    }
     (await starting)();
     await forge.whenIdle();
 

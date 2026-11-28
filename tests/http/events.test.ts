@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { Forge, RunUpdate } from "../../src/forge/forge.js";
 import { createServer } from "../../src/http/server.js";
+import { until } from "../harness/wait.js";
 
 let close: (() => Promise<void>) | undefined;
 afterEach(async () => {
@@ -28,6 +29,6 @@ describe("the live events stream", () => {
     expect(decoder.decode(value)).toBe(`data: ${JSON.stringify({ type: "changed", runId: 7 })}\n\n`);
 
     controller.abort();
-    await vi.waitFor(() => expect(listeners.size).toBe(0));
+    await until(() => expect(listeners.size).toBe(0));
   });
 });

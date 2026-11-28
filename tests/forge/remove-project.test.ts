@@ -8,6 +8,7 @@ import { createTestDatabase } from "../harness/database.js";
 import { createFakeCodeHost } from "../harness/fake-codehost.js";
 import { createFakeRunner } from "../harness/fake-runner.js";
 import { createRepoWithBareRemote, git, type TempRepo } from "../harness/git.js";
+import { until } from "../harness/wait.js";
 
 let pool: pg.Pool;
 let drop: () => Promise<void>;
@@ -223,7 +224,7 @@ describe("removing a Project with active Runs", () => {
       });
     });
     const started = await forge.startRun({ projectId: project.id, task: "Do it slowly." });
-    await vi.waitFor(() => expect(listening).toBe(true));
+    await until(() => expect(listening).toBe(true));
     expect((await forge.getRun(started.id)).state).toBe("running");
 
     await forge.removeProject(project.id);

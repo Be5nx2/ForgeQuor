@@ -133,6 +133,8 @@ async function judge(r: RunDetail, feedback?: string): Promise<RunDetail> {
 }
 const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
 
+const bad = (requests: unknown) => ({ say: summary(), requests });
+
 describe("art inside feature", () => {
   it("runs the Artist and the Asset Gate for the Asset Requests the Griller wrote, then builds on the approved Assets", async () => {
     const p = await project();
@@ -212,22 +214,19 @@ describe("art inside feature", () => {
     expect(run.assets.map((a) => [a.name, a.replace])).toEqual([["Hero Idle", true]]);
   });
 
-  it("sends back Asset Requests that are not a list, not valid requests, or ordered without an Art Direction", async () => {
-    const bad = (requests: unknown) => ({ say: summary(), requests });
-    const reasonFor = async (turns: ReturnType<typeof bad>[], opts: Parameters<typeof project>[0] = {}) => {
-      const p = await project(opts);
-      claude.steps.length = 0;
-      claude.use(griller(turns));
-      const run = await confirm(await feature(p.id));
-      expect(artists()).toHaveLength(0);
-      expect(open(run)).toMatchObject({ kind: "conversation" });
-      return grillers()[1]!.prompt;
-    };
-
-    expect(await reasonFor([bad({ not: "a list" })])).toContain("must hold a JSON array");
-    expect(await reasonFor([bad([{ ...hero, kind: "portrait" }])])).toContain("must be a sprite, a tile or an animation");
-    expect(await reasonFor([bad([{ ...hero, references: ["docs/missing.png"] }])])).toContain("does not exist in the repository's default branch");
-    expect(await reasonFor([bad([hero])], { artDirection: false })).toContain("has no Art Direction");
+  // One test per case: each starts a Project with its own repository and bare remote, which adds up under load.
+  it.each([
+    ["not a list", [bad({ not: "a list" })], {}, "must hold a JSON array"],
+    ["not a valid request", [bad([{ ...hero, kind: "portrait" }])], {}, "must be a sprite, a tile or an animation"],
+    ["leaning on a missing reference", [bad([{ ...hero, references: ["docs/missing.png"] }])], {}, "does not exist in the repository's default branch"],
+    ["ordered without an Art Direction", [bad([hero])], { artDirection: false }, "has no Art Direction"],
+  ])("sends back Asset Requests that are %s", async (_case, turns, opts, reason) => {
+    const p = await project(opts);
+    claude.use(griller(turns));
+    const run = await confirm(await feature(p.id));
+    expect(artists()).toHaveLength(0);
+    expect(open(run)).toMatchObject({ kind: "conversation" });
+    expect(grillers()[1]!.prompt).toContain(reason);
   });
 
   it("explains the file to the Griller", async () => {

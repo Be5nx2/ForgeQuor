@@ -188,7 +188,8 @@ describe("the purge", () => {
 
     clock = new Date(clock.getTime() + 2 * DAY);
     timer.tick();
-    await vi.waitFor(async () => expect(await count("gates", run.id)).toBe(0));
+    await forge.whenIdle();
+    expect(await count("gates", run.id)).toBe(0);
     await expect(forge.getRun(run.id)).rejects.toThrow();
 
     stop();
