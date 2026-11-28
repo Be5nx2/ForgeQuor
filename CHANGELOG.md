@@ -5,6 +5,7 @@ All notable changes to Forgequor. Format: [Keep a Changelog](https://keepachange
 ## [Unreleased]
 
 ### Added
+- Conversation and Spec Gates in the Run detail pattern: the Griller chat shows its rounds, questions and recommended answers with the answer box and "Confirm summary" in the panel; the spec renders as a document with its Feedback field beside it; the Gate bar keeps the summary and actions (ui-08).
 - Projects as the mockup: a list of Projects (each with its own URL, `/projects/:id`) beside the selected Project's form (Checks, Setup, slots, Art Direction, Skill Packs) with one Save that applies only what changed, Discard, and "+ Register Project"; the missing-tool warning banner shows above it (ui-11).
 - New Run as the mockup: Workflow choice cards, subject, solo or duo review (labelled with the seats' Runners), Seats with env-locked fields shown as locked, and a "What will happen" panel listing the Steps and the Gates that will need you, with the Quota hint when both vendors are read; `?project=` preselects the Project, and launching opens the new Run (ui-10).
 - Workflows, Team, Dogfood Inbox and the note popup follow the shell's design system (page head, panels, forms, chips, buttons); no behaviour change, and the popup stays fully on screen at any window height (ui-12).
