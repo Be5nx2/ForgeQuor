@@ -6,32 +6,64 @@ Milestones are specified one at a time with `/to-spec`, then split into items wi
 
 ## Now
 
-### Dogfood Notes
+### UI refresh
 
-**Dogfood Notes** jotted from a floating **+ Note** button, a **Dogfood Inbox** tab, a Markdown **Dogfood Export** of selected notes, and a `/dogfood-triage` skill. Spec: `docs/specs/dogfood-notes.md`.
+New information architecture and cinematic restyle of the web UI (direction B): Runs home with "Waiting for you" pinned, left sidebar with Project selector and Gate count, `vue-router` with a URL per Run, Gate and Project, Run detail as Step rail plus panel with fixed Gate actions, a status system (colour, glyph and label), shared loading, empty and error states, an accessibility floor, and design tokens as CSS variables. Desktop only, dark only. Spec and mockups: `docs/specs/ui-refresh/README.md`.
 
-- [x] `dogfood-01` **Jot a Dogfood Note**: from any tab the human clicks **+ Note**, picks a nature (feedback or idea) and a target (workflow, feature, display, other; pre-selected from the tab), types a text and saves; the app records it with its context and closes the popup with a short "noted" message.
-  - Spec: `docs/specs/dogfood-notes.md`
+Every item must match its mockup in `docs/specs/ui-refresh/` (same layout, components, tokens and wording): checked by a browser screenshot next to the mockup, plus the full test suite. Where M4 shipped after the mockups: Team, Workflows and Dogfood Inbox become real sidebar entries in the mockups' order; Quotas are one bar per vendor at the top of every screen (M4 decision), not a sidebar page; Skill Packs stay in Projects, since they are chosen per Project.
+
+- [ ] `ui-01` **A URL per screen**: the human can share or refresh `/runs`, `/runs/:id`, `/new`, `/projects/:id`, `/workflows`, `/team` and `/inbox` and land on the same place; Back and Forward work.
+  - Spec: `docs/specs/ui-refresh/README.md`
   - Blocked by: none
-  - Acceptance: **+ Note** is visible on every tab; only the text is required and an empty text is refused with a clear message; what was typed is kept if saving fails; the tab, the Run or Project in view (shown as text, for example "Run #42") and the date are attached automatically; a note without Run or Project is accepted; an unknown Run or Project, or an invalid nature or target, is refused; notes are stored with source `internal`, status `new`, and never deleted or edited; the glossary defines **Dogfood Note**, **Dogfood Inbox** and **Dogfood Export** and says they are not a **Gate**'s **Feedback**; Forge core tests on the real database cover creation and refusals, HTTP route tests cover request shape and error mapping.
-- [x] `dogfood-02` **Review notes in the Dogfood Inbox**: an Inbox tab lists the notes newest first, with a badge counting the new ones, filters, and buttons to triage or dismiss them.
-  - Spec: `docs/specs/dogfood-notes.md`
-  - Blocked by: `dogfood-01`
-  - Acceptance: each note shows nature, target, text, date and origin; filters by status, nature and target; the badge counts `new` notes and updates after a change; a note can go `new` → `triaged` (with an optional free-text reference) or `dismissed`, and back to `new`; triaged and dismissed notes stay listed; only status and reference ever change; Forge core tests cover filters, the count, allowed transitions and the kept reference.
-- [x] `dogfood-03` **Export selected notes**: the human selects notes in the Inbox and clicks **Export** to get one Markdown file, written in `docs/dogfood/` and offered for download.
-  - Spec: `docs/specs/dogfood-notes.md`
-  - Blocked by: `dogfood-02`
-  - Acceptance: checkboxes per note plus "select all" for the current filter; the file is named `export_forgequor_<date>_<time>.md`; it has a header with the export date and note count, then one section per target with notes ordered by date, each showing ID, date, nature, target, origin as text, triage reference when present, and the text verbatim; the folder is configurable, defaults to `docs/dogfood/` and is created when missing; exporting changes no status; an empty selection and an unwritable folder give clear errors; Forge core tests cover content, grouping, ordering and file writing in a temporary folder.
-- [x] `dogfood-04` **Triage notes with `/dogfood-triage`**: a Forgequor skill reads an export file, groups its notes by theme, proposes what each group becomes, and turns the kept ones into roadmap items once the human agrees.
-  - Spec: `docs/specs/dogfood-notes.md`
-  - Blocked by: `dogfood-03`
-  - Acceptance: the skill lives with the Forgequor-only skills and is linked by `scripts/link-skills.sh`; for each group it proposes a roadmap item, a spec to write, the icebox or dismissal; nothing is written before the human agrees; kept groups go through `/to-spec` or `/to-tickets`; it ends with the note IDs to mark triaged or dismissed and where each went; `skills/README.md` has a "Dogfooding" section explaining the flow (+ Note → Inbox → Export → `/dogfood-triage` → roadmap) and why; the role table in `CLAUDE.md` mentions it; checked by hand on a real export.
+  - Acceptance: `vue-router` replaces the tab state; every current screen is reachable by its URL and a refresh keeps it; an open Gate is reachable through its Run's URL; an unknown URL or Run shows a clear not-found message; the server serves the app for these paths; **+ Note** takes its tab and Run from the route; the look is unchanged; existing tests pass.
+- [ ] `ui-02` **Design tokens and app shell**: every screen sits in the mockups' shell: left sidebar with logotype, **+ New Run**, Project selector placeholder, navigation and **+ Note** at the bottom, the Quota bars at the top.
+  - Spec: `docs/specs/ui-refresh/README.md`
+  - Blocked by: `ui-01`
+  - Acceptance: `tokens.css` copied as is and `shell.css` turned into one layout component; sidebar matches `runs.html` (logotype FORGE/QUOR, New Run, Project button, nav Runs, Projects, Team, Workflows, Dogfood Inbox with its badge, **+ Note** at the bottom replacing the floating button); one Quota bar per vendor at the top of every screen; dark theme only; Orbitron, Inter and JetBrains Mono with system fallbacks; `aria-current` on the active entry and `:focus-visible` everywhere; existing screens render inside unchanged otherwise.
+- [ ] `ui-03` **Status system and shared states**: every status reads the same everywhere, and every screen shows the same loading, empty and error states.
+  - Spec: `docs/specs/ui-refresh/README.md`
+  - Blocked by: `ui-02`
+  - Acceptance: one status component with colour, glyph and label (running blue ●, waiting for you orange ●, done green ✓, failed red ✕, idle grey ○, paused ‖) as in the mockups' chips; green and red used for results only; shared loading, empty (with the next step) and error (with Retry) components matching `states.html`; used on every existing screen.
+- [ ] `ui-04` **One live stream and the Gate count**: the whole app follows one live-events stream, and the sidebar shows how many Gates wait for the human.
+  - Spec: `docs/specs/ui-refresh/README.md`
+  - Blocked by: `ui-02`
+  - Acceptance: a single event stream per browser tab shared by every screen (no screen opens its own); views reload what they missed on reconnection; the Runs entry carries the open-Gate count as in `runs.html`, updated live when a Gate opens or closes; fine-grained patching stays out of scope.
+- [ ] `ui-05` **Runs home**: the home page is the Runs list with "Waiting for you" pinned at the top, as in `runs.html`.
+  - Spec: `docs/specs/ui-refresh/README.md`
+  - Blocked by: `ui-03`, `ui-04`
+  - Acceptance: Gate cards first, then "Waiting for your merge", then every Run with its lifecycle state, Workflow, current Step, Iteration and time, filterable by state; each row links to the Run's URL; the separate Waiting screen is gone; empty and loading states shown; matches `runs.html`.
+- [ ] `ui-06` **Project selector**: the human picks a Project in the sidebar and every screen narrows to it.
+  - Spec: `docs/specs/ui-refresh/README.md`
+  - Blocked by: `ui-05`
+  - Acceptance: the selector lists the Projects plus "All Projects"; the choice is kept in the URL and survives a refresh; it filters the Runs home, the merge list and the Gate count, and preselects the Project in New Run; no Project registered shows the empty state that leads to Projects.
+- [ ] `ui-07` **Run detail**: a Run shows its Steps on a rail and the selected Step beside it, with the Gate actions fixed at the top while a Gate is open, as in `run-detail.html`.
+  - Spec: `docs/specs/ui-refresh/README.md`
+  - Blocked by: `ui-03`, `ui-04`
+  - Acceptance: the rail shows each Step's state, Iteration and Runner (sub-Steps indented); selecting a Step shows its log, output, Feedback, Run Notes and the seats it used; the Gate bar stays fixed while scrolling; the review Gate shows remarks, Runner chips and the Consolidator's disagreement; the live log has `aria-live`; abandon stays available; matches `run-detail.html`.
+- [ ] `ui-08` **Conversation and Spec Gates**: the Conversation Gate and the Spec Gate use the Run detail pattern, as in `run-gate-conversation.html` and `run-gate-spec.html`.
+  - Spec: `docs/specs/ui-refresh/README.md`
+  - Blocked by: `ui-07`
+  - Acceptance: the conversation with the Griller shows its rounds and recommended answers, an answer box and "Confirm summary"; the spec Gate renders the spec with approve or reject with Feedback; both keep the Gate bar fixed and the rail visible; match their mockups.
+- [ ] `ui-09` **Asset Gate**: the Asset Gate uses the Run detail pattern, as in `run-gate-assets.html`.
+  - Spec: `docs/specs/ui-refresh/README.md`
+  - Blocked by: `ui-07`
+  - Acceptance: gallery at real size and magnified with pixel-sharp rendering; Asset Checks per Asset; Feedback per rejected Asset; version history; Gate bar fixed and rail visible; matches `run-gate-assets.html`.
+- [ ] `ui-10` **New Run**: launching a Run looks like `new-run.html` and shows what the Run will ask of the human.
+  - Spec: `docs/specs/ui-refresh/README.md`
+  - Blocked by: `ui-03`
+  - Acceptance: Workflow choice, subject, solo or duo review, seats (with locked fields shown as locked); a preview of the Steps and of the Gates that will need the human; the Quota hint when both vendors are read; launching opens the new Run's URL; matches `new-run.html`.
+- [ ] `ui-11` **Projects**: the Projects screen looks like `projects.html`.
+  - Spec: `docs/specs/ui-refresh/README.md`
+  - Blocked by: `ui-03`
+  - Acceptance: list of Projects with Checks, Setup, slots, Art Direction and Skill Packs; each Project has its own URL; the system warning banner appears when a required tool is missing; matches `projects.html`.
+- [ ] `ui-12` **Workflows, Team, Inbox and the note popup**: the screens M4 and the Dogfood Notes added follow the same design system.
+  - Spec: `docs/specs/ui-refresh/README.md`
+  - Blocked by: `ui-03`
+  - Acceptance: Workflows, Team and Dogfood Inbox use the shell's panels, chips, forms and shared states; the note popup stays fully on screen at any window height; no behaviour changes; consistent with the round-2 mockups.
 
 ## Next
 
-### UI refresh
-
-New information architecture and cinematic restyle of the web UI: Runs home with "Waiting for you" pinned, left sidebar with Project selector and Gate count, `vue-router` with a URL per Run, Gate and Project, Run detail as Step rail plus panel with fixed Gate actions, a status system (colour, glyph and label), shared loading, empty and error states, an accessibility floor, and design tokens as CSS variables. Desktop only, dark only. Spec and mockups: `docs/specs/ui-refresh/README.md`. Planned after M4, with the Dogfood Notes; M3b screens are built on the current UI until then. Items are cut with `/to-tickets` when it is scheduled.
+Nothing scheduled yet.
 
 ## Icebox
 
@@ -68,6 +100,27 @@ New information architecture and cinematic restyle of the web UI: Runs home with
   - tests that abandon a Run by SQL instead of the Forge interface; README art path omits `animations`.
 
 ## Done
+
+### Dogfood Notes (done 2026-11-28)
+
+**Dogfood Notes** jotted from a floating **+ Note** button, a **Dogfood Inbox** tab, a Markdown **Dogfood Export** of selected notes, and a `/dogfood-triage` skill. Spec: `docs/specs/dogfood-notes.md`.
+
+- [x] `dogfood-01` **Jot a Dogfood Note**: from any tab the human clicks **+ Note**, picks a nature (feedback or idea) and a target (workflow, feature, display, other; pre-selected from the tab), types a text and saves; the app records it with its context and closes the popup with a short "noted" message.
+  - Spec: `docs/specs/dogfood-notes.md`
+  - Blocked by: none
+  - Acceptance: **+ Note** is visible on every tab; only the text is required and an empty text is refused with a clear message; what was typed is kept if saving fails; the tab, the Run or Project in view (shown as text, for example "Run #42") and the date are attached automatically; a note without Run or Project is accepted; an unknown Run or Project, or an invalid nature or target, is refused; notes are stored with source `internal`, status `new`, and never deleted or edited; the glossary defines **Dogfood Note**, **Dogfood Inbox** and **Dogfood Export** and says they are not a **Gate**'s **Feedback**; Forge core tests on the real database cover creation and refusals, HTTP route tests cover request shape and error mapping.
+- [x] `dogfood-02` **Review notes in the Dogfood Inbox**: an Inbox tab lists the notes newest first, with a badge counting the new ones, filters, and buttons to triage or dismiss them.
+  - Spec: `docs/specs/dogfood-notes.md`
+  - Blocked by: `dogfood-01`
+  - Acceptance: each note shows nature, target, text, date and origin; filters by status, nature and target; the badge counts `new` notes and updates after a change; a note can go `new` → `triaged` (with an optional free-text reference) or `dismissed`, and back to `new`; triaged and dismissed notes stay listed; only status and reference ever change; Forge core tests cover filters, the count, allowed transitions and the kept reference.
+- [x] `dogfood-03` **Export selected notes**: the human selects notes in the Inbox and clicks **Export** to get one Markdown file, written in `docs/dogfood/` and offered for download.
+  - Spec: `docs/specs/dogfood-notes.md`
+  - Blocked by: `dogfood-02`
+  - Acceptance: checkboxes per note plus "select all" for the current filter; the file is named `export_forgequor_<date>_<time>.md`; it has a header with the export date and note count, then one section per target with notes ordered by date, each showing ID, date, nature, target, origin as text, triage reference when present, and the text verbatim; the folder is configurable, defaults to `docs/dogfood/` and is created when missing; exporting changes no status; an empty selection and an unwritable folder give clear errors; Forge core tests cover content, grouping, ordering and file writing in a temporary folder.
+- [x] `dogfood-04` **Triage notes with `/dogfood-triage`**: a Forgequor skill reads an export file, groups its notes by theme, proposes what each group becomes, and turns the kept ones into roadmap items once the human agrees.
+  - Spec: `docs/specs/dogfood-notes.md`
+  - Blocked by: `dogfood-03`
+  - Acceptance: the skill lives with the Forgequor-only skills and is linked by `scripts/link-skills.sh`; for each group it proposes a roadmap item, a spec to write, the icebox or dismissal; nothing is written before the human agrees; kept groups go through `/to-spec` or `/to-tickets`; it ends with the note IDs to mark triaged or dismissed and where each went; `skills/README.md` has a "Dogfooding" section explaining the flow (+ Note → Inbox → Export → `/dogfood-triage` → roadmap) and why; the role table in `CLAUDE.md` mentions it; checked by hand on a real export.
 
 ### M4 Comfort (done 2026-11-28)
 
