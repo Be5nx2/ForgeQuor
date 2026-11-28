@@ -57,6 +57,30 @@ export async function createServer(deps: {
     }
   });
 
+  const projectNumber = (raw: string) => (/^[1-9]\d*$/.test(raw) ? Number(raw) : null);
+  const projectError = (e: any) => (/^No Project/.test(e.message) ? 404 : e instanceof RunStateError ? 409 : 500);
+
+  app.get<{ Params: { id: string } }>("/api/projects/:id/removal", async (req, reply) => {
+    const id = projectNumber(req.params.id);
+    if (id === null) return reply.code(400).send({ error: "The Project must be a number." });
+    try {
+      return await deps.forge.removalPreview(id);
+    } catch (e: any) {
+      return reply.code(projectError(e)).send({ error: e.message });
+    }
+  });
+
+  app.delete<{ Params: { id: string } }>("/api/projects/:id", async (req, reply) => {
+    const id = projectNumber(req.params.id);
+    if (id === null) return reply.code(400).send({ error: "The Project must be a number." });
+    try {
+      await deps.forge.removeProject(id);
+      return reply.code(204).send();
+    } catch (e: any) {
+      return reply.code(projectError(e)).send({ error: e.message });
+    }
+  });
+
   app.put<{ Params: { id: string }; Body: { checks?: unknown } }>("/api/projects/:id/checks", async (req, reply) => {
     const checks = req.body?.checks;
     if (!Array.isArray(checks) || checks.some((c) => typeof c !== "string")) {

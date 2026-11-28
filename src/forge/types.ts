@@ -26,6 +26,15 @@ export interface Project {
   skillPacks: string[];
   /** How many of its Runs are Archived (what "purge now" would delete). */
   archivedRuns: number;
+  /** When its removal began; set until the removal finishes, so a Project that still shows it was interrupted. */
+  removingSince: Date | null;
+}
+
+/** What the removal confirmation shows: how many Runs go, which ones are active (and would have to be abandoned), how many are Archived. */
+export interface RemovalPreview {
+  runs: number;
+  activeRuns: Array<{ id: number; title: string; state: RunState; prNumber: number | null; prUrl: string | null }>;
+  archivedRuns: number;
 }
 
 /** The Art Direction facts of a Project and the images a Run form can offer as references. */
