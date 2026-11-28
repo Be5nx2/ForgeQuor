@@ -100,3 +100,6 @@ test-results/
 .Trashes
 Thumbs.db
 Desktop.ini
+
+# --- Dogfood Exports (personal, regenerable from the database) ---
+docs/dogfood/

@@ -24,3 +24,6 @@ export class DogfoodNoteNotFoundError extends Error {}
 
 /** A Dogfood Note status change that is not allowed (new to triaged or dismissed, and back to new; nothing else). */
 export class DogfoodNoteTransitionError extends Error {}
+
+/** The Dogfood Export file could not be written (the folder is not writable, or is not a folder). Nothing was exported. */
+export class DogfoodExportError extends Error {}

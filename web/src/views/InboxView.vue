@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from "vue";
-import { getJson, putJson, type DogfoodNote, type DogfoodNoteList } from "../api";
+import { computed, onMounted, ref, watch } from "vue";
+import { getJson, postJson, putJson, type DogfoodExport, type DogfoodNote, type DogfoodNoteList } from "../api";
 
 /** The Dogfood Inbox: every note newest first, with filters and the buttons that triage or dismiss them. */
 const props = defineProps<{
@@ -14,12 +14,22 @@ const filter = ref({ status: "", nature: "", target: "" });
 const error = ref("");
 /** The reference being typed per note, kept until it is triaged. */
 const refs = ref<Record<number, string>>({});
+/** The notes ticked for export: only ever notes the current list shows. */
+const selected = ref<number[]>([]);
+const exporting = ref(false);
+/** What the last export did, said in words. */
+const exportedAs = ref("");
+const allSelected = computed(() => notes.value.length > 0 && notes.value.every((n) => selected.value.includes(n.id)));
+function toggleAll() {
+  selected.value = allSelected.value ? [] : notes.value.map((n) => n.id);
+}
 
 async function load() {
   const query = new URLSearchParams(Object.entries(filter.value).filter(([, v]) => v));
   try {
     const list = await getJson<DogfoodNoteList>(`/api/dogfood-notes?${query}`);
     notes.value = list.notes;
+    selected.value = selected.value.filter((id) => list.notes.some((n) => n.id === id));
     emit("count", list.newCount);
     error.value = "";
   } catch (e: any) {
@@ -38,6 +48,27 @@ async function move(n: DogfoodNote, status: string) {
   // Reload either way: after a refusal the list shows the note's real status.
   await load();
   if (failure) error.value = failure;
+}
+
+/** Asks the server to write the Dogfood Export, then offers the same file for download. No status changes. */
+async function exportSelected() {
+  exporting.value = true;
+  exportedAs.value = "";
+  try {
+    const file = await postJson<DogfoodExport>("/api/dogfood-notes/export", { ids: selected.value });
+    const url = URL.createObjectURL(new Blob([file.content], { type: "text/markdown;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = file.fileName;
+    link.click();
+    URL.revokeObjectURL(url);
+    exportedAs.value = `Exported ${selected.value.length} note${selected.value.length === 1 ? "" : "s"} to ${file.path}`;
+    error.value = "";
+  } catch (e: any) {
+    error.value = `Not exported: ${e.message}`;
+  } finally {
+    exporting.value = false;
+  }
 }
 
 onMounted(load);
@@ -68,11 +99,17 @@ watch(() => props.version, load);
       <option value="other">other</option>
     </select>
   </form>
+  <div v-if="notes.length" class="gate-actions">
+    <label><input type="checkbox" :checked="allSelected" @change="toggleAll" /> Select all {{ notes.length }} shown</label>
+    <button type="button" :disabled="!selected.length || exporting" @click="exportSelected">Export {{ selected.length }} selected</button>
+  </div>
+  <p v-if="exportedAs" class="muted" role="status">{{ exportedAs }}</p>
   <p v-if="error" class="error" role="alert">{{ error }}</p>
   <p v-if="!notes.length && !error" class="muted">No notes match.</p>
   <ul class="notes">
     <li v-for="n in notes" :key="n.id" class="stack">
       <div>
+        <input v-model="selected" type="checkbox" :value="n.id" :aria-label="`Select note ${n.id} for export`" />
         <strong>{{ n.nature }}</strong> about <strong>{{ n.target }}</strong>
         <span class="muted"> · {{ new Date(n.createdAt).toLocaleString() }} · {{ n.origin }} · {{ n.status }}<template v-if="n.triageRef"> → {{ n.triageRef }}</template></span>
       </div>

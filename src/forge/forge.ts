@@ -1,5 +1,5 @@
 import { existsSync, rmSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import type pg from "pg";
 import type { Runner } from "../runner/runner.js";
@@ -24,7 +24,7 @@ import { reviewStepType } from "./review.js";
 import { buildSeats, type RunnerName, type SeatSettings } from "./seats.js";
 import { createTeamStore, parseSeatOverrides, settingsOf, withOverrides, type Team, type TeamChange } from "./team.js";
 import { builtInExtensions } from "./builtin.js";
-import { AssetNotFoundError, DogfoodNoteNotFoundError, DogfoodNoteTransitionError, GateError, InvalidInputError, InvalidSeatError, RunNotFoundError, RunStateError, SeatLockedError } from "./errors.js";
+import { AssetNotFoundError, DogfoodExportError, DogfoodNoteNotFoundError, DogfoodNoteTransitionError, GateError, InvalidInputError, InvalidSeatError, RunNotFoundError, RunStateError, SeatLockedError } from "./errors.js";
 import type { Extension, InputProducer } from "./extension.js";
 import { allows, escalationGate, finalGate, offered, refusal, reviewGate, type GateKindModule, type GateOutcome } from "./gates.js";
 import { goBackChoices, redoFailedSteps, redoSteps, redoSet, type StepRow } from "./step-states.js";
@@ -35,6 +35,7 @@ import type {
   ApprovedRun,
   ArtInfo,
   CheckResult,
+  DogfoodExport,
   DogfoodNote,
   DogfoodNoteFilter,
   DogfoodNoteInput,
@@ -62,7 +63,7 @@ import { offeredSkillPacks, placeSkillPacks, SHARED_SKILL_PACK, SKILLS_ROOT } fr
 import { createRunWorktree, existsInBranch, inspectRepository, listInBranch, readInBranch, RegistrationError, refreshDefaultBranch, remoteHasBranch, removeRunWorktree, repositoryPath, runFoldersUnder, slugify } from "./workspace.js";
 
 export type { SeatSettings };
-export { RegistrationError, AssetNotFoundError, DogfoodNoteNotFoundError, DogfoodNoteTransitionError, GateError, InvalidInputError, InvalidSeatError, RunNotFoundError, RunStateError, SeatLockedError };
+export { RegistrationError, AssetNotFoundError, DogfoodExportError, DogfoodNoteNotFoundError, DogfoodNoteTransitionError, GateError, InvalidInputError, InvalidSeatError, RunNotFoundError, RunStateError, SeatLockedError };
 export type * from "./types.js";
 
 export interface Forge {
@@ -162,6 +163,12 @@ export interface Forge {
    * DogfoodNoteTransitionError for a move not allowed (triaged to dismissed, or to the same status); DogfoodNoteNotFoundError.
    */
   setDogfoodNoteStatus(id: number, status: string, triageRef?: string | null): Promise<DogfoodNote>;
+  /**
+   * Writes the chosen Dogfood Notes as one Markdown Dogfood Export, `export_forgequor_<date>_<time>.md`, into the export
+   * folder (created when missing) and returns its name, path and content for download. Changes no status. InvalidInputError
+   * for an empty selection or a bad ID, DogfoodNoteNotFoundError for an unknown note, DogfoodExportError when the folder cannot be written.
+   */
+  exportDogfoodNotes(ids: number[]): Promise<DogfoodExport>;
   /** Each seat's effective Runner and model with where each comes from (environment, Team, default), and the model aliases on offer. */
   team(): Promise<Team>;
   /** Saves a seat's Runner and/or model (the Team page). Throws InvalidInputError for an unknown seat or Runner, SeatLockedError for a field the environment holds. */
@@ -211,6 +218,8 @@ export interface ForgeDeps {
   skillPack?: string;
   /** How many days an Archived Run is kept before the purge deletes it. Default: 60. */
   archiveDays?: number;
+  /** Folder where Dogfood Exports are written. Default: `docs/dogfood/` of the Forgequor checkout. */
+  dogfoodExportFolder?: string;
   /** Folder whose subfolders are the Skill Packs a Project may pick. Default: Forgequor's own `skills/`. */
   skillsRoot?: string;
   /** The clock, so tests can move time. */
@@ -347,13 +356,16 @@ function reviewModeOf(flow: Workflow, chosen: string | undefined): ReviewMode | 
   return chosen as ReviewMode;
 }
 
+/** Where Dogfood Exports go unless told otherwise: `docs/dogfood/` of the Forgequor checkout. */
+const DEFAULT_DOGFOOD_EXPORT_FOLDER = join(dirname(SKILLS_ROOT), "docs", "dogfood");
+
 export function createForge(deps: ForgeDeps): Forge {
   const { pool } = deps;
   const skillsRoot = deps.skillsRoot ?? SKILLS_ROOT;
   /** The Workflows a Run can follow, by name. */
   const extensions = deps.extensions ?? builtInExtensions(pool);
   const runNotes = createRunNotes(pool);
-  const dogfood = createDogfoodNotes(pool);
+  const dogfood = createDogfoodNotes(pool, { exportFolder: deps.dogfoodExportFolder ?? DEFAULT_DOGFOOD_EXPORT_FOLDER, now: deps.now });
   const workflows = new Map<string, Workflow>([developerWorkflow, bugfixWorkflow, featureWorkflow, ...extensions.flatMap((e) => e.workflows)].map((w) => [w.name, w]));
   /** How each built-in Workflow's pull request is made, when it is not the default. */
   const publications = new Map<string, Publication>([...workflows.values()].flatMap((w) => (w.publication ? [[w.name, w.publication] as const] : [])));
@@ -1277,6 +1289,7 @@ export function createForge(deps: ForgeDeps): Forge {
     createDogfoodNote: (input) => dogfood.create(input),
     listDogfoodNotes: (filter) => dogfood.list(filter),
     setDogfoodNoteStatus: (id, status, triageRef) => dogfood.setStatus(id, status, triageRef),
+    exportDogfoodNotes: (ids) => dogfood.export(ids),
     team: () => teamStore.team(),
     changeSeat: (seat, change) => teamStore.change(seat, change),
     startQuotaReading: () => quotas.start(),

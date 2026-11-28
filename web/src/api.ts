@@ -39,6 +39,7 @@ export type DogfoodNature = Server.DogfoodNature;
 export type DogfoodTarget = Server.DogfoodTarget;
 export type DogfoodNote = Json<Server.DogfoodNote>;
 export type DogfoodNoteList = Json<Server.DogfoodNoteList>;
+export type DogfoodExport = Json<Server.DogfoodExport>;
 
 /** Records the human's decision at a Gate and returns the updated Run. */
 export function decideGate(gateId: number, action: GateAction, feedback?: string, verdicts?: Verdict[], target?: string, message?: string): Promise<RunDetail> {

@@ -428,3 +428,13 @@ export interface DogfoodNoteList {
   /** How many notes are `new`, whatever the filter. */
   newCount: number;
 }
+
+/** A Dogfood Export: the Markdown file written for a selection of notes, and the same content for download. */
+export interface DogfoodExport {
+  /** `export_forgequor_<date>_<time>.md` */
+  fileName: string;
+  /** Where it was written. */
+  path: string;
+  /** The whole Markdown document. */
+  content: string;
+}

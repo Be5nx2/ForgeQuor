@@ -1,6 +1,8 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import type pg from "pg";
-import { DogfoodNoteNotFoundError, DogfoodNoteTransitionError, InvalidInputError } from "./errors.js";
-import type { DogfoodNote, DogfoodNoteFilter, DogfoodNoteInput, DogfoodNoteList } from "./types.js";
+import { DogfoodExportError, DogfoodNoteNotFoundError, DogfoodNoteTransitionError, InvalidInputError } from "./errors.js";
+import type { DogfoodExport, DogfoodNote, DogfoodNoteFilter, DogfoodNoteInput, DogfoodNoteList } from "./types.js";
 
 export const DOGFOOD_NATURES = ["feedback", "idea"] as const;
 export const DOGFOOD_TARGETS = ["workflow", "feature", "display", "other"] as const;
@@ -50,8 +52,44 @@ function oneOf(what: string, value: unknown, allowed: readonly string[]): string
   return value;
 }
 
+/** `2026-11-28` and `143012` (UTC), the two halves of an export's file name. */
+function stamp(d: Date): { date: string; time: string } {
+  const iso = d.toISOString();
+  return { date: iso.slice(0, 10), time: iso.slice(11, 19).replaceAll(":", "") };
+}
+
+/** The text verbatim, in a code fence longer than any run of backticks inside it, so its own Markdown cannot break the file. */
+function fenced(text: string): string {
+  const longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((r) => r.length));
+  const fence = "`".repeat(Math.max(3, longest + 1));
+  return `${fence}text\n${text}\n${fence}`;
+}
+
+/** The Markdown of a Dogfood Export: a header, then one section per target (in the order of the targets) with its notes by date. */
+function exportMarkdown(notes: DogfoodNote[], exportedAt: Date): string {
+  const out = ["# Forgequor Dogfood Export", "", `- Exported: ${exportedAt.toISOString()}`, `- Notes: ${notes.length}`];
+  for (const target of DOGFOOD_TARGETS) {
+    const inTarget = notes.filter((n) => n.target === target);
+    if (!inTarget.length) continue;
+    out.push("", `## ${target} (${inTarget.length})`);
+    for (const n of inTarget) {
+      out.push("", `### Note #${n.id}`, "", `- ID: ${n.id}`, `- Date: ${n.createdAt.toISOString()}`, `- Nature: ${n.nature}`, `- Target: ${n.target}`, `- Origin: ${n.origin}`);
+      if (n.triageRef) out.push(`- Triage: ${n.triageRef}`);
+      out.push("", fenced(n.text));
+    }
+  }
+  return out.join("\n") + "\n";
+}
+
+export interface DogfoodOptions {
+  /** Where exports are written; created when missing. */
+  exportFolder: string;
+  now?: () => Date;
+}
+
 /** The Dogfood Notes: recorded as they are, listed newest first, never deleted. */
-export function createDogfoodNotes(pool: pg.Pool) {
+export function createDogfoodNotes(pool: pg.Pool, options: DogfoodOptions) {
+  const now = options.now ?? (() => new Date());
   return {
     /** Records a note with its context. Only the text is free; a blank text, a bad nature or target, or an unknown Run or Project is an InvalidInputError. */
     async create(input: DogfoodNoteInput): Promise<DogfoodNote> {
@@ -128,6 +166,38 @@ export function createDogfoodNotes(pool: pg.Pool) {
       );
       const count = await pool.query("SELECT count(*)::int AS n FROM dogfood_notes WHERE status = 'new'");
       return { notes: rows.map(toNote), newCount: count.rows[0].n };
+    },
+    /**
+     * Writes the chosen notes as one Markdown file `export_forgequor_<date>_<time>.md` into the export folder (created when
+     * missing) and returns it for download. Changes no status. No ids, a bad id, or an unknown note is refused (InvalidInputError,
+     * DogfoodNoteNotFoundError) before anything is written; a folder that cannot be written is a DogfoodExportError.
+     */
+    async export(ids: number[]): Promise<DogfoodExport> {
+      if (!Array.isArray(ids) || !ids.length) throw new InvalidInputError("Select at least one note to export.");
+      if (!ids.every((i) => Number.isInteger(i) && i > 0)) throw new InvalidInputError("The notes to export are given by their whole-number IDs.");
+      const wanted = [...new Set(ids)];
+      const { rows } = await pool.query(`SELECT ${COLUMNS} FROM dogfood_notes WHERE id = ANY($1) ORDER BY created_at ASC, id ASC`, [wanted]);
+      const missing = wanted.filter((id) => !rows.some((r) => Number(r.id) === id));
+      if (missing.length) throw new DogfoodNoteNotFoundError(`No Dogfood Note ${missing.join(", ")}.`);
+      const exportedAt = now();
+      const content = exportMarkdown(rows.map(toNote), exportedAt);
+      const { date, time } = stamp(exportedAt);
+      try {
+        await mkdir(options.exportFolder, { recursive: true });
+        // `wx` never overwrites: a second export in the same second gets a numbered name.
+        for (let n = 1; ; n++) {
+          const fileName = `export_forgequor_${date}_${time}${n > 1 ? `-${n}` : ""}.md`;
+          const path = join(options.exportFolder, fileName);
+          try {
+            await writeFile(path, content, { flag: "wx" });
+            return { fileName, path, content };
+          } catch (e: any) {
+            if (e?.code !== "EEXIST") throw e;
+          }
+        }
+      } catch (e: any) {
+        throw new DogfoodExportError(`Could not write the export into ${options.exportFolder}: ${e?.code ?? e?.message ?? e}. Nothing was exported.`);
+      }
     },
   };
 }

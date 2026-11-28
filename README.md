@@ -95,6 +95,7 @@ All settings are optional environment variables. Set them in the shell that runs
 | `FORGEQUOR_<SEAT>_MODEL` | the Runner's default | Model of an Agent seat, such as `FORGEQUOR_DEVELOPER_MODEL` or `FORGEQUOR_ARTIST_MODEL` |
 | `FORGEQUOR_STEP_TIMEOUT_MINUTES` | `60` | An Agent's Step running longer is killed and escalated |
 | `FORGEQUOR_ARCHIVE_DAYS` | `60` | An archived Run is deleted, with everything that belongs to it, after this many days |
+| `FORGEQUOR_DOGFOOD_FOLDER` | `docs/dogfood` | Where a Dogfood Export is written (relative to the Forgequor checkout; created when missing; git-ignored) |
 | `FORGEQUOR_CHECK_TIMEOUT_MINUTES` | `10` | A Check command running longer is killed and counts as failed |
 
 ### Tests
