@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { RunStateError, type Forge } from "../../src/forge/forge.js";
+import { RemovalInterruptedError, RunStateError, type Forge } from "../../src/forge/forge.js";
 import { createServer } from "../../src/http/server.js";
 
 let close: (() => Promise<void>) | undefined;
@@ -50,5 +50,17 @@ describe("the Project removal routes", () => {
     const busy = await fetch(`${address}/api/projects/2`, { method: "DELETE" });
     expect(busy.status).toBe(409);
     expect(await busy.json()).toEqual({ error: "Project Slime has 1 active Run: abandon it first." });
+  });
+
+  it("answers 502 naming the Run and pull request when the code host failed during the removal", async () => {
+    const message = "Removal of Slime stopped: could not abandon Run 8 (pull request #12): GitHub is unreachable. Retry once the code host answers.";
+    const address = await serve({
+      removeProject: async () => {
+        throw new RemovalInterruptedError(message);
+      },
+    });
+    const res = await fetch(`${address}/api/projects/2`, { method: "DELETE" });
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ error: message });
   });
 });

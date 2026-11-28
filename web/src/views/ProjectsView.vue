@@ -5,7 +5,7 @@ import { deleteJson, getJson, postJson, putJson, type Project } from "../api";
 import EmptyState from "../components/EmptyState.vue";
 import ErrorState from "../components/ErrorState.vue";
 import LoadingState from "../components/LoadingState.vue";
-import { purgeAllOffer, purgedMessage, purgeProjectOffer, removalOffer, type RemovalPreviewLike } from "../projectDanger";
+import { interruptedBanner, purgeAllOffer, purgedMessage, purgeProjectOffer, removalOffer, type RemovalPreviewLike } from "../projectDanger";
 import { changedSections, commandsOf, draftOf, projectSubtitle, selectProject, type Draft, type Section } from "../projectsForm";
 
 /** The Project the URL names (/projects/:id); without one, the first Project is shown. */
@@ -142,6 +142,7 @@ function askPurge(scope: "all" | "project") {
 }
 
 const router = useRouter();
+const interrupted = computed(() => (selected.value ? interruptedBanner(selected.value) : null));
 /** The removal confirmation: the preview the server gave when it opened, the name typed so far, and whether the removal is under way. */
 const removal = ref<{ projectId: number; preview: RemovalPreviewLike; typed: string } | null>(null);
 const removing = ref(false);
@@ -168,9 +169,18 @@ async function askRemoval() {
   }
 }
 
-async function removeProject() {
+/** Retry of an interrupted removal: the same operation, no name to type again. */
+async function retryRemoval() {
   const p = selected.value;
-  if (!p || !removalView.value?.offer.canRemove) return;
+  if (p) await removeProject(p);
+}
+
+async function confirmRemoval() {
+  const p = selected.value;
+  if (p && removalView.value?.offer.canRemove) await removeProject(p);
+}
+
+async function removeProject(p: Project) {
   removalError.value = "";
   removing.value = true;
   try {
@@ -182,6 +192,13 @@ async function removeProject() {
     await router.push("/projects");
   } catch (e: any) {
     removalError.value = e.message;
+    // The failed removal left its mark: show the banner without touching what is being edited.
+    try {
+      const fresh = await getJson<Project[]>("/api/projects");
+      for (const x of projects.value) x.removingSince = fresh.find((f) => f.id === x.id)?.removingSince ?? null;
+    } catch {
+      /* the error above stays */
+    }
   } finally {
     removing.value = false;
   }
@@ -292,6 +309,15 @@ onMounted(load);
         <button class="btn btn-primary" type="submit" :disabled="!dirty || saving">Save</button>
       </div>
 
+      <section v-if="interrupted" class="interrupted" role="alert" aria-label="Removal interrupted">
+        <div>
+          <strong>{{ interrupted.title }}</strong>
+          <span>{{ interrupted.text }}</span>
+          <span v-if="removalError" class="error">{{ removalError }}</span>
+        </div>
+        <button class="btn btn-danger-solid" type="button" :disabled="removing" @click="retryRemoval">{{ removing ? "Retrying…" : interrupted.retry }}</button>
+      </section>
+
       <section v-if="projectOffer" class="danger" aria-label="Danger zone">
         <h2>Danger zone</h2>
         <div class="danger-row">
@@ -314,15 +340,17 @@ onMounted(load);
         </div>
         <div v-if="removalView" class="danger-confirm" role="alertdialog" aria-label="Confirm removing this Project">
           <p>{{ removalView.offer.runsText }}</p>
-          <ul v-if="removalView.offer.blockedBy.length" class="blocked">
-            <li v-for="line in removalView.offer.blockedBy" :key="line">{{ line }}</li>
-          </ul>
-          <p v-if="removalView.offer.blockedBy.length" class="error">This Project has active Runs. Abandon them first, then remove it.</p>
+          <template v-if="removalView.offer.abandons.length">
+            <p>Its active Runs are abandoned first, exactly as the Abandon button does:</p>
+            <ul class="blocked">
+              <li v-for="line in removalView.offer.abandons" :key="line">{{ line }}</li>
+            </ul>
+          </template>
           <label class="field">
             <span>Type <strong>{{ selected.name }}</strong> to confirm</span>
             <input v-model="removal!.typed" type="text" autocomplete="off" spellcheck="false" :disabled="removing" />
           </label>
-          <div class="actions"><button class="btn btn-ghost" type="button" :disabled="removing" @click="removal = null">Cancel</button><button class="btn btn-danger-solid" type="button" :disabled="!removalView.offer.canRemove || removing" @click="removeProject">Remove</button></div>
+          <div class="actions"><button class="btn btn-ghost" type="button" :disabled="removing" @click="removal = null">Cancel</button><button class="btn btn-danger-solid" type="button" :disabled="!removalView.offer.canRemove || removing" @click="confirmRemoval">Remove</button></div>
         </div>
         <p v-if="removalError" class="error" role="alert">{{ removalError }}</p>
       </section>
@@ -347,6 +375,9 @@ h1 { font: 700 var(--fs-xl)/1.2 var(--font-brand); letter-spacing: 0.03em; }
 .danger-row > div { display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--fs-sm); max-width: 32rem; }
 .danger-confirm { display: flex; flex-direction: column; gap: var(--sp-3); }
 .danger-confirm p { margin: 0; font-size: var(--fs-sm); }
+.interrupted { border: 1px solid var(--st-bad); background: color-mix(in srgb, var(--st-bad) 12%, transparent); border-radius: var(--radius-md); padding: var(--sp-4); display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); flex-wrap: wrap; }
+.interrupted > div { display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--fs-sm); max-width: 40rem; }
+.interrupted strong { color: var(--st-bad); }
 .blocked { margin: 0; padding-left: var(--sp-4); font-size: var(--fs-sm); }
 .field { display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--fs-sm); }
 .btn-danger-outline { color: var(--st-bad); border-color: var(--st-bad); }

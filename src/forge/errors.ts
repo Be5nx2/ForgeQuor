@@ -27,3 +27,6 @@ export class DogfoodNoteTransitionError extends Error {}
 
 /** The Dogfood Export file could not be written (the folder is not writable, or is not a folder). Nothing was exported. */
 export class DogfoodExportError extends Error {}
+
+/** The code host failed while a Project's removal abandoned one of its Runs: the removal stopped there, the Project and its mark stay. */
+export class RemovalInterruptedError extends Error {}

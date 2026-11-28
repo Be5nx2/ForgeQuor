@@ -11,6 +11,7 @@ import {
   InvalidInputError,
   InvalidSeatError,
   RegistrationError,
+  RemovalInterruptedError,
   RunNotFoundError,
   RunStateError,
   SeatLockedError,
@@ -58,7 +59,7 @@ export async function createServer(deps: {
   });
 
   const projectNumber = (raw: string) => (/^[1-9]\d*$/.test(raw) ? Number(raw) : null);
-  const projectError = (e: any) => (/^No Project/.test(e.message) ? 404 : e instanceof RunStateError ? 409 : 500);
+  const projectError = (e: any) => (/^No Project/.test(e.message) ? 404 : e instanceof RunStateError ? 409 : e instanceof RemovalInterruptedError ? 502 : 500);
 
   app.get<{ Params: { id: string } }>("/api/projects/:id/removal", async (req, reply) => {
     const id = projectNumber(req.params.id);
