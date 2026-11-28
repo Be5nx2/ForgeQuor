@@ -65,6 +65,11 @@ Small fixes found by dogfooding (Dogfood Notes triaged with `/dogfood-triage`).
   - Blocked by: none
   - Acceptance: the tests seen failing at random under a full run, then passing on a rerun, are made deterministic (injected clock and `every`, awaited idle points instead of sleeps or real timers, no shared state between files): at least `tests/forge/quota.test.ts` ("asks once more when a Step ends while a reading is under way"), `tests/forge/feature-art.test.ts` ("sends back Asset Requests…"), `tests/forge/parallel-steps.test.ts`, `tests/store/frozen-definitions.test.ts`; the one full run where every test hung about 10 minutes is explained (a lock, a leaked server or process, a database contention) and prevented; the full suite passes 5 runs in a row; tests keep testing through the public interfaces.
 
+- [x] `pol-04` **Keep the last Quota on an empty reading**: when a vendor answers a Quota reading with no figures, the bars keep the last ones instead of turning "unknown".
+  - Spec: none (found by the BA run of 2026-11-28: `claude -p /usage` logged "Usage fetch returned a fieldless body" and printed no limits)
+  - Blocked by: none
+  - Acceptance: a full reading with no percent, no reset time and not exhausted is not recorded nor pushed live; the last reading stays and its age grows; one warning per outage in the log; a later reading with figures is recorded as before; a Forge test drives it with the manual timer; the Team BA finds the Developer's attempt by `stepId`.
+
 ## Icebox
 
 - Child Runs: a feature Run splitting its spec into one Run per ticket (ADR 0001).

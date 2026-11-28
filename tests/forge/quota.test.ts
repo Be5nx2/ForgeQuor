@@ -133,6 +133,31 @@ describe("Quota readings", () => {
     expect(timer.running()).toBe(0);
   });
 
+  it("keeps the last reading, getting older, when the vendor answers with nothing", async () => {
+    const empty = reading(null, { fiveHour: { percentUsed: null, resetsAt: null }, weekly: { percentUsed: null, resetsAt: null } });
+    const claude = askable(reading(12), empty, reading(30));
+    const timer = manualTimer();
+    const forge = forgeWith(claude, { every: timer.every });
+    const stop = await forge.startQuotaReading();
+    const heard: RunUpdate[] = [];
+    forge.subscribe((u) => heard.push(u));
+
+    clock = new Date("2026-11-27T10:05:00Z");
+    timer.tick();
+    await forge.whenIdle();
+
+    expect(claude.asked).toBe(2);
+    expect(heard).toEqual([]);
+    expect((await forge.quota())[0]).toEqual({ vendor: "claude", reading: reading(12, { readAt: new Date("2026-11-27T10:00:00Z") }), ageSeconds: 300 });
+
+    clock = new Date("2026-11-27T10:10:00Z");
+    timer.tick();
+    await forge.whenIdle();
+
+    expect((await forge.quota())[0]).toMatchObject({ reading: { fiveHour: { percentUsed: 30 } }, ageSeconds: 0 });
+    stop();
+  });
+
   it("keeps the readings through a restart", async () => {
     await forgeWith(askable(reading(12))).startQuotaReading().then((stop) => stop());
 
