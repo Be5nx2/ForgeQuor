@@ -71,6 +71,10 @@ To inspect what the Developer did, open the Run's worktree. The path is shown in
 
 > M1 (walking skeleton) and M2 (Assets) are done: a `developer` Run goes from its own worktree to a pull request and your final Gate, where you can approve, abandon or reject with Feedback; an `assets` Run has Codex draw sprites, tiles and Animation Strips that you judge one by one at the Asset Gate. M3 (full loop) is next. The Run page shows the Developer's progress live. On the Projects screen, declare a Project's **Setup** (shell commands run in each new worktree before the Developer, in order; a failing one opens an Escalation and the Developer never starts) and its **Checks** (run after the Developer, in order; without any, a Run goes straight to the pull request). See [ROADMAP.md](ROADMAP.md).
 
+#### Preparing your own Project
+
+Everything a repository needs to work with Forgequor (required files, Setup and Checks, Skill Packs, Art Direction, a copy-paste prompt that does the preparation for you) is in [ForgeQuor_must_have.md](ForgeQuor_must_have.md).
+
 #### Registering Forgequor itself
 
 To let Forgequor run its own roadmap items, register this repository as a Project with:
