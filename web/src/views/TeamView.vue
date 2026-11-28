@@ -1,9 +1,13 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { getJson, putJson, type Team, type TeamField, type TeamSeat } from "../api";
+import ErrorState from "../components/ErrorState.vue";
+import LoadingState from "../components/LoadingState.vue";
 
 const team = ref<Team | null>(null);
 const error = ref("");
+/** Why the Team could not load (a failed save stays in `error`). */
+const loadError = ref("");
 /** What is being typed per seat: its Runner and model. */
 const drafts = ref<Record<string, { runner: string; model: string }>>({});
 
@@ -15,8 +19,9 @@ function fill(t: Team) {
 async function load() {
   try {
     fill(await getJson<Team>("/api/team"));
+    loadError.value = "";
   } catch (e: any) {
-    error.value = e.message;
+    loadError.value = e.message;
   }
 }
 
@@ -46,7 +51,9 @@ onMounted(load);
   <h2>Team</h2>
   <p class="muted">Each seat's Runner and model. A change applies to the Runs that start afterwards. A field set by an environment variable is locked.</p>
   <p v-if="error" class="error">{{ error }}</p>
-  <ul v-if="team">
+  <ErrorState v-if="loadError" title="Could not load the Team" text="The Forgequor server did not answer. Check that it is running, then retry." :details="loadError" @retry="load" />
+  <LoadingState v-else-if="!team" what="the Team" />
+  <ul v-else>
     <li v-for="s in team.seats" :key="s.seat">
       <form class="stack" @submit.prevent="save(s)">
         <strong>{{ s.seat }}</strong>

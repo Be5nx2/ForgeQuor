@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { decideGate, type Asset, type Gate, type Verdict } from "../api";
+import { assetStatus } from "../status";
+import StatusChip from "./StatusChip.vue";
 
 const props = defineProps<{ runId: number; iteration: number; assets: Asset[]; gate?: Gate; filesRemoved?: boolean }>();
 const emit = defineEmits<{ decided: [] }>();
@@ -69,7 +71,7 @@ function approveAll() {
     </label>
     <ul>
       <li v-for="a in assets" :key="a.id">
-        <strong>{{ a.name }}</strong> <span class="badge">{{ a.status }}</span>
+        <strong>{{ a.name }}</strong> <StatusChip :status="assetStatus(a.status)" />
         <div class="muted">
           {{ a.kind }} · {{ a.width }}x{{ a.height }}<span v-if="a.kind === 'animation'"> × {{ a.frames }} frames</span><span v-if="a.fill"> · fills its square</span><span v-if="a.replace"> · replaces an existing file</span> · <code>{{ a.targetPath }}</code></div>
         <ul v-if="a.warnings.length" class="warnings" aria-label="Palette warnings">

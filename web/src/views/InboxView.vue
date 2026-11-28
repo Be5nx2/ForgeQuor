@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { getJson, postJson, putJson, type DogfoodExport, type DogfoodNote, type DogfoodNoteList } from "../api";
+import EmptyState from "../components/EmptyState.vue";
+import ErrorState from "../components/ErrorState.vue";
+import LoadingState from "../components/LoadingState.vue";
 
 /** The Dogfood Inbox: every note newest first, with filters and the buttons that triage or dismiss them. */
 const props = defineProps<{
@@ -12,6 +15,10 @@ const emit = defineEmits<{ count: [n: number] }>();
 const notes = ref<DogfoodNote[]>([]);
 const filter = ref({ status: "", nature: "", target: "" });
 const error = ref("");
+/** Why the list itself could not load (a failed triage or export stays in `error`, above the list). */
+const loadError = ref("");
+/** False until the first list arrives, so an empty page never reads as "No notes" while it is loading. */
+const loaded = ref(false);
 /** The reference being typed per note, kept until it is triaged. */
 const refs = ref<Record<number, string>>({});
 /** The notes ticked for export: only ever notes the current list shows. */
@@ -32,8 +39,10 @@ async function load() {
     selected.value = selected.value.filter((id) => list.notes.some((n) => n.id === id));
     emit("count", list.newCount);
     error.value = "";
+    loadError.value = "";
+    loaded.value = true;
   } catch (e: any) {
-    error.value = e.message;
+    loadError.value = e.message;
   }
 }
 
@@ -105,7 +114,10 @@ watch(() => props.version, load);
   </div>
   <p v-if="exportedAs" class="muted" role="status">{{ exportedAs }}</p>
   <p v-if="error" class="error" role="alert">{{ error }}</p>
-  <p v-if="!notes.length && !error" class="muted">No notes match.</p>
+  <ErrorState v-if="loadError" title="Could not load the notes" text="The Forgequor server did not answer. Check that it is running, then retry." :details="loadError" @retry="load" />
+  <LoadingState v-else-if="!loaded" what="notes" />
+  <EmptyState v-else-if="!notes.length && (filter.status || filter.nature || filter.target)" title="No note matches these filters" text="Change the filters to see more notes." />
+  <EmptyState v-else-if="!notes.length" title="No note yet" text="Use + Note in the sidebar to jot down what you notice while using Forgequor." />
   <ul class="notes">
     <li v-for="n in notes" :key="n.id" class="stack">
       <div>

@@ -47,3 +47,15 @@ form.filters select { flex: 1 1 12rem; min-width: 0; max-width: 100%; }
 
 
 .badge { margin-left: 0.4rem; padding: 0 0.45rem; border-radius: 999px; background: #ff8c24; color: #080f19; font-size: 0.8em; font-weight: 700; }
+
+/* Shared states: loading, empty, error (LoadingState, EmptyState, ErrorState; mockup states.html) */
+.state { border: 1px dashed var(--border-strong); border-radius: var(--radius-lg); padding: var(--sp-6) var(--sp-5); display: grid; gap: var(--sp-3); justify-items: start; background: rgb(8 15 25 / 0.4); min-height: 14rem; align-content: center; margin: var(--sp-4) 0; }
+.state h3 { font-size: var(--fs-lg); font-weight: 600; }
+.state p { margin: 0; color: var(--text-muted); font-size: var(--fs-sm); max-width: 28rem; }
+.state.err { border-color: var(--st-bad); border-style: solid; }
+.state details { font-size: var(--fs-xs); color: var(--text-muted); }
+.skeleton { width: 100%; display: grid; gap: var(--sp-3); }
+.skeleton i { display: block; height: 1rem; border-radius: var(--radius-sm); background: linear-gradient(90deg, var(--surface) 0%, var(--surface-raised) 50%, var(--surface) 100%); background-size: 200% 100%; animation: shimmer 1.4s linear infinite; }
+.skeleton i:nth-child(1) { width: 60%; } .skeleton i:nth-child(2) { width: 90%; } .skeleton i:nth-child(3) { width: 75%; }
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .skeleton i { animation: none; } }

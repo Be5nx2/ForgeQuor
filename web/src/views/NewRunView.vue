@@ -2,6 +2,9 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { getJson, postJson, type ArtInfo, type AssetKind, type Project, type QuotaStatus, type ReviewMode, type Run, type Team, type TeamSeat, type WorkflowList, type WorkflowOption } from "../api";
+import EmptyState from "../components/EmptyState.vue";
+import ErrorState from "../components/ErrorState.vue";
+import LoadingState from "../components/LoadingState.vue";
 
 const router = useRouter();
 
@@ -105,10 +108,11 @@ async function loadProjects() {
   try {
     const known = await getJson<Project[]>("/api/projects");
     projects.value = known;
+    projectsError.value = "";
     form.value.projectId ||= String(known[0]?.id ?? "");
     projectsLoaded.value = true;
   } catch (e: any) {
-    projectsError.value = `Could not load the Projects: ${e.message}`;
+    projectsError.value = e.message;
   }
 }
 
@@ -169,14 +173,16 @@ watch(
 
 <template>
   <h2>New Run</h2>
-  <p v-if="projectsError" class="error">{{ projectsError }}</p>
-  <p v-else-if="!projectsLoaded" class="muted" role="status">Loading…</p>
-  <p v-else-if="!projects.length" class="muted">Register a Project first.</p>
+  <ErrorState v-if="projectsError" title="Could not load the Projects" text="The Forgequor server did not answer. Check that it is running, then retry." :details="projectsError" @retry="loadProjects" />
+  <LoadingState v-else-if="!projectsLoaded" what="Projects" />
+  <EmptyState v-else-if="!projects.length" title="No Project yet" text="Forgequor works on a git repository. Register your first Project to start a Run.">
+    <router-link class="btn btn-primary" to="/projects">Register a Project</router-link>
+  </EmptyState>
   <form v-else class="stack" @submit.prevent="start">
     <select v-model="form.projectId" aria-label="Project">
       <option v-for="p in projects" :key="p.id" :value="String(p.id)">{{ projectLabel(p) }}</option>
     </select>
-    <p v-if="workflowsLoading" class="muted" role="status">Loading Workflows…</p>
+    <LoadingState v-if="workflowsLoading" what="Workflows" />
     <select v-else v-model="form.workflow" aria-label="Workflow">
       <option v-for="w in workflows" :key="w.name" :value="w.name">{{ w.name }} ({{ originLabel(w) }}){{ w.description ? `: ${w.description}` : "" }}</option>
     </select>

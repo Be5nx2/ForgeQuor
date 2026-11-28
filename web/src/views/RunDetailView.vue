@@ -4,17 +4,24 @@ import { followRuns, getJson, postJson, type RunDetail, type RunNote } from "../
 import AssetGallery from "../components/AssetGallery.vue";
 import GateActions from "../components/GateActions.vue";
 import Markdown from "../components/Markdown.vue";
+import ErrorState from "../components/ErrorState.vue";
+import LoadingState from "../components/LoadingState.vue";
+import StatusChip from "../components/StatusChip.vue";
+import { attemptStatus, checkStatus, gateStatus, runStatus, stepStatus, verdictStatus } from "../status";
 
 const props = defineProps<{ id: number }>();
 
 const run = ref<RunDetail | null>(null);
 const error = ref("");
+/** Why the Run could not load (a failed action stays in `error`, above the Run). */
+const loadError = ref("");
 
 async function load() {
   try {
     run.value = await getJson(`/api/runs/${props.id}`);
+    loadError.value = "";
   } catch (e: any) {
-    error.value = e.message;
+    loadError.value = e.message;
   }
 }
 
@@ -68,9 +75,11 @@ onUnmounted(() => stopFollowing?.());
 
 <template>
   <p><router-link to="/runs">&larr; Runs</router-link></p>
-  <p v-if="error" class="error">{{ error }}</p>
+  <p v-if="error || (loadError && run)" class="error">{{ error || loadError }}</p>
+  <ErrorState v-if="loadError && !run" title="Could not load this Run" text="The Forgequor server did not answer. Check that it is running, then retry." :details="loadError" @retry="load" />
+  <LoadingState v-else-if="!run" what="the Run" />
   <template v-if="run">
-    <h2>{{ run.title }} <span class="badge">{{ run.state }}</span></h2>
+    <h2>{{ run.title }} <StatusChip :status="runStatus(run.state)" /></h2>
     <p v-if="run.state === 'paused' && run.resumeAt" class="muted">
       The Runner's Quota is used up. This Run restarts its current Step after {{ new Date(run.resumeAt).toLocaleString() }}.
     </p>
@@ -118,7 +127,7 @@ onUnmounted(() => stopFollowing?.());
         <li v-for="s in run.steps" :key="s.id">
           <strong>{{ s.id }}</strong>
           <span class="muted">{{ " · " + s.type + (s.detail ? ` (${s.detail})` : "") }}</span>
-          {{ " " }}<span class="badge">{{ s.status }}</span>
+          {{ " " }}<StatusChip :status="stepStatus(s.status)" />
           <span v-if="s.attempts" class="muted"> · {{ s.attempts }} {{ s.attempts === 1 ? "pass" : "passes" }}</span>
           <span v-if="s.status === 'waiting' && s.needs.length" class="muted"> · after {{ s.needs.join(", ") }}</span>
         </li>
@@ -143,10 +152,13 @@ onUnmounted(() => stopFollowing?.());
         <Markdown v-if="g.evidence && (g.kind === 'spec' || g.kind === 'conversation')" :text="g.evidence" />
         <pre v-else-if="g.evidence">{{ g.evidence }}</pre>
         <div v-if="g.decidedAt" class="muted">
-          {{ { approve: "Approved", reject: "Rejected", retry: "Retried", go_back: "Went back", abandon: "Abandoned", answer: "Answered", confirm: "Confirmed" }[g.decision ?? "abandon"] }} · {{ new Date(g.decidedAt).toLocaleString() }}
+          <StatusChip :status="gateStatus(g.decision ?? 'abandon')" /> {{ new Date(g.decidedAt).toLocaleString() }}
           <pre v-if="g.feedback">{{ g.feedback }}</pre>
         </div>
-        <GateActions v-else :gate="g" @decided="load" />
+        <template v-else>
+          <StatusChip :status="gateStatus(null)" />
+          <GateActions :gate="g" @decided="load" />
+        </template>
       </li>
     </ul>
 
@@ -170,7 +182,7 @@ onUnmounted(() => stopFollowing?.());
       <ul>
         <li v-for="r in run.reviews" :key="r.id">
           <strong>{{ r.author }}</strong> · iteration {{ r.iteration }} · attempt {{ r.attempt }} ·
-          <span class="badge">{{ r.verdict }}</span><span v-if="r.final" class="badge">final</span>
+          <StatusChip :status="verdictStatus(r.verdict)" /><span v-if="r.final" class="badge">final</span>
           <pre>{{ r.body }}</pre>
         </li>
       </ul>
@@ -181,7 +193,7 @@ onUnmounted(() => stopFollowing?.());
     <ul>
       <li v-for="c in run.checks" :key="c.id">
         <code>{{ c.command }}</code> · iteration {{ c.iteration }} · attempt {{ c.attempt }} ·
-        <span class="badge">{{ c.exitStatus === 0 ? "passed" : c.exitStatus === null ? "killed" : `exit ${c.exitStatus}` }}</span>
+        <StatusChip :status="checkStatus(c.exitStatus)" />
         <pre v-if="c.output.trim()">{{ c.output }}</pre>
       </li>
     </ul>
@@ -190,7 +202,7 @@ onUnmounted(() => stopFollowing?.());
     <p v-if="!run.attempts.length" class="muted">None yet.</p>
     <ul>
       <li v-for="a in run.attempts" :key="a.id">
-        <strong>{{ a.step }}</strong><span v-if="a.assetId"> · {{ run.assets.find((x) => x.id === a.assetId)?.name }}</span> · iteration {{ a.iteration }} · attempt {{ a.attempt }} · <span class="badge">{{ a.status }}</span>
+        <strong>{{ a.step }}</strong><span v-if="a.assetId"> · {{ run.assets.find((x) => x.id === a.assetId)?.name }}</span> · iteration {{ a.iteration }} · attempt {{ a.attempt }} · <StatusChip :status="attemptStatus(a.status)" />
         <div class="muted">
           <span aria-label="Runner and model">{{ a.runner }} · {{ a.model ?? "—" }}</span> · {{ new Date(a.startedAt).toLocaleString() }}
           <span v-if="a.endedAt"> → {{ new Date(a.endedAt).toLocaleTimeString() }}</span>

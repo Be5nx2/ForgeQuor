@@ -2,6 +2,11 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { followRuns, getJson, type Project, type Run } from "../api";
+import EmptyState from "../components/EmptyState.vue";
+import ErrorState from "../components/ErrorState.vue";
+import LoadingState from "../components/LoadingState.vue";
+import StatusChip from "../components/StatusChip.vue";
+import { runStatus } from "../status";
 
 const router = useRouter();
 const openRun = (id: number) => router.push(`/runs/${id}`);
@@ -35,7 +40,7 @@ async function load() {
     loaded.value = true;
     loadError.value = "";
   } catch (e: any) {
-    if (mine === latest) loadError.value = `Could not load the Runs: ${e.message}`;
+    if (mine === latest) loadError.value = e.message;
   }
 }
 
@@ -70,12 +75,15 @@ watch([filterProject, filterState], load);
     </select>
     <label><input v-model="showArchived" type="checkbox" /> Show archived</label>
   </form>
-  <p v-if="loadError" class="error">{{ loadError }}</p>
-  <p v-if="!loaded" class="muted">Loading the Runs…</p>
-  <p v-else-if="!visible.length" class="muted">No Run{{ filterProject || filterState || (!showArchived && runs.length) ? " matches these filters" : "" }}.</p>
+  <ErrorState v-if="loadError" title="Could not load the Runs" text="The Forgequor server did not answer. Check that it is running, then retry." :details="loadError" @retry="load" />
+  <LoadingState v-else-if="!loaded" what="Runs" />
+  <EmptyState v-else-if="!visible.length && (filterProject || filterState || (!showArchived && runs.length))" title="No Run matches these filters" text="Change the filters, or show the archived Runs, to see more." />
+  <EmptyState v-else-if="!visible.length" title="No Run yet" text="A Run is one Workflow carried out on a Project. Start one to see it here.">
+    <router-link class="btn btn-primary" to="/new">+ New Run</router-link>
+  </EmptyState>
   <ul>
     <li v-for="r in visible" :key="r.id" class="clickable" @click="openRun(r.id)">
-      <strong>{{ r.title }}</strong> <span class="badge">{{ r.state }}</span> <span v-if="r.archivedAt" class="badge">archived</span>
+      <strong>{{ r.title }}</strong> <StatusChip :status="runStatus(r.state)" /> <span v-if="r.archivedAt" class="badge">archived</span>
       <div class="muted">{{ r.workflow }} · {{ projectName(r.projectId) }}<span v-if="r.trackerRef"> · {{ r.trackerRef }}</span></div>
     </li>
   </ul>

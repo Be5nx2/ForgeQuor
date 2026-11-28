@@ -20,7 +20,7 @@ Every item must match its mockup in `docs/specs/ui-refresh/` (same layout, compo
   - Spec: `docs/specs/ui-refresh/README.md`
   - Blocked by: `ui-01`
   - Acceptance: `tokens.css` copied as is and `shell.css` turned into one layout component; sidebar matches `runs.html` (logotype FORGE/QUOR, New Run, Project button, nav Runs, Projects, Team, Workflows, Dogfood Inbox with its badge, **+ Note** at the bottom replacing the floating button); one Quota bar per vendor at the top of every screen; dark theme only; Orbitron, Inter and JetBrains Mono with system fallbacks; `aria-current` on the active entry and `:focus-visible` everywhere; existing screens render inside unchanged otherwise.
-- [ ] `ui-03` **Status system and shared states**: every status reads the same everywhere, and every screen shows the same loading, empty and error states.
+- [x] `ui-03` **Status system and shared states**: every status reads the same everywhere, and every screen shows the same loading, empty and error states.
   - Spec: `docs/specs/ui-refresh/README.md`
   - Blocked by: `ui-02`
   - Acceptance: one status component with colour, glyph and label (running blue ●, waiting for you orange ●, done green ✓, failed red ✕, idle grey ○, paused ‖) as in the mockups' chips; green and red used for results only; shared loading, empty (with the next step) and error (with Retry) components matching `states.html`; used on every existing screen.

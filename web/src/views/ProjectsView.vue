@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref } from "vue";
 import { getJson, postJson, putJson, type Project } from "../api";
+import EmptyState from "../components/EmptyState.vue";
+import ErrorState from "../components/ErrorState.vue";
+import LoadingState from "../components/LoadingState.vue";
 
 /** The Project the URL names (/projects/:id): scrolled into view once the list is loaded. */
 const props = defineProps<{ id?: number }>();
@@ -8,6 +11,10 @@ const props = defineProps<{ id?: number }>();
 const projects = ref<Project[]>([]);
 const path = ref("");
 const error = ref("");
+/** Why the list could not load (a failed save stays in `error`, above the list). */
+const loadError = ref("");
+/** False until the first list arrives, so an empty page never reads as "No Project" while it is loading. */
+const loaded = ref(false);
 /** Check commands being edited, one per line, by Project id. */
 const drafts = ref<Record<number, string>>({});
 /** Setup commands being edited, one per line, by Project id. */
@@ -21,6 +28,16 @@ const packChoices = ref<Record<number, string[]>>({});
 const arts = ref<Record<number, { artDirectionPath: string; artFolder: string }>>({});
 
 async function load() {
+  try {
+    await fetchAll();
+    loadError.value = "";
+    loaded.value = true;
+  } catch (e) {
+    loadError.value = (e as Error).message;
+  }
+}
+
+async function fetchAll() {
   projects.value = await getJson("/api/projects");
   drafts.value = Object.fromEntries(projects.value.map((p) => [p.id, p.checks.join("\n")]));
   setupDrafts.value = Object.fromEntries(projects.value.map((p) => [p.id, p.setup.join("\n")]));
@@ -111,7 +128,9 @@ onMounted(async () => {
   </form>
   <p v-if="error" class="error">{{ error }}</p>
 
-  <p v-if="!projects.length" class="muted">No Project registered yet.</p>
+  <ErrorState v-if="loadError" title="Could not load the Projects" text="The Forgequor server did not answer. Check that it is running, then retry." :details="loadError" @retry="load" />
+  <LoadingState v-else-if="!loaded" what="Projects" />
+  <EmptyState v-else-if="!projects.length" title="No Project yet" text="Forgequor works on a git repository. Register your first Project with its local path above to start a Run." />
   <ul>
     <li v-for="p in projects" :key="p.id" :id="`project-${p.id}`">
       <strong>{{ p.name }}</strong>
