@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { neighbour, type RailItem } from "../runDetail";
+import { neighbour, runnerLabel, type RailItem } from "../runDetail";
 
 /** The Run's Steps as a rail (run-detail.html): state dot, name, Iteration, Runner; sub-Steps indented. Selecting a Step is the parent's business. */
 const props = defineProps<{ rail: RailItem[]; selected: string }>();
@@ -42,7 +42,7 @@ function onKey(e: KeyboardEvent) {
         {{ r.label }} <small>{{ r.note }}</small>
         <span class="sr-only"> · {{ r.status.label }}</span>
       </span>
-      <span v-if="r.runner" class="runner" :title="r.model ? `${r.runner} · ${r.model}` : r.runner">{{ r.runner }}</span>
+      <span v-if="r.runner" class="runner" :title="runnerLabel(r)">{{ r.runner }}</span>
     </li>
   </ol>
 </template>

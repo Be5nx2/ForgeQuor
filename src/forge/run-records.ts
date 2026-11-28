@@ -13,6 +13,7 @@ export interface AttemptStart {
   attempt: number;
   runner: string;
   model?: string;
+  effort?: string;
   /** The Asset the attempt works on, for the Artist. */
   assetId?: number;
   /** The Workflow Step the attempt belongs to. */
@@ -91,9 +92,9 @@ export function createRunRecords(pool: pg.Pool, runId: number, iteration: number
   return {
     async startAttempt(s) {
       const { rows } = await pool.query(
-        `INSERT INTO step_attempts (run_id, iteration, step, attempt, runner, model, status, asset_id, step_id)
-         VALUES ($1, $2, $3, $4, $5, $6, 'running', $7, $8) RETURNING id`,
-        [runId, iteration, s.step, s.attempt, s.runner, s.model ?? null, s.assetId ?? null, s.stepId ?? null],
+        `INSERT INTO step_attempts (run_id, iteration, step, attempt, runner, model, effort, status, asset_id, step_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'running', $8, $9) RETURNING id`,
+        [runId, iteration, s.step, s.attempt, s.runner, s.model ?? null, s.effort ?? null, s.assetId ?? null, s.stepId ?? null],
       );
       return Number(rows[0].id);
     },

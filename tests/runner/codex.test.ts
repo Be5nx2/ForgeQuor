@@ -90,6 +90,17 @@ describe("Codex Runner", () => {
     expect(args).toContain('developer_instructions="You are the Artist."');
   });
 
+  it("hands the effort to Codex as a reasoning-effort config, and adds none when there is no effort", async () => {
+    const s = setup({ stdout: [started, message("ok"), completed] });
+    const runner = createCodexRunner({ env: s.env });
+
+    await runner.run({ ...step(), effort: "high" }, () => {});
+    const args = s.fake.lastInvocation().args;
+    expect(args[args.indexOf('model_reasoning_effort="high"') - 1]).toBe("-c");
+    await runner.run(step(), () => {});
+    expect(s.fake.lastInvocation().args.join(" ")).not.toContain("model_reasoning_effort");
+  });
+
   it("attaches the reference images to the prompt, one flag each, before the prompt marker", async () => {
     const s = setup({ stdout: [started, message("ok"), completed] });
     const runner = createCodexRunner({ env: s.env });

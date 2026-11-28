@@ -257,10 +257,10 @@ export async function createServer(deps: {
   app.get("/api/quota", async () => deps.forge.quota());
   // The Team page: each seat's effective Runner and model, and where each comes from.
   app.get("/api/team", async () => deps.forge.team());
-  app.put<{ Params: { seat: string }; Body: { runner?: string | null; model?: string | null } }>("/api/team/:seat", async (req, reply) => {
+  app.put<{ Params: { seat: string }; Body: { runner?: string | null; model?: string | null; effort?: string | null } }>("/api/team/:seat", async (req, reply) => {
     try {
-      const { runner, model } = req.body ?? {};
-      return await deps.forge.changeSeat(req.params.seat, { runner, model });
+      const { runner, model, effort } = req.body ?? {};
+      return await deps.forge.changeSeat(req.params.seat, { runner, model, effort });
     } catch (e) {
       if (e instanceof InvalidInputError) return reply.code(400).send({ error: e.message });
       if (e instanceof SeatLockedError) return reply.code(409).send({ error: e.message });

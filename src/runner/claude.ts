@@ -120,6 +120,7 @@ export function createClaudeRunner(options: ClaudeRunnerOptions = {}): Runner {
         "--append-system-prompt", step.instructions,
       ];
       if (step.model) args.push("--model", step.model);
+      if (step.effort) args.push("--effort", step.effort);
 
       let final: any = null;
       let rateLimit: any = null;

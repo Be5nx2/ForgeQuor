@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ARTIST_INSTRUCTIONS } from "../../src/forge/assets.js";
 import { checkAssetFile } from "../../src/forge/asset-checks.js";
+import { readCatalog } from "../../src/runner/catalog.js";
 import { createCodexRunner } from "../../src/runner/codex.js";
 
 // Opt-in: uses the real `codex` and a little of the subscription's Quota (one image).
@@ -16,6 +17,14 @@ describe.skipIf(!process.env.FORGEQUOR_SMOKE_CODEX)("real codex (smoke)", () => 
     expect(reading!.fiveHour.resetsAt).toBeInstanceOf(Date);
     expect(reading!.weekly.percentUsed).toBeGreaterThanOrEqual(0);
     expect(reading!.weekly.resetsAt).toBeInstanceOf(Date);
+  }, 30_000);
+
+  it("reads the models and their effort levels, at no cost", async () => {
+    const { codex } = await readCatalog();
+    expect(codex.fallback).toBe(false);
+    expect(codex.models.length).toBeGreaterThan(0);
+    expect(codex.models.map((m) => m.id)).toContain(codex.defaultModel);
+    for (const m of codex.models) expect(m.efforts.length).toBeGreaterThan(0);
   }, 30_000);
 
   it("generates one 16x16 sprite and returns it as a file", async () => {

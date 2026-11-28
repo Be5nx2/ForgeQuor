@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import { effortChoice, effortOptions } from "../effort";
 import { getJson, postJson, type ArtInfo, type AssetKind, type Project, type QuotaStatus, type ReviewMode, type Run, type Team, type TeamSeat, type WorkflowList, type WorkflowOption } from "../api";
 import EmptyState from "../components/EmptyState.vue";
 import ErrorState from "../components/ErrorState.vue";
@@ -74,7 +75,7 @@ const error = ref("");
 
 /** The Team as it is now: the "Seats" section starts from it, and a Run overrides only what the human changes here. */
 const team = ref<Team | null>(null);
-const seatDrafts = ref<Record<string, { runner: string; model: string }>>({});
+const seatDrafts = ref<Record<string, { runner: string; model: string; effort: string }>>({});
 /** Each vendor's latest Quota Reading, to warn next to a seat whose Runner is exhausted and to hint at the Quota left. */
 const quota = ref<QuotaStatus[]>([]);
 
@@ -82,11 +83,19 @@ async function loadSeats() {
   const [t, q] = await Promise.all([getJson<Team>("/api/team").catch(() => null), getJson<QuotaStatus[]>("/api/quota").catch((): QuotaStatus[] => [])]);
   quota.value = q;
   team.value = t;
-  seatDrafts.value = Object.fromEntries((t?.seats ?? []).map((s) => [s.seat, { runner: s.runner.value ?? "", model: s.model.value ?? "" }]));
+  seatDrafts.value = Object.fromEntries((t?.seats ?? []).map((s) => [s.seat, { runner: s.runner.value ?? "", model: s.model.value ?? "", effort: s.effort.value ?? "" }]));
 }
 
-const offeredModels = (s: TeamSeat) => team.value?.models[seatDrafts.value[s.seat]!.runner] ?? [];
-const lockedBy = (s: TeamSeat) => [s.runner.variable, s.model.variable].filter(Boolean).join(", ");
+const offeredModels = (s: TeamSeat) => team.value?.catalog[seatDrafts.value[s.seat]!.runner]?.models.map((m) => m.id) ?? [];
+const lockedBy = (s: TeamSeat) => [s.runner.variable, s.model.variable, s.effort.variable].filter(Boolean).join(", ");
+
+/** The effort select of a seat, from its draft Runner and model: the levels on offer and whether the picked one still fits. */
+const effortOf = (s: TeamSeat) => {
+  const d = seatDrafts.value[s.seat]!;
+  return effortChoice(team.value?.catalog, d.runner, d.model.trim(), d.effort);
+};
+/** A Run cannot start while a seat's effort does not fit its Runner and model. */
+const seatsInvalid = computed(() => (team.value?.seats ?? []).some((s) => effortOf(s).invalid !== null));
 
 function exhaustion(s: TeamSeat): string {
   const runner = seatDrafts.value[s.seat]!.runner;
@@ -98,13 +107,14 @@ function exhaustion(s: TeamSeat): string {
 }
 
 /** Only the fields the human changed, and never one the environment holds. */
-function seatOverrides(): Record<string, { runner?: string; model?: string }> | undefined {
-  const out: Record<string, { runner?: string; model?: string }> = {};
+function seatOverrides(): Record<string, { runner?: string; model?: string; effort?: string }> | undefined {
+  const out: Record<string, { runner?: string; model?: string; effort?: string }> = {};
   for (const s of team.value?.seats ?? []) {
     const draft = seatDrafts.value[s.seat]!;
-    const change: { runner?: string; model?: string } = {};
+    const change: { runner?: string; model?: string; effort?: string } = {};
     if (s.runner.source !== "env" && draft.runner && draft.runner !== (s.runner.value ?? "")) change.runner = draft.runner;
     if (s.model.source !== "env" && draft.model && draft.model !== (s.model.value ?? "")) change.model = draft.model;
+    if (s.effort.source !== "env" && draft.effort && draft.effort !== (s.effort.value ?? "")) change.effort = draft.effort;
     if (Object.keys(change).length) out[s.seat] = change;
   }
   return Object.keys(out).length ? out : undefined;
@@ -300,13 +310,13 @@ watch(
         </template>
         <details v-if="team" class="seats">
           <summary>Seats <span v-if="lockedSeats" class="muted">· {{ lockedSeats }} with a locked field</span></summary>
-          <p class="hint">Each seat's Runner and model for this Run only; the Team page keeps the defaults. Left as they are, the Run uses the Team's settings as they are when it starts.</p>
+          <p class="hint">Each seat's Runner, model and effort for this Run only; the Team page keeps the defaults. Left as they are, the Run uses the Team's settings as they are when it starts.</p>
           <div v-for="s in team.seats" :key="s.seat" class="seat">
             <strong>{{ s.seat }}</strong>
             <label>
               Runner
               <select v-model="seatDrafts[s.seat]!.runner" :disabled="s.runner.source === 'env'" :aria-label="`Runner of ${s.seat} for this Run`">
-                <option v-for="r in Object.keys(team.models)" :key="r" :value="r">{{ r }}</option>
+                <option v-for="r in Object.keys(team.catalog)" :key="r" :value="r">{{ r }}</option>
               </select>
             </label>
             <label>
@@ -316,6 +326,14 @@ watch(
                 <option v-for="m in offeredModels(s)" :key="m" :value="m" />
               </datalist>
             </label>
+            <label>
+              Effort
+              <select v-model="seatDrafts[s.seat]!.effort" :disabled="s.effort.source === 'env'" :aria-label="`Effort of ${s.seat} for this Run`" :aria-invalid="effortOf(s).invalid !== null">
+                <option value="">Runner default</option>
+                <option v-for="l in effortOptions(effortOf(s), seatDrafts[s.seat]!.effort)" :key="l" :value="l">{{ l }}</option>
+              </select>
+            </label>
+            <span v-if="effortOf(s).invalid" class="error" role="alert">{{ effortOf(s).invalid }}</span>
             <span v-if="lockedBy(s)" class="lock" title="Held by the environment: change it there, not here">Locked by {{ lockedBy(s) }}</span>
             <span v-if="exhaustion(s)" class="error" role="status">{{ exhaustion(s) }}</span>
           </div>
@@ -331,7 +349,7 @@ watch(
         <p v-if="error" class="error">{{ error }}</p>
         <div class="actions">
           <router-link class="btn btn-ghost" to="/runs">Cancel</router-link>
-          <button class="btn btn-primary" type="submit" :disabled="workflowsLoading || !launchable">Start Run</button>
+          <button class="btn btn-primary" type="submit" :disabled="workflowsLoading || !launchable || seatsInvalid">Start Run</button>
         </div>
       </form>
 
@@ -404,7 +422,7 @@ fieldset.asset-request .btn { align-self: flex-start; }
 .add-asset { align-self: flex-start; }
 .seats { border: 1px solid var(--border-strong); border-radius: var(--radius-md); padding: var(--sp-3) var(--sp-4); }
 .seats summary { cursor: pointer; font-weight: 600; font-size: var(--fs-sm); }
-.seat { display: grid; grid-template-columns: 8rem 1fr 1fr; gap: var(--sp-2) var(--sp-3); align-items: end; padding: var(--sp-3) 0; border-top: 1px solid var(--border); font-size: var(--fs-sm); }
+.seat { display: grid; grid-template-columns: 8rem 1fr 1fr 1fr; gap: var(--sp-2) var(--sp-3); align-items: end; padding: var(--sp-3) 0; border-top: 1px solid var(--border); font-size: var(--fs-sm); }
 .seat strong { align-self: center; }
 .seat label { display: flex; flex-direction: column; gap: 0.25rem; font-size: var(--fs-xs); color: var(--text-muted); }
 .seat select, .seat input { background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--radius-md); padding: 0.45rem 0.6rem; font: var(--fs-sm) var(--font-ui); min-width: 0; }

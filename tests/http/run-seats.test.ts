@@ -26,6 +26,24 @@ describe("POST /api/runs seat overrides", () => {
     expect(started).toMatchObject([{ seats: { developer: { runner: "codex", model: "gpt" } } }]);
   });
 
+  it("passes an effort in a seat override on, and answers 400 when the Forge refuses it", async () => {
+    const started: unknown[] = [];
+    const address = await serve({
+      startRun: async (input) => {
+        if (input.seats?.developer?.effort === "turbo") throw new InvalidSeatError('"turbo" is not an effort level; it accepts low, high.');
+        return (started.push(input), { id: 1 } as never);
+      },
+    });
+
+    const ok = await post(address, { projectId: 1, task: "A bug.", seats: { developer: { effort: "high" } } });
+    const bad = await post(address, { projectId: 1, task: "A bug.", seats: { developer: { effort: "turbo" } } });
+
+    expect(ok.status).toBe(201);
+    expect(started).toMatchObject([{ seats: { developer: { effort: "high" } } }]);
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toEqual({ error: '"turbo" is not an effort level; it accepts low, high.' });
+  });
+
   it("answers 400 for an unknown seat or Runner, and 409 for a field the environment holds", async () => {
     const address = await serve({
       startRun: async (input) => {

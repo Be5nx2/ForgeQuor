@@ -2,6 +2,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { readCatalog } from "../../src/runner/catalog.js";
 import { createClaudeRunner } from "../../src/runner/claude.js";
 
 // Opt-in: uses the real `claude` and a little of the subscription's Quota.
@@ -40,6 +41,12 @@ describe.skipIf(!process.env.FORGEQUOR_SMOKE_CLAUDE)("real claude (smoke)", () =
     const lost = await runner.run({ ...base, prompt: "hi", session: { resume: "00000000-0000-4000-8000-000000000000" } }, () => {});
     expect(lost).toMatchObject({ status: "failed", sessionLost: true });
   }, 240_000);
+
+  it("reads the effort levels from its help, at no cost", async () => {
+    const { claude } = await readCatalog();
+    expect(claude.fallback).toBe(false);
+    expect(claude.efforts.length).toBeGreaterThan(0);
+  }, 30_000);
 
   it("reads the Quota with /usage, which costs none", async () => {
     const reading = await createClaudeRunner().readQuota!();

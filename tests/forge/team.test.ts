@@ -6,6 +6,7 @@ import type pg from "pg";
 import { createForge, InvalidInputError, SeatLockedError, type Forge, type ForgeDeps, type Project, type RunDetail } from "../../src/forge/forge.js";
 import { seatSettingsFromEnv } from "../../src/forge/seats.js";
 import { effectiveSeats } from "../../src/forge/team.js";
+import { fallbackCatalog } from "../../src/runner/catalog.js";
 import type { StepRequest, StepResult } from "../../src/runner/runner.js";
 import { createTestDatabase } from "../harness/database.js";
 import { createFakeCodeHost } from "../harness/fake-codehost.js";
@@ -91,13 +92,24 @@ describe("effectiveSeats", () => {
 });
 
 describe("the Team", () => {
-  it("lists every seat with its default Runner, and the model aliases per Runner", async () => {
+  it("lists every seat with its default Runner, and the built-in Catalog when none was read", async () => {
     const team = await forgeWith().team();
 
     expect(team.seats).toHaveLength(8);
     expect(seat(team, "reviewer-b").runner).toEqual({ value: "codex", source: "default" });
-    expect(team.models.claude).toEqual(["opus", "sonnet", "haiku"]);
-    expect(team.models.codex.length).toBeGreaterThan(0);
+    expect(team.catalog.claude.models.map((m) => m.id)).toEqual(["opus", "sonnet", "haiku"]);
+    expect(team.catalog.claude.fallback).toBe(true);
+    expect(team.catalog.codex.fallback).toBe(true);
+  });
+
+  it("carries the Catalog the Forge was given, kept as read", async () => {
+    const catalog = fallbackCatalog();
+    catalog.codex = { models: [{ id: "gpt-6.1-terra", efforts: ["low", "high"], defaultEffort: "low" }], defaultModel: "gpt-6.1-terra", efforts: ["low", "high"], fallback: false };
+
+    const team = await forgeWith({ catalog }).team();
+
+    expect(team.catalog).toEqual(catalog);
+    expect((await forgeWith({ catalog }).changeSeat("developer", { model: "x" })).catalog).toEqual(catalog);
   });
 
   it("keeps a saved setting across Forges (a restart), and clears a field with null", async () => {
@@ -126,6 +138,124 @@ describe("the Team", () => {
     const team = await f.changeSeat("developer", { runner: "codex" });
 
     expect(seat(team, "developer")).toMatchObject({ runner: { value: "codex", source: "team" }, model: { value: "env-model", source: "env", variable: "FORGEQUOR_DEVELOPER_MODEL" } });
+  });
+});
+
+const effortCatalog = () => {
+  const catalog = fallbackCatalog();
+  catalog.codex = {
+    models: [
+      { id: "gpt-terra", efforts: ["low", "medium", "high"], defaultEffort: "low" },
+      { id: "gpt-sol", efforts: ["low", "ultra"], defaultEffort: "low" },
+    ],
+    defaultModel: "gpt-terra",
+    efforts: ["low", "medium", "high"],
+    fallback: false,
+  };
+  return catalog;
+};
+
+describe("a Seat's effort", () => {
+  it("is set from the environment, then the Team, else the Runner's default, with its source", async () => {
+    const f = forgeWith({ seats: seatSettingsFromEnv({ FORGEQUOR_DEVELOPER_EFFORT: "max", FORGEQUOR_ARCHITECT_EFFORT: " " }), catalog: effortCatalog() });
+
+    const team = await f.changeSeat("griller", { effort: "high" });
+
+    expect(seat(team, "developer").effort).toEqual({ value: "max", source: "env", variable: "FORGEQUOR_DEVELOPER_EFFORT" });
+    expect(seat(team, "griller").effort).toEqual({ value: "high", source: "team" });
+    expect(seat(team, "architect").effort).toEqual({ value: null, source: "default" });
+  });
+
+  it("is kept across Forges, and cleared with null or an empty text", async () => {
+    await forgeWith().changeSeat("developer", { effort: "low" });
+    expect(seat(await forgeWith().team(), "developer").effort).toEqual({ value: "low", source: "team" });
+
+    expect(seat(await forgeWith().changeSeat("developer", { effort: null }), "developer").effort).toEqual({ value: null, source: "default" });
+    await forgeWith().changeSeat("developer", { effort: "low" });
+    expect(seat(await forgeWith().changeSeat("developer", { effort: "" }), "developer").effort.value).toBeNull();
+  });
+
+  it("leaves the Runner and model alone when only the effort changes", async () => {
+    const f = forgeWith({ catalog: effortCatalog() });
+    await f.changeSeat("reviewer-b", { runner: "codex", model: "gpt-sol", effort: "ultra" });
+
+    const team = await f.changeSeat("reviewer-b", { effort: "low" });
+
+    expect(seat(team, "reviewer-b")).toMatchObject({ runner: { value: "codex" }, model: { value: "gpt-sol" }, effort: { value: "low" } });
+  });
+
+  it("is refused when the Runner has no such level, naming the accepted ones, saving nothing", async () => {
+    const f = forgeWith({ catalog: effortCatalog() });
+
+    await expect(f.changeSeat("developer", { effort: "ultra" })).rejects.toThrow(InvalidInputError);
+    await expect(f.changeSeat("developer", { effort: "ultra" })).rejects.toThrow(/low, medium, high, xhigh, max/);
+    await expect(f.changeSeat("developer", { effort: "turbo" })).rejects.toThrow(/not an effort level/);
+    expect((await pool.query("SELECT 1 FROM team_seats")).rowCount).toBe(0);
+  });
+
+  it("follows the Seat's Codex model: a level only another model has is refused", async () => {
+    const f = forgeWith({ catalog: effortCatalog() });
+    await f.changeSeat("reviewer-b", { model: "gpt-sol", effort: "ultra" });
+
+    await expect(f.changeSeat("reviewer-b", { effort: "medium" })).rejects.toThrow(/with model gpt-sol; it accepts low, ultra/);
+    // A model the Catalog does not know gets the default model's levels.
+    expect(seat(await f.changeSeat("reviewer-b", { model: "gpt-new", effort: "medium" }), "reviewer-b").effort.value).toBe("medium");
+  });
+
+  it("refuses a Runner or model change that strands the stored effort, saving nothing of it", async () => {
+    const f = forgeWith({ catalog: effortCatalog() });
+    await f.changeSeat("reviewer-b", { model: "gpt-sol", effort: "ultra" });
+
+    await expect(f.changeSeat("reviewer-b", { model: "gpt-terra" })).rejects.toThrow(/"ultra" is not an effort level of codex with model gpt-terra/);
+    await expect(f.changeSeat("reviewer-b", { runner: "claude" })).rejects.toThrow(/of claude with model gpt-sol; it accepts low, medium, high, xhigh, max/);
+    expect(seat(await f.team(), "reviewer-b")).toMatchObject({ runner: { source: "default" }, model: { value: "gpt-sol" }, effort: { value: "ultra" } });
+    // Changing both together to something that fits is fine.
+    const ok = await f.changeSeat("reviewer-b", { model: "gpt-terra", effort: "high" });
+    expect(seat(ok, "reviewer-b").effort.value).toBe("high");
+  });
+
+  it("is locked when the environment holds it, naming the variable; the other fields stay free", async () => {
+    const f = forgeWith({ seats: seatSettingsFromEnv({ FORGEQUOR_DEVELOPER_EFFORT: "max" }) });
+
+    await expect(f.changeSeat("developer", { effort: "low" })).rejects.toThrow(SeatLockedError);
+    await expect(f.changeSeat("developer", { effort: "low" })).rejects.toThrow(/FORGEQUOR_DEVELOPER_EFFORT/);
+    expect(seat(await f.changeSeat("developer", { model: "opus" }), "developer").model.value).toBe("opus");
+  });
+});
+
+describe("Runs and a Seat's effort", () => {
+  it("record the effort on each Step attempt, and the Runner default as null", async () => {
+    const f = forgeWith();
+    const p = await project(f);
+    const before = await bugfix(f, p);
+    expect(before.attempts[0]!.effort).toBeNull();
+
+    await f.changeSeat("developer", { effort: "high" });
+    const after = await bugfix(f, p);
+
+    expect(after.attempts[0]).toMatchObject({ runner: "claude", effort: "high" });
+    expect(claude.steps.filter((s) => !isReviewer(s)).at(-1)).toMatchObject({ effort: "high" });
+  });
+
+  it("let the environment win over the Team", async () => {
+    const f = forgeWith({ seats: seatSettingsFromEnv({ FORGEQUOR_DEVELOPER_EFFORT: "max" }) });
+    const p = await project(f);
+    await pool.query("INSERT INTO team_seats (seat, effort) VALUES ('developer', 'low')");
+
+    const run = await bugfix(f, p);
+
+    expect(run.attempts[0]!.effort).toBe("max");
+  });
+
+  it("freeze the effort with the Run's other Seat settings", async () => {
+    const f = forgeWith();
+    const p = await project(f);
+    await f.changeSeat("developer", { effort: "low" });
+    const started = await f.startRun({ projectId: p.id, workflow: "bugfix", task: "The player cannot jump twice." });
+    await f.whenIdle();
+    await f.changeSeat("developer", { effort: "max" });
+
+    expect((await pool.query("SELECT seats FROM runs WHERE id = $1", [started.id])).rows[0].seats.developer.effort).toBe("low");
   });
 });
 

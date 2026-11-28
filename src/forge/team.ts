@@ -1,12 +1,7 @@
 import type pg from "pg";
+import { effortProblem, type RunnerCatalog } from "../runner/catalog.js";
 import { InvalidInputError, InvalidSeatError, SeatLockedError } from "./errors.js";
 import { DEFAULT_RUNNERS, RUNNER_NAMES, SEAT_NAMES, seatVariable, type RunnerName, type SeatName, type SeatSetting, type SeatSettings } from "./seats.js";
-
-/** The model aliases the Team page offers per Runner. Any other identifier is accepted as typed. */
-export const MODEL_ALIASES: Record<RunnerName, string[]> = {
-  claude: ["opus", "sonnet", "haiku"],
-  codex: ["gpt-6.2-sol", "gpt-6.2-astra", "gpt-6-luna"],
-};
 
 export type SettingSource = "env" | "team" | "default";
 
@@ -22,53 +17,57 @@ export interface TeamSeat {
   seat: SeatName;
   runner: EffectiveField;
   model: EffectiveField;
+  /** null means the Runner's own default effort. */
+  effort: EffectiveField;
 }
 
 export interface Team {
   seats: TeamSeat[];
-  /** The aliases offered per Runner. */
-  models: Record<RunnerName, string[]>;
+  /** What each Runner offers: its models and effort levels, and whether the list is the built-in one (the CLI could not be read). */
+  catalog: RunnerCatalog;
 }
 
 /** What the Team page changes: a field left out stays as it is, null or empty clears it. */
 export interface TeamChange {
   runner?: string | null;
   model?: string | null;
+  effort?: string | null;
 }
 
 /** Each field as it is in effect: the environment's, else the Team's, else the default. */
 export function effectiveSeats(env: SeatSettings, team: SeatSettings): TeamSeat[] {
   return SEAT_NAMES.map((seat) => {
     const field = (name: keyof SeatSetting, fallback: string | null): EffectiveField => {
-      const variable = seatVariable(seat, name === "runner" ? "RUNNER" : "MODEL");
+      const variable = seatVariable(seat, name === "runner" ? "RUNNER" : name === "model" ? "MODEL" : "EFFORT");
       const fromEnv = env[seat]?.[name];
       if (fromEnv) return { value: fromEnv, source: "env", variable };
       const fromTeam = team[seat]?.[name];
       if (fromTeam) return { value: fromTeam, source: "team" };
       return { value: fallback, source: "default" };
     };
-    return { seat, runner: field("runner", DEFAULT_RUNNERS[seat]), model: field("model", null) };
+    return { seat, runner: field("runner", DEFAULT_RUNNERS[seat]), model: field("model", null), effort: field("effort", null) };
   });
 }
 
 /** The refusal for a field the environment holds. */
-const lockedMessage = (seat: SeatName, field: "runner" | "model") =>
-  `The ${field} of seat "${seat}" is set by ${seatVariable(seat, field === "runner" ? "RUNNER" : "MODEL")}; unset it and restart Forgequor to change it here.`;
+const lockedMessage = (seat: SeatName, field: "runner" | "model" | "effort") =>
+  `The ${field} of seat "${seat}" is set by ${seatVariable(seat, field === "runner" ? "RUNNER" : field === "model" ? "MODEL" : "EFFORT")}; unset it and restart Forgequor to change it here.`;
 
 /**
  * The per-Run seat overrides a launch gives, checked like the Team page's: an unknown seat or Runner is an
- * InvalidSeatError, a field the environment holds a SeatLockedError. Returns what to keep (empty fields dropped).
+ * InvalidSeatError, a field the environment holds a SeatLockedError. An effort the seat could not run (after the override,
+ * with the Team's settings under it) is an InvalidSeatError naming the accepted levels. Returns what to keep (empty fields dropped).
  */
-export function parseSeatOverrides(env: SeatSettings, given: unknown): SeatSettings {
+export function parseSeatOverrides(env: SeatSettings, given: unknown, team: TeamSeat[], catalog: RunnerCatalog): SeatSettings {
   if (given === undefined || given === null) return {};
-  if (typeof given !== "object" || Array.isArray(given)) throw new InvalidSeatError("seats must map a seat to its runner and/or model.");
+  if (typeof given !== "object" || Array.isArray(given)) throw new InvalidSeatError("seats must map a seat to its runner, model and/or effort.");
   const kept: SeatSettings = {};
   for (const [name, value] of Object.entries(given)) {
     if (!SEAT_NAMES.includes(name as SeatName)) throw new InvalidSeatError(`"${name}" is not a seat; the seats are ${SEAT_NAMES.join(", ")}.`);
     const seat = name as SeatName;
-    if (!value || typeof value !== "object" || Array.isArray(value)) throw new InvalidSeatError(`The override of seat "${seat}" must give a runner and/or a model.`);
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new InvalidSeatError(`The override of seat "${seat}" must give a runner, a model and/or an effort.`);
     const setting: SeatSetting = {};
-    for (const field of ["runner", "model"] as const) {
+    for (const field of ["runner", "model", "effort"] as const) {
       const raw = (value as Record<string, unknown>)[field];
       if (raw !== undefined && raw !== null && typeof raw !== "string") throw new InvalidSeatError(`${field} must be text.`);
       if (!raw?.trim()) continue;
@@ -77,7 +76,12 @@ export function parseSeatOverrides(env: SeatSettings, given: unknown): SeatSetti
       if (field === "runner" && !RUNNER_NAMES.includes(text as RunnerName)) throw new InvalidSeatError(`"${text}" is not a Runner; it must be ${RUNNER_NAMES.join(" or ")}.`);
       setting[field] = text;
     }
-    if (setting.runner || setting.model) kept[seat] = setting;
+    if (!(setting.runner || setting.model || setting.effort)) continue;
+    // The seat as the Run would have it: its effort must exist for its Runner and model, whichever field the override touches.
+    const now = team.find((t) => t.seat === seat)!;
+    const problem = effortProblem(catalog, setting.runner ?? now.runner.value ?? DEFAULT_RUNNERS[seat], setting.model ?? now.model.value, setting.effort ?? now.effort.value);
+    if (problem) throw new InvalidSeatError(`Seat "${seat}": ${problem}`);
+    kept[seat] = setting;
   }
   return kept;
 }
@@ -92,7 +96,7 @@ export function withOverrides(settings: SeatSettings, overrides: SeatSettings): 
 /** The settings that resolve to what `effectiveSeats` says, for `buildSeats`. */
 export function settingsOf(seats: TeamSeat[]): SeatSettings {
   const settings: SeatSettings = {};
-  for (const s of seats) settings[s.seat] = { runner: s.runner.value ?? undefined, model: s.model.value ?? undefined };
+  for (const s of seats) settings[s.seat] = { runner: s.runner.value ?? undefined, model: s.model.value ?? undefined, effort: s.effort.value ?? undefined };
   return settings;
 }
 
@@ -100,29 +104,30 @@ export function settingsOf(seats: TeamSeat[]): SeatSettings {
 export interface TeamStore {
   /** Each seat's effective Runner and model, read now. */
   effective(): Promise<TeamSeat[]>;
-  /** The effective seats with the aliases on offer. */
+  /** The effective seats with the Runner Catalog on offer. */
   team(): Promise<Team>;
-  /** Saves a seat's Runner and/or model; refuses an unknown seat or Runner, and a field the environment holds. */
+  /** Saves a seat's Runner, model and/or effort; refuses an unknown seat, Runner or effort (or one the Runner and model cannot take), and a field the environment holds. */
   change(seat: string, change: TeamChange): Promise<Team>;
 }
 
-export function createTeamStore(pool: pg.Pool, env: SeatSettings): TeamStore {
+export function createTeamStore(pool: pg.Pool, env: SeatSettings, catalog: RunnerCatalog): TeamStore {
   async function saved(): Promise<SeatSettings> {
-    const { rows } = await pool.query("SELECT seat, runner, model FROM team_seats");
+    const { rows } = await pool.query("SELECT seat, runner, model, effort FROM team_seats");
     const settings: SeatSettings = {};
-    for (const r of rows) if (SEAT_NAMES.includes(r.seat)) settings[r.seat as SeatName] = { runner: r.runner ?? undefined, model: r.model ?? undefined };
+    for (const r of rows) if (SEAT_NAMES.includes(r.seat)) settings[r.seat as SeatName] = { runner: r.runner ?? undefined, model: r.model ?? undefined, effort: r.effort ?? undefined };
     return settings;
   }
   const effective = async () => effectiveSeats(env, await saved());
-  const team = async (): Promise<Team> => ({ seats: await effective(), models: MODEL_ALIASES });
+  const team = async (): Promise<Team> => ({ seats: await effective(), catalog });
 
   async function change(seatName: string, change: TeamChange): Promise<Team> {
     if (!SEAT_NAMES.includes(seatName as SeatName)) throw new InvalidInputError(`"${seatName}" is not a seat; the seats are ${SEAT_NAMES.join(", ")}.`);
     const seat = seatName as SeatName;
     const touchesRunner = change.runner !== undefined;
     const touchesModel = change.model !== undefined;
-    if (!touchesRunner && !touchesModel) throw new InvalidInputError("Give a runner and/or a model.");
-    for (const field of ["runner", "model"] as const) {
+    const touchesEffort = change.effort !== undefined;
+    if (!touchesRunner && !touchesModel && !touchesEffort) throw new InvalidInputError("Give a runner, a model and/or an effort.");
+    for (const field of ["runner", "model", "effort"] as const) {
       const given = change[field];
       if (given !== undefined && given !== null && typeof given !== "string") throw new InvalidInputError(`${field} must be text.`);
       if (given !== undefined && env[seat]?.[field]) {
@@ -132,12 +137,23 @@ export function createTeamStore(pool: pg.Pool, env: SeatSettings): TeamStore {
     const runner = touchesRunner ? change.runner?.trim().toLowerCase() || null : undefined;
     if (runner && !RUNNER_NAMES.includes(runner as RunnerName)) throw new InvalidInputError(`"${runner}" is not a Runner; it must be ${RUNNER_NAMES.join(" or ")}.`);
     const model = touchesModel ? change.model?.trim() || null : undefined;
+    const effort = touchesEffort ? change.effort?.trim() || null : undefined;
+    // The seat as it would be after the change: its effort must still exist for its Runner and model, whatever was touched.
+    const now = effectiveSeats(env, await saved()).find((s) => s.seat === seat)!;
+    const after = {
+      runner: runner === undefined ? now.runner.value : runner ?? DEFAULT_RUNNERS[seat],
+      model: model === undefined ? now.model.value : model,
+      effort: effort === undefined ? now.effort.value : effort,
+    };
+    const problem = effortProblem(catalog, after.runner ?? DEFAULT_RUNNERS[seat], after.model, after.effort);
+    if (problem) throw new InvalidInputError(`Seat "${seat}": ${problem}`);
     // One statement: a field left out keeps its value, so two changes to one seat cannot undo each other.
     await pool.query(
-      `INSERT INTO team_seats (seat, runner, model) VALUES ($1, $2, $3)
-       ON CONFLICT (seat) DO UPDATE SET runner = CASE WHEN $4 THEN EXCLUDED.runner ELSE team_seats.runner END,
-                                        model  = CASE WHEN $5 THEN EXCLUDED.model  ELSE team_seats.model  END`,
-      [seat, runner ?? null, model ?? null, touchesRunner, touchesModel],
+      `INSERT INTO team_seats (seat, runner, model, effort) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (seat) DO UPDATE SET runner = CASE WHEN $5 THEN EXCLUDED.runner ELSE team_seats.runner END,
+                                        model  = CASE WHEN $6 THEN EXCLUDED.model  ELSE team_seats.model  END,
+                                        effort = CASE WHEN $7 THEN EXCLUDED.effort ELSE team_seats.effort END`,
+      [seat, runner ?? null, model ?? null, effort ?? null, touchesRunner, touchesModel, touchesEffort],
     );
     return team();
   }

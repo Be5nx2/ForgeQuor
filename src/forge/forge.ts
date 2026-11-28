@@ -2,6 +2,7 @@ import { existsSync, rmSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import type pg from "pg";
+import { fallbackCatalog, type RunnerCatalog } from "../runner/catalog.js";
 import type { Runner } from "../runner/runner.js";
 import { bugfixAgent, bugfixWorkflow, developerAgent, developerWorkflow } from "./developer.js";
 import { createDogfoodNotes } from "./dogfood.js";
@@ -187,7 +188,7 @@ export interface Forge {
    * for an empty selection or a bad ID, DogfoodNoteNotFoundError for an unknown note, DogfoodExportError when the folder cannot be written.
    */
   exportDogfoodNotes(ids: number[]): Promise<DogfoodExport>;
-  /** Each seat's effective Runner and model with where each comes from (environment, Team, default), and the model aliases on offer. */
+  /** Each seat's effective Runner and model with where each comes from (environment, Team, default), and the Runner Catalog on offer. */
   team(): Promise<Team>;
   /** Saves a seat's Runner and/or model (the Team page). Throws InvalidInputError for an unknown seat or Runner, SeatLockedError for a field the environment holds. */
   changeSeat(seat: string, change: TeamChange): Promise<Team>;
@@ -219,6 +220,8 @@ export interface ForgeDeps {
    * naming it when a Step needs it, not at startup.
    */
   seats?: SeatSettings;
+  /** What the Runners' CLIs offer, read once at startup (`readCatalog`). Default: the built-in lists. */
+  catalog?: RunnerCatalog;
   codeHost: CodeHost;
   /** Folder under which each Run's worktree is created, outside the Projects' checkouts. */
   worktreesRoot: string;
@@ -301,6 +304,7 @@ function toAttempt(r: Record<string, any>): StepAttempt {
     attempt: r.attempt,
     runner: r.runner,
     model: r.model,
+    effort: r.effort,
     assetId: r.asset_id === null ? null : Number(r.asset_id),
     status: r.status,
     startedAt: r.started_at,
@@ -426,7 +430,8 @@ export function createForge(deps: ForgeDeps): Forge {
   for (const [seat, model] of [["developer", deps.developerModel], ["artist", deps.artistModel]] as const) {
     if (model && !envSettings[seat]?.model) envSettings[seat] = { ...envSettings[seat], model };
   }
-  const teamStore = createTeamStore(pool, envSettings);
+  const catalog = deps.catalog ?? fallbackCatalog();
+  const teamStore = createTeamStore(pool, envSettings, catalog);
   /**
    * The seats a Run works through: its frozen ones, else (its first start) the Team's as they are now with the Run's
    * overrides laid over them, frozen from then on. So a Team change applies to the next Runs without a restart, and not
@@ -1123,7 +1128,7 @@ export function createForge(deps: ForgeDeps): Forge {
 
     async startRun({ projectId, trackerRef, workflow = "developer", seats, ...input }) {
       // Refused before anything else, as the Team page refuses a bad change.
-      const seatOverrides = parseSeatOverrides(envSettings, seats);
+      const seatOverrides = parseSeatOverrides(envSettings, seats, await teamStore.effective(), catalog);
       const { rows: found } = await pool.query(`SELECT ${COLUMNS} FROM projects WHERE id = $1`, [projectId]);
       if (!found[0]) throw new Error(`No Project ${projectId}.`);
       const project = toProject(found[0]);

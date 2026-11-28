@@ -146,6 +146,7 @@ export function createCodexRunner(options: CodexRunnerOptions = {}): Runner {
       "-c", `developer_instructions=${JSON.stringify(step.instructions)}`,
     ];
     if (step.model) args.push("-m", step.model);
+    if (step.effort) args.push("-c", `model_reasoning_effort=${JSON.stringify(step.effort)}`);
     args.push("-"); // the prompt comes on standard input
 
     let threadId: string | null = null;

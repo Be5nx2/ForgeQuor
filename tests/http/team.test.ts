@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { InvalidInputError, SeatLockedError, type Forge } from "../../src/forge/forge.js";
+import { fallbackCatalog } from "../../src/runner/catalog.js";
 import { createServer } from "../../src/http/server.js";
 
 let close: (() => Promise<void>) | undefined;
@@ -17,7 +18,7 @@ const put = (address: string, seat: string, body: unknown) =>
   fetch(`${address}/api/team/${seat}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
 describe("the Team routes", () => {
-  const team = { seats: [], models: { claude: ["opus"], codex: ["gpt"] } };
+  const team = { seats: [], catalog: fallbackCatalog() };
 
   it("GET /api/team returns the Forge's Team", async () => {
     const address = await serve({ team: async () => team });
@@ -36,6 +37,16 @@ describe("the Team routes", () => {
 
     expect(res.status).toBe(200);
     expect(calls).toEqual([["developer", { runner: "codex", model: "gpt" }]]);
+  });
+
+  it("PUT /api/team/:seat passes the effort on, null included", async () => {
+    const calls: unknown[] = [];
+    const address = await serve({ changeSeat: async (seat, change) => (calls.push([seat, change]), team) });
+
+    await put(address, "developer", { effort: "high" });
+    await put(address, "developer", { effort: null });
+
+    expect(calls).toEqual([["developer", { effort: "high" }], ["developer", { effort: null }]]);
   });
 
   it("answers 400 for an unknown seat or Runner, and 409 for a seat the environment holds", async () => {

@@ -83,6 +83,9 @@ describe.sequential("bugfix: a bug description becomes a reviewed fix (solo)", (
     project = await registerProject(cloneSandbox("bugfix"), { checks: [`test "$(sh ${buggy} 2 3)" = 5`], max: 1 });
     const workflows = await ok<{ workflows: { name: string; inputs: string[] }[] }>("GET", `/api/projects/${project.id}/workflows`);
     expect(workflows.workflows.find((w) => w.name === "bugfix")?.inputs).toEqual(["task", "review"]);
+    // An effort set on the Team page reaches the next Step attempt (the cheapest level, so the BA stays cheap).
+    const team = await ok<any>("PUT", "/api/team/developer", { effort: "low" });
+    expect(team.seats.find((s: any) => s.seat === "developer").effort).toEqual({ value: "low", source: "team" });
     run = await ok<Run>("POST", "/api/runs", {
       projectId: project.id,
       workflow: "bugfix",
@@ -92,6 +95,8 @@ describe.sequential("bugfix: a bug description becomes a reviewed fix (solo)", (
     expect(run.review).toBe("solo");
     const detail = await nextGate(run.id);
     expect(openGate(detail)?.kind).toBe("final");
+    expect(detail.attempts.find((a) => a.step === "developer")).toMatchObject({ effort: "low" });
+    await ok("PUT", "/api/team/developer", { effort: null });
     expect(stepLine(detail)).toBe("developer:done checks:done review:done publish:done final:running");
     const reviews = (detail as any).reviews as { author: string; verdict: string }[];
     expect(reviews.at(-1)).toMatchObject({ author: "reviewer-a", verdict: "pass" });
