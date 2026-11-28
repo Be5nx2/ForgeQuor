@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type pg from "pg";
-import { createForge, RunStateError, type Forge, type Project } from "../../src/forge/forge.js";
+import { createForge, RemovalInterruptedError, RunStateError, type Forge, type Project } from "../../src/forge/forge.js";
 import { createTestDatabase } from "../harness/database.js";
 import { createFakeCodeHost } from "../harness/fake-codehost.js";
 import { createFakeRunner } from "../harness/fake-runner.js";
@@ -138,22 +138,6 @@ describe("removing a Project without active Runs", () => {
     expect(await runsOf(again.id)).toBe(0);
   });
 
-  it.each(["queued", "running", "waiting", "paused", "approved"])("refuses a Project with a %s Run and changes nothing", async (state) => {
-    const { project } = await newProject();
-    const finished = await runIn(project, "merged");
-    const active = await runIn(project, state);
-
-    const attempt = forge.removeProject(project.id);
-
-    await expect(attempt).rejects.toBeInstanceOf(RunStateError);
-    await expect(attempt).rejects.toThrow(/1 active Run/);
-    expect(await projectExists(project.id)).toBe(true);
-    expect(await runsOf(project.id)).toBe(2);
-    expect(await markOf(project.id)).toBeNull();
-    expect(existsSync(finished.worktreePath!)).toBe(true);
-    expect((await forge.getRun(active.id)).state).toBe(state);
-  });
-
   it("refuses an unknown Project", async () => {
     await expect(forge.removeProject(999999)).rejects.toThrow("No Project 999999.");
   });
@@ -191,6 +175,104 @@ describe("removing a Project without active Runs", () => {
     await forge.whenIdle();
 
     expect((await forge.getRun(queued.id)).state).toBe("queued");
+  });
+});
+
+describe("removing a Project with active Runs", () => {
+  it.each(["queued", "running", "waiting", "paused", "approved"])("abandons a %s Run like the Abandon button, then removes everything", async (state) => {
+    const { project, repo } = await newProject();
+    const finished = await runIn(project, "merged");
+    const active = await runIn(project, state);
+    git(repo.path, "branch", "keep-me");
+
+    await forge.removeProject(project.id);
+
+    expect(await projectExists(project.id)).toBe(false);
+    expect(await runsOf(project.id)).toBe(0);
+    expect(codeHost.pullRequests.find((p) => p.number === active.prNumber)!.state).toBe("closed");
+    expect(codeHost.deletedBranches.map((b) => b.branch)).toContain(active.branch);
+    for (const run of [finished, active]) expect(existsSync(run.worktreePath!)).toBe(false);
+    expect(git(repo.path, "branch", "--list")).not.toContain(active.branch);
+    expect(git(repo.path, "branch", "--list")).toContain("keep-me");
+  });
+
+  it("ends an Approved Run whose pull request was merged as Merged, and closes nothing", async () => {
+    const { project } = await newProject();
+    const approved = await runIn(project, "approved");
+    codeHost.setState(approved.prNumber!, "merged");
+
+    await forge.removeProject(project.id);
+
+    expect(codeHost.pullRequests.find((p) => p.number === approved.prNumber)!.state).toBe("merged");
+    expect(codeHost.deletedBranches.map((b) => b.branch)).not.toContain(approved.branch);
+    expect(await projectExists(project.id)).toBe(false);
+  });
+
+  it("stops a running Step", async () => {
+    const { project } = await newProject();
+    let aborted = false;
+    let listening = false;
+    runner.use((step) => {
+      writeFileSync(join(step.cwd, "slow.gd"), "extends Node\n");
+      return new Promise<void>((resolve) => {
+        listening = true;
+        step.signal?.addEventListener("abort", () => {
+          aborted = true;
+          resolve();
+        });
+      });
+    });
+    const started = await forge.startRun({ projectId: project.id, task: "Do it slowly." });
+    await vi.waitFor(() => expect(listening).toBe(true));
+    expect((await forge.getRun(started.id)).state).toBe("running");
+
+    await forge.removeProject(project.id);
+
+    expect(aborted).toBe(true);
+    expect(await projectExists(project.id)).toBe(false);
+  });
+
+  it("stops at a code host failure on the second Run, keeps the Project and its mark, and a retry finishes", async () => {
+    const { project } = await newProject();
+    const first = await runIn(project, "approved");
+    const second = await runIn(project, "approved");
+    const third = await runIn(project, "approved");
+    codeHost.failStateReadOf(second.prNumber!, "GitHub is unreachable");
+
+    const attempt = forge.removeProject(project.id);
+
+    await expect(attempt).rejects.toBeInstanceOf(RemovalInterruptedError);
+    await expect(attempt).rejects.toThrow(new RegExp(`Run ${second.id} \\(pull request #${second.prNumber}\\).*GitHub is unreachable`));
+    expect(await projectExists(project.id)).toBe(true);
+    expect(await markOf(project.id)).toBeInstanceOf(Date);
+    expect((await forge.getRun(first.id)).state).toBe("abandoned");
+    expect((await forge.getRun(second.id)).state).toBe("approved");
+    expect((await forge.getRun(third.id)).state).toBe("approved");
+    // Still marked: nothing starts on it.
+    await expect(forge.startRun({ projectId: project.id, task: "Nope." })).rejects.toBeInstanceOf(RunStateError);
+
+    codeHost.failStateReadOf(second.prNumber!, null);
+    await forge.removeProject(project.id);
+
+    expect(await projectExists(project.id)).toBe(false);
+    expect(await runsOf(project.id)).toBe(0);
+    for (const run of [first, second, third]) expect(codeHost.pullRequests.find((p) => p.number === run.prNumber)!.state).toBe("closed");
+  });
+
+  it("sets the mark before the first abandon, so a freed slot starts no Queued Run", async () => {
+    const { project } = await newProject();
+    const working = await runIn(project, "waiting");
+    const queued = await runIn(project, "waiting");
+    await pool.query("UPDATE runs SET state = 'queued' WHERE id = $1", [queued.id]);
+    codeHost.failStateReadOf(queued.prNumber!, "GitHub is unreachable");
+
+    await expect(forge.removeProject(project.id)).rejects.toBeInstanceOf(RemovalInterruptedError);
+    await forge.whenIdle();
+
+    expect((await forge.getRun(working.id)).state).toBe("abandoned");
+    expect((await forge.getRun(queued.id)).state).toBe("queued");
+    codeHost.failStateReadOf(queued.prNumber!, null);
+    await forge.removeProject(project.id);
   });
 });
 

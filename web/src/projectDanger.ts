@@ -46,12 +46,12 @@ export interface RemovalPreviewLike {
 
 /** What the "Remove this Project" confirmation shows, and whether Remove is enabled. */
 export interface RemovalOffer {
-  /** Remove is enabled: the typed name matches exactly and nothing blocks the removal. */
+  /** Remove is enabled: the typed name matches exactly. */
   canRemove: boolean;
   /** Says how many Runs will be deleted. */
   runsText: string;
-  /** One line per active Run that blocks the removal (until a removal can abandon them); empty when none. */
-  blockedBy: string[];
+  /** One line per active Run the removal will abandon, with the pull request it will close; empty when none. */
+  abandons: string[];
 }
 
 /** The typed confirmation matches the Project's name exactly (case and spaces count). */
@@ -62,13 +62,31 @@ export function nameMatches(project: { name: string }, typed: string): boolean {
 /** The offer of "Remove this Project", from the preview read and what the human has typed so far. */
 export function removalOffer(project: { name: string }, preview: RemovalPreviewLike, typed: string): RemovalOffer {
   const n = preview.runs;
-  const blockedBy = preview.activeRuns.map((r) => `Run ${r.id} "${r.title}" is ${r.state}${r.prNumber ? ` (pull request #${r.prNumber})` : ""}`);
+  const abandons = preview.activeRuns.map((r) => `Run ${r.id} "${r.title}" (${r.state}) will be abandoned${r.prNumber ? `: pull request #${r.prNumber} will be closed` : ""}`);
   return {
-    canRemove: nameMatches(project, typed) && blockedBy.length === 0,
+    canRemove: nameMatches(project, typed),
     runsText:
       n === 0
         ? `${project.name} has no Run. Removing it forgets its settings only.`
         : `This deletes ${n} Run${n === 1 ? "" : "s"} of ${project.name}, with their Gates, attempts, Assets and Run Notes. The repository stays as it is.`,
-    blockedBy,
+    abandons,
+  };
+}
+
+/** What the Projects screen shows on a Project whose removal began and did not finish. */
+export interface InterruptedBanner {
+  title: string;
+  text: string;
+  /** The Retry button's text. */
+  retry: string;
+}
+
+/** The "Removal interrupted" banner of a marked Project, or null for a Project that is not being removed. Never resumes by itself. */
+export function interruptedBanner(project: { name: string; removingSince: string | null }): InterruptedBanner | null {
+  if (!project.removingSince) return null;
+  return {
+    title: "Removal interrupted",
+    text: `The removal of ${project.name} stopped before it finished. Nothing starts on this Project until it is removed. What was already abandoned stays abandoned.`,
+    retry: "Retry",
   };
 }

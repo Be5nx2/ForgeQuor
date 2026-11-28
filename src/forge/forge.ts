@@ -24,7 +24,7 @@ import { reviewStepType } from "./review.js";
 import { buildSeats, type RunnerName, type SeatSettings } from "./seats.js";
 import { createTeamStore, parseSeatOverrides, settingsOf, withOverrides, type Team, type TeamChange } from "./team.js";
 import { builtInExtensions } from "./builtin.js";
-import { AssetNotFoundError, DogfoodExportError, DogfoodNoteNotFoundError, DogfoodNoteTransitionError, GateError, InvalidInputError, InvalidSeatError, RunNotFoundError, RunStateError, SeatLockedError } from "./errors.js";
+import { AssetNotFoundError, DogfoodExportError, DogfoodNoteNotFoundError, DogfoodNoteTransitionError, GateError, InvalidInputError, InvalidSeatError, RemovalInterruptedError, RunNotFoundError, RunStateError, SeatLockedError } from "./errors.js";
 import type { Extension, InputProducer } from "./extension.js";
 import { allows, escalationGate, finalGate, offered, refusal, reviewGate, type GateKindModule, type GateOutcome } from "./gates.js";
 import { goBackChoices, redoFailedSteps, redoSteps, redoSet, type StepRow } from "./step-states.js";
@@ -64,7 +64,7 @@ import { offeredSkillPacks, placeSkillPacks, SHARED_SKILL_PACK, SKILLS_ROOT } fr
 import { createRunWorktree, existsInBranch, inspectRepository, listInBranch, readInBranch, RegistrationError, refreshDefaultBranch, remoteHasBranch, removeRunWorktree, repositoryPath, runFoldersUnder, slugify } from "./workspace.js";
 
 export type { SeatSettings };
-export { RegistrationError, AssetNotFoundError, DogfoodExportError, DogfoodNoteNotFoundError, DogfoodNoteTransitionError, GateError, InvalidInputError, InvalidSeatError, RunNotFoundError, RunStateError, SeatLockedError };
+export { RegistrationError, AssetNotFoundError, DogfoodExportError, DogfoodNoteNotFoundError, DogfoodNoteTransitionError, GateError, InvalidInputError, InvalidSeatError, RemovalInterruptedError, RunNotFoundError, RunStateError, SeatLockedError };
 export type * from "./types.js";
 
 export interface Forge {
@@ -81,10 +81,12 @@ export interface Forge {
   /** What removing a Project would delete, for the confirmation. Throws "No Project N." for an unknown Project. */
   removalPreview(projectId: number): Promise<RemovalPreview>;
   /**
-   * Forgets a Project: marks it as being removed, archives its finished Runs not yet Archived (worktree and local branch removed),
-   * deletes every Run with everything that belongs to it, then the Project. The Project's folder and GitHub are never touched
-   * beyond what Archiving removes. Every step is idempotent, so calling it again is the retry. Throws a RunStateError (nothing
-   * changed) while the Project has an active Run, and "No Project N." for an unknown Project.
+   * Forgets a Project: marks it as being removed (before anything else, so no Queued Run can start meanwhile), abandons each active
+   * Run through the same abandon as the Abandon button, archives its finished Runs not yet Archived (worktree and local branch
+   * removed), deletes every Run with everything that belongs to it, then the Project. The Project's folder and GitHub are never
+   * touched beyond what Archiving and abandoning remove. Every step is idempotent, so calling it again is the retry. Throws a
+   * RemovalInterruptedError naming the Run and its pull request when the code host fails (the Project and its mark stay; Runs
+   * already abandoned stay abandoned), and "No Project N." for an unknown Project.
    */
   removeProject(projectId: number): Promise<void>;
   /** Replaces a Project's ordered Check commands (blank ones are dropped). Applies to Runs started afterwards. */
@@ -1019,19 +1021,21 @@ export function createForge(deps: ForgeDeps): Forge {
     },
 
     async removeProject(projectId) {
-      // The mark is set only when no Run is active, in one statement, so a refusal changes nothing.
-      const marked = await pool.query(
-        `UPDATE projects SET removing_since = COALESCE(removing_since, now())
-         WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM runs WHERE project_id = $1 AND state = ANY($2)) RETURNING name`,
-        [projectId, ACTIVE],
-      );
-      if (!marked.rowCount) {
-        const { rows } = await pool.query("SELECT name FROM projects WHERE id = $1", [projectId]);
-        if (!rows[0]) throw new Error(`No Project ${projectId}.`);
-        const { rows: active } = await pool.query("SELECT count(*)::int AS n FROM runs WHERE project_id = $1 AND state = ANY($2)", [projectId, ACTIVE]);
-        throw new RunStateError(
-          `Project ${rows[0].name} has ${active[0].n} active Run${active[0].n === 1 ? "" : "s"} (Queued, Running, Waiting, Paused or Approved): abandon ${active[0].n === 1 ? "it" : "them"} first.`,
-        );
+      // The mark first, unconditionally: from here no Run launches on the Project and the scheduler skips its Queued Runs.
+      const marked = await pool.query("UPDATE projects SET removing_since = COALESCE(removing_since, now()) WHERE id = $1 RETURNING name", [projectId]);
+      if (!marked.rowCount) throw new Error(`No Project ${projectId}.`);
+      // Each active Run is abandoned exactly as the Abandon button does. A Run that finished meanwhile needs nothing more.
+      const { rows: active } = await pool.query("SELECT id, pr_number FROM runs WHERE project_id = $1 AND state = ANY($2) ORDER BY id", [projectId, ACTIVE]);
+      let abandoned = 0;
+      for (const r of active) {
+        try {
+          await abandon(Number(r.id));
+          abandoned++;
+        } catch (e: any) {
+          if (e instanceof RunStateError || e instanceof RunNotFoundError) continue;
+          const pr = r.pr_number ? ` (pull request #${r.pr_number})` : "";
+          throw new RemovalInterruptedError(`Removal of ${marked.rows[0].name} stopped: could not abandon Run ${r.id}${pr}: ${e.message}. Retry once the code host answers.`);
+        }
       }
       // Finished Runs not yet Archived get the usual clean-up on disk before they go (archive never throws).
       const { rows: finished } = await pool.query("SELECT id FROM runs WHERE project_id = $1 AND state = ANY($2) AND archived_at IS NULL ORDER BY id", [projectId, OVER]);
@@ -1039,10 +1043,10 @@ export function createForge(deps: ForgeDeps): Forge {
       // Only finished Runs go: one created after the mark (a launch that raced it) is never deleted behind its worktree's back.
       const deleted = await pool.query("DELETE FROM runs WHERE project_id = $1 AND state = ANY($2)", [projectId, OVER]);
       const { rows: left } = await pool.query("SELECT count(*)::int AS n FROM runs WHERE project_id = $1", [projectId]);
-      if (left[0].n) throw new RunStateError(`Project ${marked.rows[0].name} got ${left[0].n} active Run${left[0].n === 1 ? "" : "s"} while it was being removed: abandon ${left[0].n === 1 ? "it" : "them"}, then retry.`);
+      if (left[0].n) throw new RunStateError(`Project ${marked.rows[0].name} got ${left[0].n} active Run${left[0].n === 1 ? "" : "s"} while it was being removed: retry the removal to abandon ${left[0].n === 1 ? "it" : "them"}.`);
       await pool.query("DELETE FROM projects WHERE id = $1", [projectId]);
       const n = deleted.rowCount ?? 0;
-      console.log(`Removal: Project ${marked.rows[0].name} removed, ${n} Run${n === 1 ? "" : "s"} deleted.`);
+      console.log(`Removal: Project ${marked.rows[0].name} removed, ${n} Run${n === 1 ? "" : "s"} deleted (${abandoned} abandoned).`);
     },
 
     async setChecks(projectId, checks) {

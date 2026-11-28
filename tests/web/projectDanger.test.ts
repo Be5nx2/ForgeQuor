@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { purgeAllOffer, purgedMessage, purgeProjectOffer, removalOffer, totalArchived } from "../../web/src/projectDanger.js";
+import { interruptedBanner, purgeAllOffer, purgedMessage, purgeProjectOffer, removalOffer, totalArchived } from "../../web/src/projectDanger.js";
 
 describe("the purge offers", () => {
   it("states how many Archived Runs a Project's purge deletes", () => {
@@ -45,13 +45,29 @@ describe("the removal offer", () => {
     expect(removalOffer(slime, { runs: 0, activeRuns: [] }, "").runsText).toContain("has no Run");
   });
 
-  it("is blocked, even with the right name, while a Run is active, and says which", () => {
+  it("is not blocked by active Runs: it lists each one it will abandon with the pull request it will close", () => {
     const active = [
       { id: 7, title: "Add jump", state: "approved", prNumber: 12 },
       { id: 8, title: "Fix", state: "queued", prNumber: null },
     ];
     const offer = removalOffer(slime, { runs: 2, activeRuns: active }, "Slime Game");
-    expect(offer.canRemove).toBe(false);
-    expect(offer.blockedBy).toEqual(['Run 7 "Add jump" is approved (pull request #12)', 'Run 8 "Fix" is queued']);
+    expect(offer.canRemove).toBe(true);
+    expect(offer.abandons).toEqual(['Run 7 "Add jump" (approved) will be abandoned: pull request #12 will be closed', 'Run 8 "Fix" (queued) will be abandoned']);
+  });
+
+  it("lists nothing to abandon without active Runs", () => {
+    expect(removalOffer(slime, { runs: 1, activeRuns: [] }, "").abandons).toEqual([]);
+  });
+});
+
+describe("the interrupted removal banner", () => {
+  it("shows 'Removal interrupted' with Retry on a marked Project, whenever it is read", () => {
+    const banner = interruptedBanner({ name: "Slime Game", removingSince: "2026-11-28T10:00:00.000Z" });
+    expect(banner).toMatchObject({ title: "Removal interrupted", retry: "Retry" });
+    expect(banner!.text).toContain("Slime Game");
+  });
+
+  it("shows nothing on a Project that is not being removed", () => {
+    expect(interruptedBanner({ name: "Slime Game", removingSince: null })).toBeNull();
   });
 });

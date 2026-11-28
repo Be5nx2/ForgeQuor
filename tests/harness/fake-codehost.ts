@@ -8,11 +8,12 @@ export interface RecordedPullRequest extends PullRequestInput {
 }
 
 /** An in-memory GitHub: records the pull requests opened and the comments posted on them. */
-export function createFakeCodeHost(): CodeHost & { pullRequests: RecordedPullRequest[]; failWith: (message: string | null) => void; setState: (number: number, state: PullRequestState) => void; failStateReads: (message: string | null) => void; deletedBranches: { owner: string; repo: string; branch: string }[]; failBranchDeletion: (message: string | null) => void } {
+export function createFakeCodeHost(): CodeHost & { pullRequests: RecordedPullRequest[]; failWith: (message: string | null) => void; setState: (number: number, state: PullRequestState) => void; failStateReads: (message: string | null) => void; deletedBranches: { owner: string; repo: string; branch: string }[]; failBranchDeletion: (message: string | null) => void; failStateReadOf: (number: number, message: string | null) => void } {
   const pullRequests: RecordedPullRequest[] = [];
   let failure: string | null = null;
   let readFailure: string | null = null;
   let deletionFailure: string | null = null;
+  const readFailures = new Map<number, string>();
   const deletedBranches: { owner: string; repo: string; branch: string }[] = [];
   return {
     pullRequests,
@@ -25,6 +26,10 @@ export function createFakeCodeHost(): CodeHost & { pullRequests: RecordedPullReq
     },
     setState: (number, state) => {
       pullRequests.find((p) => p.number === number)!.state = state;
+    },
+    failStateReadOf: (number, message) => {
+      if (message === null) readFailures.delete(number);
+      else readFailures.set(number, message);
     },
     failStateReads: (message) => {
       readFailure = message;
@@ -48,6 +53,7 @@ export function createFakeCodeHost(): CodeHost & { pullRequests: RecordedPullReq
     },
     async pullRequestState({ number }) {
       if (readFailure) throw new Error(readFailure);
+      if (readFailures.has(number)) throw new Error(readFailures.get(number));
       return pullRequests.find((p) => p.number === number)!.state;
     },
   };
