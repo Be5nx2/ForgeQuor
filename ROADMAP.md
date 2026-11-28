@@ -10,6 +10,10 @@ Nothing in progress.
 
 ## Next
 
+### Project removal and purge now
+
+Remove a **Project** from Forgequor (active Runs abandoned, every Run deleted, the human's repository untouched beyond what Archiving removes, typed-name confirmation, resumable after a failure) and purge Archived Runs on demand, per Project or for all. Source: Dogfood Note #1. Spec: `docs/specs/project-removal.md`. Items are cut with `/to-tickets`.
+
 ### Polish
 
 Small fixes found by dogfooding (Dogfood Notes triaged with `/dogfood-triage`).
