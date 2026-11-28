@@ -1,6 +1,6 @@
 # UI refresh
 
-Status: **mockups approved (direction B, cinematic)**; in `ROADMAP.md` as "UI refresh", tickets to be cut with `/to-tickets` when scheduled. Implementation is planned after M4 (with the Dogfood work), not before. M3b screens are built on the current UI until then.
+Status: **mockups approved (direction B, cinematic)**; in `ROADMAP.md` as "UI refresh", tickets `ui-01` to `ui-12` (cut 2026-11-28).
 
 Vocabulary: `GLOSSARY.md`. Brand: `docs/BRAND_IDENTITY.md`. Decisions below come from a grilling session.
 
@@ -62,5 +62,5 @@ Mobile or responsive layouts, a light theme, accounts and permissions, the emble
 
 ## Open
 
-- Cut the implementation tickets (`/to-tickets`) when the work is scheduled, after M4.
+- Tickets cut: `ui-01` to `ui-12` in `ROADMAP.md`, which also records how the M4 screens (Team, Workflows, Quotas, Skill Packs, Dogfood Inbox) fit the mockups.
 - The `CHANGELOG.md` line is added by the pull request that implements it, not by this spec.
