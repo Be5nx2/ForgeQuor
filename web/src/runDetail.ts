@@ -1,7 +1,7 @@
 // What the Run detail shows, worked out from a Run: the Step rail, which Step is selected, what the selected Step's panel
 // holds, and the remarks of a Review. Plain data in, plain data out, so the screen only draws it.
-import type { Gate, Iteration, Review, RunDetail, StepAttempt } from "./api";
-import { attemptStatus, stepStatus, type Status } from "./status";
+import type { Gate, Iteration, Review, RunDetail, StepAttempt } from "./api.js";
+import { attemptStatus, stepStatus, type Status } from "./status.js";
 
 type Step = RunDetail["steps"][number];
 

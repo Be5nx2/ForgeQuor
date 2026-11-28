@@ -36,7 +36,7 @@ Every item must match its mockup in `docs/specs/ui-refresh/` (same layout, compo
   - Spec: `docs/specs/ui-refresh/README.md`
   - Blocked by: `ui-05`
   - Acceptance: the selector lists the Projects plus "All Projects"; the choice is kept in the URL and survives a refresh; it filters the Runs home, the merge list and the Gate count, and preselects the Project in New Run; no Project registered shows the empty state that leads to Projects.
-- [ ] `ui-07` **Run detail**: a Run shows its Steps on a rail and the selected Step beside it, with the Gate actions fixed at the top while a Gate is open, as in `run-detail.html`.
+- [x] `ui-07` **Run detail**: a Run shows its Steps on a rail and the selected Step beside it, with the Gate actions fixed at the top while a Gate is open, as in `run-detail.html`.
   - Spec: `docs/specs/ui-refresh/README.md`
   - Blocked by: `ui-03`, `ui-04`
   - Acceptance: the rail shows each Step's state, Iteration and Runner (sub-Steps indented); selecting a Step shows its log, output, Feedback, Run Notes and the seats it used; the Gate bar stays fixed while scrolling; the review Gate shows remarks, Runner chips and the Consolidator's disagreement; the live log has `aria-live`; abandon stays available; matches `run-detail.html`.
