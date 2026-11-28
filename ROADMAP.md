@@ -32,7 +32,7 @@ Every item must match its mockup in `docs/specs/ui-refresh/` (same layout, compo
   - Spec: `docs/specs/ui-refresh/README.md`
   - Blocked by: `ui-03`, `ui-04`
   - Acceptance: Gate cards first, then "Waiting for your merge", then every Run with its lifecycle state, Workflow, current Step, Iteration and time, filterable by state; each row links to the Run's URL; the separate Waiting screen is gone; empty and loading states shown; matches `runs.html`.
-- [ ] `ui-06` **Project selector**: the human picks a Project in the sidebar and every screen narrows to it.
+- [x] `ui-06` **Project selector**: the human picks a Project in the sidebar and every screen narrows to it.
   - Spec: `docs/specs/ui-refresh/README.md`
   - Blocked by: `ui-05`
   - Acceptance: the selector lists the Projects plus "All Projects"; the choice is kept in the URL and survives a refresh; it filters the Runs home, the merge list and the Gate count, and preselects the Project in New Run; no Project registered shows the empty state that leads to Projects.

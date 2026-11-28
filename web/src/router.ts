@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from "vue-router";
 import { screens } from "./navigation";
+import { carryProject, type Query } from "./projectScope";
 import InboxView from "./views/InboxView.vue";
 import NewRunView from "./views/NewRunView.vue";
 import NotFoundView from "./views/NotFoundView.vue";
@@ -34,4 +35,11 @@ export const router = createRouter({
     })),
     { name: "not-found", path: "/:rest(.*)*", component: NotFoundView },
   ],
+});
+
+// The chosen Project lives in the URL: a navigation that does not name one (a plain link, "+ New Run", Back to a bare URL
+// typed in) keeps the choice the human was on.
+router.beforeEach((to, from) => {
+  const query = carryProject(from.query as Query, to.query as Query);
+  return query ? { path: to.path, query, hash: to.hash, replace: true } : true;
 });

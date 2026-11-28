@@ -282,6 +282,7 @@ export interface ApprovedRun extends Run {
 /** An open Gate with enough of its Run and Project to be listed on its own. */
 export interface OpenGate extends Gate {
   runTitle: string;
+  projectId: number;
   projectName: string;
 }
 

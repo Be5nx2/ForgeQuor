@@ -1155,11 +1155,11 @@ export function createForge(deps: ForgeDeps): Forge {
 
     async listOpenGates() {
       const { rows } = await pool.query(
-        `SELECT g.*, r.title AS run_title, p.name AS project_name
+        `SELECT g.*, r.title AS run_title, p.name AS project_name, r.project_id
          FROM gates g JOIN runs r ON r.id = g.run_id JOIN projects p ON p.id = r.project_id
          WHERE g.decided_at IS NULL ORDER BY g.id`,
       );
-      return Promise.all(rows.map(async (r) => ({ ...(await withRedo(await gateOf(r))), runTitle: r.run_title, projectName: r.project_name })));
+      return Promise.all(rows.map(async (r) => ({ ...(await withRedo(await gateOf(r))), runTitle: r.run_title, projectId: Number(r.project_id), projectName: r.project_name })));
     },
 
     async listApprovedRuns() {

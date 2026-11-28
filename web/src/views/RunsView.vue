@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import { getJson, type ApprovedRun, type OpenGate, type Project, type Run, type RunDetail } from "../api";
 import EmptyState from "../components/EmptyState.vue";
 import ErrorState from "../components/ErrorState.vue";
@@ -7,6 +8,7 @@ import LoadingState from "../components/LoadingState.vue";
 import StatusChip from "../components/StatusChip.vue";
 import { liveEvents } from "../liveEvents";
 import { gateAction, gateLabel, isActive, keepsState, nowOf, startedLabel, statePills, waitingFor, type PillId } from "../runsHome";
+import { inProject, resolveProject, type Query } from "../projectScope";
 import { runStatus } from "../status";
 
 /** The Runs home: what waits for the human (Gates, then pull requests to merge) pinned above every Run. */
@@ -17,7 +19,9 @@ const gates = ref<OpenGate[]>([]);
 const merges = ref<ApprovedRun[]>([]);
 /** The detail of each active Run, for its "Now" cell. */
 const details = ref<Record<number, RunDetail>>({});
-const filterProject = ref("");
+/** The Project the sidebar selector chose (the `project` query parameter); null for "All Projects". */
+const route = useRoute();
+const filterProject = ref<number | null>(null);
 const pill = ref<PillId>("all");
 /** Archived Runs (finished, their worktree removed) are hidden unless asked for. */
 const showArchived = ref(false);
@@ -29,15 +33,13 @@ let latest = 0;
 
 async function load() {
   const mine = ++latest;
-  const q = new URLSearchParams();
-  if (filterProject.value) q.set("projectId", filterProject.value);
   try {
-    // Projects come along, so a Run of a Project registered since is named, not shown as a bare id.
-    const [found, known, open] = await Promise.all([
-      getJson<Run[]>(`/api/runs?${q}`),
-      getJson<Project[]>("/api/projects"),
-      getJson<OpenGate[]>("/api/gates"),
-    ]);
+    // The Projects come first: a Project that is not registered (any more) counts as "All Projects", as in the selector.
+    const known = await getJson<Project[]>("/api/projects");
+    const chosen = resolveProject(route.query as Query, known);
+    const q = new URLSearchParams();
+    if (chosen !== null) q.set("projectId", String(chosen));
+    const [found, open] = await Promise.all([getJson<Run[]>(`/api/runs?${q}`), getJson<OpenGate[]>("/api/gates")]);
     // The merge list, and a Run's detail, failing to load must not hide the Runs and the open Gates.
     const [approved, active] = await Promise.all([
       getJson<ApprovedRun[]>("/api/approved-runs").catch(() => merges.value),
@@ -46,8 +48,9 @@ async function load() {
     if (mine !== latest) return;
     runs.value = found;
     projects.value = known;
-    gates.value = open;
-    merges.value = approved;
+    filterProject.value = chosen;
+    gates.value = inProject(open, chosen);
+    merges.value = inProject(approved, chosen);
     details.value = Object.fromEntries(active.filter((d): d is RunDetail => !!d).map((d) => [d.id, d]));
     loaded.value = true;
     loadError.value = "";
@@ -56,13 +59,9 @@ async function load() {
   }
 }
 
-// Same-named Projects are told apart by their local path, in the menu and in the list: two Projects called alike once
-// made a Run look missing from its Project.
-const projectLabel = (p: Project) => `${p.name} (${p.localPath})`;
-
 const shown = computed(() => runs.value.filter((r) => (showArchived.value || !r.archivedAt) && keepsState(pill.value, r.state)));
 const activeCount = computed(() => runs.value.filter((r) => isActive(r.state) && !r.archivedAt).length);
-const filtered = computed(() => pill.value !== "all" || !!filterProject.value || (!showArchived.value && runs.value.some((r) => r.archivedAt)));
+const filtered = computed(() => pill.value !== "all" || (!showArchived.value && runs.value.some((r) => r.archivedAt)));
 const nothing = computed(() => !gates.value.length && !merges.value.length && !runs.value.length);
 
 let stopFollowing: () => void;
@@ -71,7 +70,8 @@ onMounted(async () => {
   await load();
 });
 onUnmounted(() => stopFollowing?.());
-watch(filterProject, load);
+// The sidebar selector changes the query, not the path, so the view stays mounted: reload for the new Project.
+watch(() => route.query.project, load);
 </script>
 
 <template>
@@ -84,7 +84,10 @@ watch(filterProject, load);
 
   <ErrorState v-if="loadError" title="Could not load the Runs" text="The Forgequor server did not answer. Check that it is running, then retry." :details="loadError" @retry="load" />
   <LoadingState v-else-if="!loaded" what="Runs" />
-  <EmptyState v-else-if="nothing && !filterProject" title="No Run yet" text="A Run is one Workflow carried out on a Project. Start one to see it here.">
+  <EmptyState v-else-if="!projects.length" title="No Project yet" text="A Project is the game repository Runs work on. Register one to start.">
+    <router-link class="btn btn-primary" to="/projects">Go to Projects</router-link>
+  </EmptyState>
+  <EmptyState v-else-if="nothing && filterProject === null" title="No Run yet" text="A Run is one Workflow carried out on a Project. Start one to see it here.">
     <router-link class="btn btn-primary" to="/new">+ New Run</router-link>
   </EmptyState>
   <template v-else>
@@ -128,10 +131,6 @@ watch(filterProject, load);
           <div class="pills" role="group" aria-label="Filter by state">
             <button v-for="p in statePills" :key="p.id" type="button" :aria-pressed="pill === p.id" @click="pill = p.id">{{ p.label }}</button>
           </div>
-          <select v-model="filterProject" aria-label="Filter by Project">
-            <option value="">All Projects</option>
-            <option v-for="p in projects" :key="p.id" :value="String(p.id)">{{ projectLabel(p) }}</option>
-          </select>
           <label class="muted"><input v-model="showArchived" type="checkbox" /> Show archived</label>
         </div>
         <EmptyState v-if="!shown.length && filtered" title="No Run matches these filters" text="Change the filters, or show the archived Runs, to see more." />
@@ -191,7 +190,6 @@ section h2 .n { color: var(--action); margin-left: 0.4rem; }
 .pills { display: flex; gap: var(--sp-2); flex-wrap: wrap; margin-right: auto; }
 .pills button { background: transparent; border: 1px solid var(--border-strong); color: var(--text-muted); border-radius: 999px; padding: 0.35rem 0.8rem; font: 500 var(--fs-xs) var(--font-ui); cursor: pointer; }
 .pills button[aria-pressed="true"] { color: var(--text); border-color: var(--ai); background: rgb(56 189 248 / 0.12); }
-.tools select { max-width: 100%; min-width: 0; }
 .tools label { font-size: var(--fs-xs); display: flex; align-items: center; gap: 0.35rem; }
 .tools input[type="checkbox"] { flex: none; }
 .scroll { overflow-x: auto; }
