@@ -1,6 +1,6 @@
 // The API's shapes are the server's own (src/forge/types.ts), so the two can never drift apart. That module imports
 // nothing, and these imports are types only: no server code reaches the browser.
-import type * as Server from "../../src/forge/types";
+import type * as Server from "../../src/forge/types.js";
 
 /** A server shape as it arrives over JSON: every Date is a string. */
 type Json<T> = T extends Date ? string : T extends (infer U)[] ? Json<U>[] : T extends object ? { [K in keyof T]: Json<T[K]> } : T;
@@ -26,6 +26,7 @@ export type GateKind = Server.GateKind;
 export type GateAction = Server.GateAction;
 export type Gate = Json<Server.Gate>;
 export type Iteration = Json<Server.Iteration>;
+export type Review = Json<Server.Review>;
 export type ConversationTurn = Json<Server.ConversationTurn>;
 export type RunNoteInfo = Json<Server.RunNoteInfo>;
 export type RunNote = Json<Server.RunNote>;

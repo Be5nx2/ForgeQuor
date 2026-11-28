@@ -58,23 +58,23 @@ const stepLabel = (s: { stepId: string; type: string; detail: string | null }) =
 
 <template>
   <div class="gate-actions" @click.stop>
-    <form v-if="gate.actions.includes('answer')" class="stack" @submit.prevent="reply">
+    <form v-if="gate.actions.includes('answer')" class="stack reply" @submit.prevent="reply">
       <textarea v-model="message" rows="5" placeholder="Your answers, all in one message" aria-label="Your answer" required />
       <div>
-        <button type="submit" :disabled="busy || !message.trim()">Send answer</button>
-        <button v-if="gate.actions.includes('confirm')" type="button" :disabled="busy" @click="send('confirm')">Confirm the summary</button>
+        <button type="submit" class="btn btn-primary" :disabled="busy || !message.trim()">Send answer</button>
+        <button v-if="gate.actions.includes('confirm')" type="button" class="btn btn-outline-action" :disabled="busy" @click="send('confirm')">Confirm the summary</button>
       </div>
     </form>
-    <button v-if="gate.actions.includes('approve')" type="button" :disabled="busy" @click="decide('approve')">
+    <button v-if="gate.actions.includes('approve')" type="button" class="btn btn-primary" :disabled="busy" @click="decide('approve')">
       Approve
     </button>
-    <button v-if="gate.actions.includes('reject') && !form" type="button" class="secondary" :disabled="busy" @click="open('reject')">
+    <button v-if="gate.actions.includes('reject') && !form" type="button" class="btn btn-outline-action" :disabled="busy" @click="open('reject')">
       Reject…
     </button>
-    <button v-if="gate.redo && !form" type="button" :disabled="busy" @click="open('retry')">
+    <button v-if="gate.redo && !form" type="button" class="btn btn-primary" :disabled="busy" @click="open('retry')">
       Retry…
     </button>
-    <button v-if="gate.redo?.goBack.length && !form" type="button" class="secondary" :disabled="busy" @click="open('go_back')">
+    <button v-if="gate.redo?.goBack.length && !form" type="button" class="btn btn-outline-action" :disabled="busy" @click="open('go_back')">
       Go back…
     </button>
     <form v-if="form" class="stack" @submit.prevent="decide(form)">
@@ -93,15 +93,25 @@ const stepLabel = (s: { stepId: string; type: string; detail: string | null }) =
         :required="form !== 'retry'"
       />
       <div>
-        <button type="submit" :disabled="busy || (form !== 'retry' && !feedback.trim())">
+        <button type="submit" class="btn btn-primary" :disabled="busy || (form !== 'retry' && !feedback.trim())">
           {{ form === "retry" ? "Retry the Step" : form === "go_back" ? "Go back" : "Send Feedback" }}
         </button>
-        <button type="button" class="secondary" :disabled="busy" @click="form = null">Cancel</button>
+        <button type="button" class="btn btn-ghost" :disabled="busy" @click="form = null">Cancel</button>
       </div>
     </form>
-    <button v-if="gate.actions.includes('abandon') && !form" type="button" class="secondary" :disabled="busy" @click="decide('abandon')">
+    <button v-if="gate.actions.includes('abandon') && !form" type="button" class="btn btn-danger" :disabled="busy" @click="decide('abandon')">
       Abandon
     </button>
     <span v-if="error" class="error">{{ error }}</span>
   </div>
 </template>
+
+<style scoped>
+.gate-actions { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: center; margin: 0; }
+.gate-actions form { flex: 1 1 100%; margin: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.gate-actions form > div { display: flex; gap: var(--sp-2); }
+.gate-actions textarea { width: 100%; min-height: 4.5rem; max-height: 40vh; background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--radius-md); padding: 0.7rem; font: var(--fs-sm) var(--font-ui); resize: vertical; }
+.gate-actions select { background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--radius-md); padding: 0.4rem; font: var(--fs-sm) var(--font-ui); }
+.btn:disabled { opacity: 0.5; cursor: wait; }
+.btn:focus-visible { outline: 2px solid var(--ai); outline-offset: 2px; }
+</style>
