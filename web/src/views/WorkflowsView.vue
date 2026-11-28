@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from "vue";
 import { getJson, type Project, type WorkflowList } from "../api";
+import EmptyState from "../components/EmptyState.vue";
+import ErrorState from "../components/ErrorState.vue";
+import LoadingState from "../components/LoadingState.vue";
 
 /** Read-only: every Workflow a Project offers, valid or not, with its Steps, YAML and errors. */
 const projects = ref<Project[]>([]);
@@ -9,16 +12,23 @@ const list = ref<WorkflowList>({ workflows: [], problem: null });
 const loading = ref(false);
 const error = ref("");
 
-onMounted(async () => {
+/** False until the Projects arrive, so the page never says "No Project yet" while loading or after a failure. */
+const projectsLoaded = ref(false);
+const projectsError = ref("");
+
+async function loadProjects() {
   try {
     projects.value = await getJson<Project[]>("/api/projects");
-    projectId.value = projects.value[0] ? String(projects.value[0].id) : "";
+    projectsError.value = "";
+    projectsLoaded.value = true;
+    if (!projects.value.some((p) => String(p.id) === projectId.value)) projectId.value = projects.value[0] ? String(projects.value[0].id) : "";
   } catch (e: any) {
-    error.value = e.message;
+    projectsError.value = e.message;
   }
-});
+}
 
-watch(projectId, async (id) => {
+async function loadWorkflows() {
+  const id = projectId.value;
   list.value = { workflows: [], problem: null };
   error.value = "";
   if (!id) return;
@@ -31,19 +41,28 @@ watch(projectId, async (id) => {
   } finally {
     if (projectId.value === id) loading.value = false;
   }
-});
+}
+
+onMounted(loadProjects);
+watch(projectId, loadWorkflows);
 
 const place = (e: { line?: number; path: string }) => (e.line ? `line ${e.line}: ` : e.path ? `${e.path}: ` : "");
 </script>
 
 <template>
   <h2>Workflows</h2>
-  <p v-if="error" class="error">{{ error }}</p>
-  <p v-if="!projects.length && !error" class="muted">Register a Project first.</p>
-  <select v-else v-model="projectId" aria-label="Project">
-    <option v-for="p in projects" :key="p.id" :value="String(p.id)">{{ p.name }} ({{ p.localPath }})</option>
-  </select>
-  <p v-if="loading" class="muted" role="status">Loading Workflows…</p>
+  <ErrorState v-if="projectsError" title="Could not load the Projects" text="The Forgequor server did not answer. Check that it is running, then retry." :details="projectsError" @retry="loadProjects" />
+  <LoadingState v-else-if="!projectsLoaded" what="Projects" />
+  <EmptyState v-else-if="!projects.length" title="No Project yet" text="Workflows belong to a Project. Register one to see the Workflows it offers.">
+    <router-link class="btn btn-primary" to="/projects">Register a Project</router-link>
+  </EmptyState>
+  <template v-else>
+    <select v-model="projectId" aria-label="Project">
+      <option v-for="p in projects" :key="p.id" :value="String(p.id)">{{ p.name }} ({{ p.localPath }})</option>
+    </select>
+    <ErrorState v-if="error" title="Could not load the Workflows" text="The Forgequor server did not answer. Check that it is running, then retry." :details="error" @retry="loadWorkflows" />
+    <LoadingState v-else-if="loading" what="Workflows" />
+  </template>
   <p v-if="list.problem" class="error">{{ list.problem }}</p>
   <section v-for="w in list.workflows" :key="w.name" class="card">
     <h3>
