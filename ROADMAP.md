@@ -44,7 +44,7 @@ Every item must match its mockup in `docs/specs/ui-refresh/` (same layout, compo
   - Spec: `docs/specs/ui-refresh/README.md`
   - Blocked by: `ui-07`
   - Acceptance: the conversation with the Griller shows its rounds and recommended answers, an answer box and "Confirm summary"; the spec Gate renders the spec with approve or reject with Feedback; both keep the Gate bar fixed and the rail visible; match their mockups.
-- [ ] `ui-09` **Asset Gate**: the Asset Gate uses the Run detail pattern, as in `run-gate-assets.html`.
+- [x] `ui-09` **Asset Gate**: the Asset Gate uses the Run detail pattern, as in `run-gate-assets.html`.
   - Spec: `docs/specs/ui-refresh/README.md`
   - Blocked by: `ui-07`
   - Acceptance: gallery at real size and magnified with pixel-sharp rendering; Asset Checks per Asset; Feedback per rejected Asset; version history; Gate bar fixed and rail visible; matches `run-gate-assets.html`.

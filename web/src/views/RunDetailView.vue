@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import { getJson, postJson, type Project, type RunDetail, type RunNote } from "../api";
 import { chatOf } from "../conversation";
 import { liveEvents } from "../liveEvents";
+import { approveAllOf, draftsFor, gateSummary, isComplete, verdictsOf, waitingKey, type VerdictDraft, type VerdictDrafts } from "../assetGate";
 import { gateTitle, railOf, resolveSelection, stepViewOf } from "../runDetail";
 import AssetGallery from "../components/AssetGallery.vue";
 import ConversationReply from "../components/ConversationReply.vue";
@@ -93,6 +94,16 @@ const chat = computed(() => (view.value ? chatOf(turns.value, agentName(view.val
 /** The Feedback typed beside the spec: the Gate bar's "Reject with Feedback" sends it; it starts empty at each Spec Gate. */
 const specFeedback = ref("");
 watch(() => openSpec.value?.id, () => (specFeedback.value = ""));
+/** The Asset Gate's Verdicts, one per Asset waiting (all approving at first): the gallery edits them, the Gate bar sends them. */
+const openAssetGate = computed(() => openGates.value.find((g) => g.kind === "asset" && g.actions.includes("judge")) ?? null);
+const drafts = ref<VerdictDrafts>({});
+watch(() => (run.value ? waitingKey(run.value.assets) : ""), () => (drafts.value = draftsFor(run.value?.assets ?? [])), { immediate: true });
+const setVerdict = (assetId: number, patch: Partial<VerdictDraft>) => {
+  const d = drafts.value[assetId];
+  if (d) Object.assign(d, patch);
+};
+const summary = computed(() => gateSummary(drafts.value));
+const judge = computed(() => ({ send: verdictsOf(drafts.value), approveAll: approveAllOf(drafts.value), ready: isComplete(drafts.value), label: summary.value.send }));
 const time = (d: string) => new Date(d).toLocaleTimeString();
 
 let stopFollowing: () => void;
@@ -152,11 +163,15 @@ onUnmounted(() => stopFollowing?.());
       <div v-for="g in openGates" :key="g.id" class="gate">
         <div class="why">
           <strong>{{ gateTitle(g) }}</strong>
-          {{ g.reason }}
+          <template v-if="g === openAssetGate">
+            {{ summary.assets }}. You give one Verdict per Asset; the Artist redoes only the rejected ones.
+            <span v-if="summary.missing" class="muted">{{ summary.missing }} rejected without Feedback.</span>
+          </template>
+          <template v-else>{{ g.reason }}</template>
           <button v-if="gateElsewhere(g.stepId)" type="button" class="link" @click="select(gateElsewhere(g.stepId)!)">Show the {{ stepName(g.stepId) }} Step</button>
           <details v-if="g.evidence && !stepName(g.stepId)"><summary>Evidence</summary><pre>{{ g.evidence }}</pre></details>
         </div>
-        <GateActions :gate="g" :held="g.kind === 'spec' ? specFeedback : undefined" @decided="load" />
+        <GateActions :gate="g" :held="g.kind === 'spec' ? specFeedback : undefined" :judge="g === openAssetGate ? judge : undefined" @decided="load" />
       </div>
     </div>
 
@@ -199,7 +214,7 @@ onUnmounted(() => stopFollowing?.());
           <p class="progress muted" aria-label="Progress">
             {{ drawnCount }} of {{ run.assets.length }} drawn<span v-if="drawing"> · the Artist is drawing <strong>{{ drawing.name }}</strong> (Asset {{ drawing.position + 1 }}, attempt {{ runningAttempt?.attempt }})</span>
           </p>
-          <AssetGallery :run-id="run.id" :iteration="run.iteration" :assets="run.assets" :files-removed="!!run.archivedAt" :gate="run.gates.find((g) => g.kind === 'asset' && !g.decidedAt)" @decided="load" />
+          <AssetGallery :run-id="run.id" :iteration="run.iteration" :assets="run.assets" :files-removed="!!run.archivedAt" :judging="!!openAssetGate" :drafts="drafts" @verdict="setVerdict" />
         </div>
 
         <div v-if="turns.length || openConversation" class="conversation">

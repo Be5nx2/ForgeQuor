@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import { decideGate, type Gate, type GateAction } from "../api";
+import { decideGate, type Gate, type GateAction, type Verdict } from "../api";
 
 /** `held`: the Feedback, when the screen holds the Feedback field itself (the Spec Gate shows it beside the spec), "Reject" sends that text at once. */
-const props = defineProps<{ gate: Gate; held?: string }>();
+/** `judge`: the Verdicts, when the screen holds them beside the Assets (the Asset Gate): `send` goes out as they are, `approveAll` approves every Asset waiting; not `ready` while a rejection lacks Feedback. */
+const props = defineProps<{ gate: Gate; held?: string; judge?: { send: Verdict[]; approveAll: Verdict[]; ready: boolean; label: string } }>();
 const emit = defineEmits<{ decided: [] }>();
 
 const busy = ref(false);
@@ -18,6 +19,19 @@ function open(which: "reject" | "retry" | "go_back") {
   form.value = which;
   target.value = props.gate.redo?.goBack[0]?.stepId ?? "";
   feedback.value = "";
+}
+
+async function judgeWith(verdicts: Verdict[]) {
+  busy.value = true;
+  error.value = "";
+  try {
+    await decideGate(props.gate.id, "judge", undefined, verdicts);
+    emit("decided");
+  } catch (e: any) {
+    error.value = e.message;
+  } finally {
+    busy.value = false;
+  }
 }
 
 async function decide(action: GateAction) {
@@ -43,6 +57,10 @@ const stepLabel = (s: { stepId: string; type: string; detail: string | null }) =
     <button v-if="gate.actions.includes('approve')" type="button" class="btn btn-primary" :disabled="busy" @click="decide('approve')">
       {{ gate.kind === "spec" ? "Approve spec" : "Approve" }}
     </button>
+    <template v-if="judge && gate.actions.includes('judge')">
+      <button type="button" class="btn btn-primary" :disabled="busy || !judge.ready" :title="judge.ready ? undefined : 'Write the Feedback for each rejected Asset first'" @click="judgeWith(judge.send)">{{ judge.label }}</button>
+      <button type="button" class="btn btn-outline-action" :disabled="busy" @click="judgeWith(judge.approveAll)">Approve all</button>
+    </template>
     <button v-if="gate.actions.includes('reject') && keeps()" type="button" class="btn btn-outline-action" :disabled="busy || !held?.trim()" :title="held?.trim() ? undefined : 'Write the Feedback first'" @click="decide('reject')">
       Reject with Feedback
     </button>
