@@ -5,6 +5,7 @@ All notable changes to Forgequor. Format: [Keep a Changelog](https://keepachange
 ## [Unreleased]
 
 ### Added
+- Jot a Dogfood Note: a floating **+ Note** button on every tab opens a popup (nature, target pre-selected from the tab, text) and records the note with its tab, Run or Project and date; `POST` and `GET /api/dogfood-notes`; glossary entries for Dogfood Note, Inbox and Export (dogfood-01).
 - `tests/acceptance/comfort.ba.ts`: M4 BA scenarios, archiving of an abandoned Run (worktree, branches, pull request, history kept), a Claude Quota reading after a Step, Workflow validation and the Team seats (m4-11).
 - Seats per Run: New Run has a folded "Seats" section (filled from the Team, locked fields read-only, a non-blocking warning with the reset time beside a seat whose Runner's Quota is used up); `POST /api/runs` takes per-seat overrides validated like the Team page; a Run freezes its effective seats at its first start and keeps them after a restart; the Run detail shows each Agent Step's Runner and model (m4-07).
 - An Archived Run keeps its text Run Notes in the database (copied from the worktree just before it is removed, deleted by the purge) and the Run page lists and shows them (m4-12).

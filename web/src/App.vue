@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
-import { getJson } from "./api";
+import { getJson, type DogfoodTarget } from "./api";
+import NoteButton from "./components/NoteButton.vue";
 import QuotaBar from "./components/QuotaBar.vue";
 import NewRunView from "./views/NewRunView.vue";
 import ProjectsView from "./views/ProjectsView.vue";
@@ -39,6 +40,16 @@ function openRun(id: number) {
   runId.value = id;
 }
 
+/** What each tab is most likely about, for the note popup's pre-selected target. */
+const targetOf: Record<(typeof tabs)[number]["id"], DogfoodTarget> = {
+  waiting: "workflow",
+  new: "workflow",
+  runs: "workflow",
+  projects: "feature",
+  workflows: "workflow",
+  team: "feature",
+};
+
 onMounted(async () => {
   tools.value = (await getJson<{ tools: Tool[] }>("/api/health")).tools;
 });
@@ -61,5 +72,6 @@ onMounted(async () => {
     <TeamView v-else-if="tab === 'team'" />
     <RunDetailView v-else-if="runId !== null" :id="runId" @back="runId = null" />
     <RunsView v-else @open="openRun" />
+    <NoteButton :tab="tab" :run-id="tab === 'runs' ? runId : null" :suggested-target="targetOf[tab]" />
   </main>
 </template>
