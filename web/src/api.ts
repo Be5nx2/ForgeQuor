@@ -77,6 +77,11 @@ export async function getJson<T>(url: string): Promise<T> {
   return res.json();
 }
 
+export async function deleteJson(url: string): Promise<void> {
+  const res = await fetch(url, { method: "DELETE" });
+  if (!res.ok) throw new Error((await res.json()).error ?? res.statusText);
+}
+
 export async function postJson<T>(url: string, body: unknown): Promise<T> {
   const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   const data = await res.json();

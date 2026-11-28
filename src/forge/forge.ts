@@ -46,6 +46,7 @@ import type {
   Iteration,
   OpenGate,
   Project,
+  RemovalPreview,
   QuotaStatus,
   Run,
   RunDetail,
@@ -77,6 +78,15 @@ export interface Forge {
    * purge is unchanged. Throws "No Project N." for an unknown Project.
    */
   purgeArchivedRuns(projectId?: number): Promise<number>;
+  /** What removing a Project would delete, for the confirmation. Throws "No Project N." for an unknown Project. */
+  removalPreview(projectId: number): Promise<RemovalPreview>;
+  /**
+   * Forgets a Project: marks it as being removed, archives its finished Runs not yet Archived (worktree and local branch removed),
+   * deletes every Run with everything that belongs to it, then the Project. The Project's folder and GitHub are never touched
+   * beyond what Archiving removes. Every step is idempotent, so calling it again is the retry. Throws a RunStateError (nothing
+   * changed) while the Project has an active Run, and "No Project N." for an unknown Project.
+   */
+  removeProject(projectId: number): Promise<void>;
   /** Replaces a Project's ordered Check commands (blank ones are dropped). Applies to Runs started afterwards. */
   setChecks(projectId: number, checks: string[]): Promise<Project>;
   /** Replaces a Project's ordered setup commands (blank ones are dropped). A failing one opens an Escalation and the Developer never starts. */
@@ -238,7 +248,7 @@ export interface ForgeDeps {
 
 const COLUMNS =
   "id, name, local_path, remote_owner, remote_name, default_branch, checks, setup, max_concurrent_runs, art_direction_path, art_folder, skill_packs, " +
-  "(SELECT count(*) FROM runs WHERE runs.project_id = projects.id AND runs.archived_at IS NOT NULL) AS archived_runs";
+  "(SELECT count(*) FROM runs WHERE runs.project_id = projects.id AND runs.archived_at IS NOT NULL) AS archived_runs, removing_since";
 
 function toProject(r: Record<string, any>): Project {
   return {
@@ -255,6 +265,7 @@ function toProject(r: Record<string, any>): Project {
     artFolder: r.art_folder,
     skillPacks: r.skill_packs,
     archivedRuns: Number(r.archived_runs),
+    removingSince: r.removing_since,
   };
 }
 
@@ -524,6 +535,11 @@ export function createForge(deps: ForgeDeps): Forge {
     try {
       await client.query("BEGIN");
       const found = await client.query(`SELECT ${COLUMNS} FROM projects WHERE id = $1 FOR UPDATE`, [projectId]);
+      // A Project being removed (or already gone) starts nothing: a freed slot must not launch work about to go.
+      if (!found.rows[0] || found.rows[0].removing_since) {
+        await client.query("ROLLBACK");
+        return;
+      }
       project = toProject(found.rows[0]);
       const held = await client.query("SELECT count(*)::int AS n FROM runs WHERE project_id = $1 AND state = ANY($2)", [
         projectId,
@@ -989,6 +1005,46 @@ export function createForge(deps: ForgeDeps): Forge {
       return n;
     },
 
+    async removalPreview(projectId) {
+      const { rows } = await pool.query(`SELECT ${COLUMNS} FROM projects WHERE id = $1`, [projectId]);
+      if (!rows[0]) throw new Error(`No Project ${projectId}.`);
+      const { rows: runs } = await pool.query("SELECT id, title, state, pr_number, pr_url FROM runs WHERE project_id = $1 ORDER BY id", [projectId]);
+      return {
+        runs: runs.length,
+        activeRuns: runs
+          .filter((r) => ACTIVE.includes(r.state))
+          .map((r) => ({ id: Number(r.id), title: r.title, state: r.state, prNumber: r.pr_number ?? null, prUrl: r.pr_url ?? null })),
+        archivedRuns: Number(rows[0].archived_runs),
+      };
+    },
+
+    async removeProject(projectId) {
+      // The mark is set only when no Run is active, in one statement, so a refusal changes nothing.
+      const marked = await pool.query(
+        `UPDATE projects SET removing_since = COALESCE(removing_since, now())
+         WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM runs WHERE project_id = $1 AND state = ANY($2)) RETURNING name`,
+        [projectId, ACTIVE],
+      );
+      if (!marked.rowCount) {
+        const { rows } = await pool.query("SELECT name FROM projects WHERE id = $1", [projectId]);
+        if (!rows[0]) throw new Error(`No Project ${projectId}.`);
+        const { rows: active } = await pool.query("SELECT count(*)::int AS n FROM runs WHERE project_id = $1 AND state = ANY($2)", [projectId, ACTIVE]);
+        throw new RunStateError(
+          `Project ${rows[0].name} has ${active[0].n} active Run${active[0].n === 1 ? "" : "s"} (Queued, Running, Waiting, Paused or Approved): abandon ${active[0].n === 1 ? "it" : "them"} first.`,
+        );
+      }
+      // Finished Runs not yet Archived get the usual clean-up on disk before they go (archive never throws).
+      const { rows: finished } = await pool.query("SELECT id FROM runs WHERE project_id = $1 AND state = ANY($2) AND archived_at IS NULL ORDER BY id", [projectId, OVER]);
+      for (const r of finished) await archive(Number(r.id));
+      // Only finished Runs go: one created after the mark (a launch that raced it) is never deleted behind its worktree's back.
+      const deleted = await pool.query("DELETE FROM runs WHERE project_id = $1 AND state = ANY($2)", [projectId, OVER]);
+      const { rows: left } = await pool.query("SELECT count(*)::int AS n FROM runs WHERE project_id = $1", [projectId]);
+      if (left[0].n) throw new RunStateError(`Project ${marked.rows[0].name} got ${left[0].n} active Run${left[0].n === 1 ? "" : "s"} while it was being removed: abandon ${left[0].n === 1 ? "it" : "them"}, then retry.`);
+      await pool.query("DELETE FROM projects WHERE id = $1", [projectId]);
+      const n = deleted.rowCount ?? 0;
+      console.log(`Removal: Project ${marked.rows[0].name} removed, ${n} Run${n === 1 ? "" : "s"} deleted.`);
+    },
+
     async setChecks(projectId, checks) {
       const clean = checks.map((c) => c.trim()).filter(Boolean);
       const { rows } = await pool.query(`UPDATE projects SET checks = $2 WHERE id = $1 RETURNING ${COLUMNS}`, [
@@ -1067,6 +1123,7 @@ export function createForge(deps: ForgeDeps): Forge {
       const { rows: found } = await pool.query(`SELECT ${COLUMNS} FROM projects WHERE id = $1`, [projectId]);
       if (!found[0]) throw new Error(`No Project ${projectId}.`);
       const project = toProject(found[0]);
+      if (project.removingSince) throw new RunStateError(`Project ${project.name} is being removed: no Run can start on it.`);
       // What a Run starts from is the default branch as it is on the remote now: fetched once, here, for the Project's
       // Workflows and for whatever the launch checks ask of the repository. A remote out of reach leaves the Project's
       // Workflows unread; the Run is still created and opens an Escalation when its worktree cannot be made.

@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { getJson, postJson, putJson, type Project } from "../api";
+import { useRouter } from "vue-router";
+import { deleteJson, getJson, postJson, putJson, type Project } from "../api";
 import EmptyState from "../components/EmptyState.vue";
 import ErrorState from "../components/ErrorState.vue";
 import LoadingState from "../components/LoadingState.vue";
-import { purgeAllOffer, purgedMessage, purgeProjectOffer } from "../projectDanger";
+import { purgeAllOffer, purgedMessage, purgeProjectOffer, removalOffer, type RemovalPreviewLike } from "../projectDanger";
 import { changedSections, commandsOf, draftOf, projectSubtitle, selectProject, type Draft, type Section } from "../projectsForm";
 
 /** The Project the URL names (/projects/:id); without one, the first Project is shown. */
@@ -140,6 +141,52 @@ function askPurge(scope: "all" | "project") {
   confirmingPurge.value = confirmingPurge.value === scope ? null : scope;
 }
 
+const router = useRouter();
+/** The removal confirmation: the preview the server gave when it opened, the name typed so far, and whether the removal is under way. */
+const removal = ref<{ projectId: number; preview: RemovalPreviewLike; typed: string } | null>(null);
+const removing = ref(false);
+const removalError = ref("");
+const removalView = computed(() => {
+  const r = removal.value;
+  const p = selected.value;
+  return r && p && r.projectId === p.id ? { offer: removalOffer(p, r.preview, r.typed), preview: r.preview } : null;
+});
+
+async function askRemoval() {
+  const p = selected.value;
+  if (!p) return;
+  if (removal.value?.projectId === p.id) {
+    removal.value = null;
+    return;
+  }
+  removalError.value = "";
+  notice.value = "";
+  try {
+    removal.value = { projectId: p.id, preview: await getJson<RemovalPreviewLike>(`/api/projects/${p.id}/removal`), typed: "" };
+  } catch (e: any) {
+    removalError.value = e.message;
+  }
+}
+
+async function removeProject() {
+  const p = selected.value;
+  if (!p || !removalView.value?.offer.canRemove) return;
+  removalError.value = "";
+  removing.value = true;
+  try {
+    await deleteJson(`/api/projects/${p.id}`);
+    removal.value = null;
+    projects.value = projects.value.filter((x) => x.id !== p.id);
+    window.dispatchEvent(new Event("projects-changed"));
+    notice.value = `${p.name} removed.`;
+    await router.push("/projects");
+  } catch (e: any) {
+    removalError.value = e.message;
+  } finally {
+    removing.value = false;
+  }
+}
+
 function addRow(rows: string[]) {
   rows.push("");
 }
@@ -258,6 +305,26 @@ onMounted(load);
           <p>{{ projectOffer.question }}</p>
           <div class="actions"><button class="btn btn-ghost" type="button" :disabled="purging" @click="confirmingPurge = null">Cancel</button><button class="btn btn-danger-solid" type="button" :disabled="purging" @click="purgeNow('project')">Delete</button></div>
         </div>
+        <div class="danger-row">
+          <div>
+            <strong>Remove this Project</strong>
+            <span class="hint">Forgequor forgets {{ selected.name }} and every Run it had. Its repository, on disk and on GitHub, stays as it is.</span>
+          </div>
+          <button class="btn btn-danger-outline" type="button" :disabled="removing" :aria-expanded="!!removalView" @click="askRemoval">Remove this Project</button>
+        </div>
+        <div v-if="removalView" class="danger-confirm" role="alertdialog" aria-label="Confirm removing this Project">
+          <p>{{ removalView.offer.runsText }}</p>
+          <ul v-if="removalView.offer.blockedBy.length" class="blocked">
+            <li v-for="line in removalView.offer.blockedBy" :key="line">{{ line }}</li>
+          </ul>
+          <p v-if="removalView.offer.blockedBy.length" class="error">This Project has active Runs. Abandon them first, then remove it.</p>
+          <label class="field">
+            <span>Type <strong>{{ selected.name }}</strong> to confirm</span>
+            <input v-model="removal!.typed" type="text" autocomplete="off" spellcheck="false" :disabled="removing" />
+          </label>
+          <div class="actions"><button class="btn btn-ghost" type="button" :disabled="removing" @click="removal = null">Cancel</button><button class="btn btn-danger-solid" type="button" :disabled="!removalView.offer.canRemove || removing" @click="removeProject">Remove</button></div>
+        </div>
+        <p v-if="removalError" class="error" role="alert">{{ removalError }}</p>
       </section>
     </form>
     <EmptyState v-else title="Project not found" text="No Project has this address. Pick one from the list." />
@@ -280,6 +347,8 @@ h1 { font: 700 var(--fs-xl)/1.2 var(--font-brand); letter-spacing: 0.03em; }
 .danger-row > div { display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--fs-sm); max-width: 32rem; }
 .danger-confirm { display: flex; flex-direction: column; gap: var(--sp-3); }
 .danger-confirm p { margin: 0; font-size: var(--fs-sm); }
+.blocked { margin: 0; padding-left: var(--sp-4); font-size: var(--fs-sm); }
+.field { display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--fs-sm); }
 .btn-danger-outline { color: var(--st-bad); border-color: var(--st-bad); }
 .btn-danger-solid { background: var(--st-bad); border-color: var(--st-bad); color: #1a0508; }
 
