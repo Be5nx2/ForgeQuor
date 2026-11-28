@@ -5,6 +5,7 @@ All notable changes to Forgequor. Format: [Keep a Changelog](https://keepachange
 ## [Unreleased]
 
 ### Added
+- Runs home: `/` redirects to `/runs`, which pins "Waiting for you" (one card per open Gate, with its wait and an Open/Answer button) and "Waiting for your merge" above "All Runs", a table with state chip, Workflow, current Step, Iteration and start time, filtered by state pills; the separate Waiting screen and its sidebar entry are gone (ui-05).
 - One live-events stream per browser tab, shared by every screen and the Quota bars (opened with the first subscriber, closed with the last; views reload what they missed on reconnection); the sidebar's Runs entry shows how many Gates wait for you, updated live (ui-04).
 - Status system and shared states: one status chip (colour, glyph, label) maps every Run state, Step state, attempt, Asset, Review verdict, Gate decision and Check result to running, waiting for you, done, failed, idle or paused (`web/src/status.ts`, tested); loading, empty (with the next step) and error (with Retry) components replace the ad-hoc text on every screen (ui-03).
 - App shell: every screen sits in a left sidebar (FORGE/QUOR logotype, **+ New Run**, "All Projects" placeholder, navigation with `aria-current`, **+ Note** at the bottom) with one Quota bar per vendor on top; design tokens from the UI refresh mockups, Orbitron/Inter/JetBrains Mono with system fallbacks, `:focus-visible` outlines (ui-02).

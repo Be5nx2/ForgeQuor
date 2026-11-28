@@ -28,7 +28,7 @@ Every item must match its mockup in `docs/specs/ui-refresh/` (same layout, compo
   - Spec: `docs/specs/ui-refresh/README.md`
   - Blocked by: `ui-02`
   - Acceptance: a single event stream per browser tab shared by every screen (no screen opens its own); views reload what they missed on reconnection; the Runs entry carries the open-Gate count as in `runs.html`, updated live when a Gate opens or closes; fine-grained patching stays out of scope.
-- [ ] `ui-05` **Runs home**: the home page is the Runs list with "Waiting for you" pinned at the top, as in `runs.html`.
+- [x] `ui-05` **Runs home**: the home page is the Runs list with "Waiting for you" pinned at the top, as in `runs.html`.
   - Spec: `docs/specs/ui-refresh/README.md`
   - Blocked by: `ui-03`, `ui-04`
   - Acceptance: Gate cards first, then "Waiting for your merge", then every Run with its lifecycle state, Workflow, current Step, Iteration and time, filterable by state; each row links to the Run's URL; the separate Waiting screen is gone; empty and loading states shown; matches `runs.html`.
