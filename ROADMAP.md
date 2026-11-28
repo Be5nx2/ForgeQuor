@@ -14,7 +14,7 @@ Nothing in progress.
 
 Remove a **Project** from Forgequor (active Runs abandoned, every Run deleted, the human's repository untouched beyond what Archiving removes, typed-name confirmation, resumable after a failure) and purge Archived Runs on demand, per Project or for all. Source: Dogfood Note #1. Spec: `docs/specs/project-removal.md`.
 
-- [ ] `rm-01` **Purge Archived Runs now**: the human clears Archived Runs on demand, for every Project from the top of the Projects screen or for one Project from its new Danger zone, without waiting 60 days.
+- [x] `rm-01` **Purge Archived Runs now**: the human clears Archived Runs on demand, for every Project from the top of the Projects screen or for one Project from its new Danger zone, without waiting 60 days.
   - Spec: `docs/specs/project-removal.md`
   - Blocked by: none
   - Acceptance: a Forge operation deletes the Archived Runs in scope (all Projects or one), whatever their age, with everything that belongs to them, and returns the count; active and finished-not-Archived Runs are never touched; the daily purge is unchanged; the log uses the daily purge's wording; an HTTP route (400 bad input, 404 unknown Project); "Purge Archived Runs" at the top of the Projects screen and a red Danger zone at the bottom of the Project form with "Purge its Archived Runs now"; a simple confirmation states the count; buttons disabled with "No Archived Run" at zero; a "Starting over" section in the README (stop Forgequor, drop the database or its Docker volume, empty the worktrees folder); Forge tests on the real database, route tests, front logic in a tested module, checked in a browser.
