@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { followRuns, getJson, type ApprovedRun, type OpenGate, type RunDetail } from "../api";
+import { getJson, type ApprovedRun, type OpenGate, type RunDetail } from "../api";
+import { liveEvents } from "../liveEvents";
 import AssetGallery from "../components/AssetGallery.vue";
 import GateActions from "../components/GateActions.vue";
 import Markdown from "../components/Markdown.vue";
@@ -47,7 +48,7 @@ async function load() {
 let stopFollowing: () => void;
 onMounted(() => {
   load();
-  stopFollowing = followRuns((u) => u.type === "changed" && load(), load);
+  stopFollowing = liveEvents.follow((u) => u.type === "changed" && load(), load);
 });
 onUnmounted(() => stopFollowing?.());
 </script>

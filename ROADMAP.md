@@ -24,7 +24,7 @@ Every item must match its mockup in `docs/specs/ui-refresh/` (same layout, compo
   - Spec: `docs/specs/ui-refresh/README.md`
   - Blocked by: `ui-02`
   - Acceptance: one status component with colour, glyph and label (running blue ●, waiting for you orange ●, done green ✓, failed red ✕, idle grey ○, paused ‖) as in the mockups' chips; green and red used for results only; shared loading, empty (with the next step) and error (with Retry) components matching `states.html`; used on every existing screen.
-- [ ] `ui-04` **One live stream and the Gate count**: the whole app follows one live-events stream, and the sidebar shows how many Gates wait for the human.
+- [x] `ui-04` **One live stream and the Gate count**: the whole app follows one live-events stream, and the sidebar shows how many Gates wait for the human.
   - Spec: `docs/specs/ui-refresh/README.md`
   - Blocked by: `ui-02`
   - Acceptance: a single event stream per browser tab shared by every screen (no screen opens its own); views reload what they missed on reconnection; the Runs entry carries the open-Gate count as in `runs.html`, updated live when a Gate opens or closes; fine-grained patching stays out of scope.

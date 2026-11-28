@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { followRuns, getJson, postJson, type RunDetail, type RunNote } from "../api";
+import { getJson, postJson, type RunDetail, type RunNote } from "../api";
+import { liveEvents } from "../liveEvents";
 import AssetGallery from "../components/AssetGallery.vue";
 import GateActions from "../components/GateActions.vue";
 import Markdown from "../components/Markdown.vue";
@@ -64,7 +65,7 @@ const drawing = computed(() => run.value?.assets.find((a) => a.id === runningAtt
 let stopFollowing: () => void;
 onMounted(() => {
   load();
-  stopFollowing = followRuns((u) => {
+  stopFollowing = liveEvents.follow((u) => {
     if (u.type === "quota" || u.runId !== props.id) return;
     if (u.type === "changed") return void load();
     live.value = [...live.value, { attemptId: u.attemptId, kind: u.kind, summary: u.summary }].slice(-LIVE_LINES);

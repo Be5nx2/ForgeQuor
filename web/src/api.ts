@@ -46,17 +46,6 @@ export function decideGate(gateId: number, action: GateAction, feedback?: string
   return postJson(`/api/gates/${gateId}/decision`, { action, feedback, verdicts, target, message });
 }
 
-/**
- * Follows live Run updates over server-sent events. `onOpen` fires on every (re)connection, so a view can reload what it
- * missed meanwhile. Returns the function that stops following.
- */
-export function followRuns(onUpdate: (update: RunUpdate) => void, onOpen?: () => void): () => void {
-  const source = new EventSource("/api/events");
-  source.onopen = () => onOpen?.();
-  source.onmessage = (m) => onUpdate(JSON.parse(m.data));
-  return () => source.close();
-}
-
 export interface TeamField {
   value: string | null;
   source: "env" | "team" | "default";

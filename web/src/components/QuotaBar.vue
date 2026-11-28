@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from "vue";
-import { followRuns, getJson, type QuotaReading, type QuotaStatus } from "../api";
+import { getJson, type QuotaReading, type QuotaStatus } from "../api";
+import { liveEvents } from "../liveEvents";
 
 const VENDORS = [
   { id: "claude", label: "Claude" },
@@ -43,7 +44,7 @@ let stopFollowing: () => void;
 let timer: ReturnType<typeof setInterval>;
 onMounted(() => {
   load();
-  stopFollowing = followRuns((u) => {
+  stopFollowing = liveEvents.follow((u) => {
     if (u.type === "quota") readings.value = { ...readings.value, [u.vendor]: u.reading };
   }, load);
   timer = setInterval(() => (clock.value = Date.now()), 30_000);
