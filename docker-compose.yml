@@ -4,6 +4,9 @@ name: forgequor
 services:
   postgres:
     image: postgres:17
+    # Every checkout, every Run's worktree and every test run share this one instance: a full test run alone opens ~40
+    # connections, so the default 100 ran out as soon as two suites ran side by side ("too many clients already").
+    command: ["postgres", "-c", "max_connections=500"]
     environment:
       POSTGRES_USER: forgequor
       POSTGRES_PASSWORD: forgequor

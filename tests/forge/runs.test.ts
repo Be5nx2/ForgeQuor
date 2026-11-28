@@ -8,6 +8,7 @@ import { createTestDatabase } from "../harness/database.js";
 import { createFakeCodeHost } from "../harness/fake-codehost.js";
 import { createFakeRunner } from "../harness/fake-runner.js";
 import { createRepoWithBareRemote, git, type TempRemote, type TempRepo } from "../harness/git.js";
+import { eventually, until } from "../harness/wait.js";
 
 let forge: Forge;
 let pool: pg.Pool;
@@ -1043,15 +1044,6 @@ describe("the concurrency limit and the queue", () => {
   });
 });
 
-/** Waits until `read` returns something truthy (a file written by a child process, a process gone...). */
-async function eventually<T>(read: () => T | null | false | undefined): Promise<T> {
-  for (let i = 0; i < 250; i++) {
-    const value = read();
-    if (value) return value;
-    await new Promise((r) => setTimeout(r, 20));
-  }
-  throw new Error("timed out waiting");
-}
 const isAlive = (pid: number) => {
   try {
     process.kill(pid, 0);
@@ -1363,7 +1355,7 @@ describe("following a Run live", () => {
     });
 
     const run = await forge.startRun({ projectId: project.id, task: "Make the player jump." });
-    await vi.waitFor(() => expect(updates.filter((u) => u.type === "progress")).toHaveLength(2));
+    await until(() => expect(updates.filter((u) => u.type === "progress")).toHaveLength(2));
     expect(await forge.getRun(run.id)).toMatchObject({ state: "running" });
     expect(updates.filter((u) => u.type === "progress")).toMatchObject([
       { runId: run.id, kind: "text", summary: "Reading the player script" },
@@ -1386,12 +1378,12 @@ describe("following a Run live", () => {
 
     const run = await forge.startRun({ projectId: project.id, task: "Make the player jump." });
     await forge.whenIdle();
-    await vi.waitFor(() => expect(seen.at(-1)).toBe("waiting"));
+    await until(() => expect(seen.at(-1)).toBe("waiting"));
     expect(seen).toContain("running");
     expect(seen.indexOf("running")).toBeLessThan(seen.indexOf("waiting"));
 
     await forge.abandonRun(run.id);
-    await vi.waitFor(() => expect(seen.at(-1)).toBe("abandoned"));
+    await until(() => expect(seen.at(-1)).toBe("abandoned"));
     unsubscribe();
   });
 

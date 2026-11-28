@@ -1376,7 +1376,11 @@ export function createForge(deps: ForgeDeps): Forge {
 
     async startPurging() {
       await purge();
-      return (deps.every ?? realEvery)(() => void purge(), DAY_MS);
+      // The timed purge is tracked, so that `whenIdle()` waits for it like for any other background work.
+      return (deps.every ?? realEvery)(() => {
+        const work = purge().finally(() => inFlight.delete(work));
+        inFlight.add(work);
+      }, DAY_MS);
     },
 
     async whenIdle() {

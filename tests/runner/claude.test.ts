@@ -6,6 +6,7 @@ import { killAllProcessGroups } from "../../src/process-group.js";
 import { createClaudeRunner } from "../../src/runner/claude.js";
 import type { RunnerEvent, StepRequest } from "../../src/runner/runner.js";
 import { createFakeCli, type FakeCliScript } from "../harness/fake-cli.js";
+import { eventually } from "../harness/wait.js";
 
 const line = (o: unknown) => JSON.stringify(o);
 const init = line({ type: "system", subtype: "init", session_id: "s1" });
@@ -164,14 +165,6 @@ describe("Claude Runner", () => {
   });
 
   describe("cancelling a Step", () => {
-    async function waitFor<T>(read: () => T | null | false): Promise<T> {
-      for (let i = 0; i < 300; i++) {
-        const value = read();
-        if (value) return value;
-        await new Promise((r) => setTimeout(r, 20));
-      }
-      throw new Error("timed out waiting");
-    }
     const alive = (pid: number) => {
       try {
         process.kill(pid, 0);
@@ -185,25 +178,25 @@ describe("Claude Runner", () => {
       const fake = createFakeCli({ stdout: [], hang: true });
       const controller = new AbortController();
       const running = createClaudeRunner({ env: fake.env }).run({ ...step(), signal: controller.signal }, () => {});
-      const grandchild = await waitFor(() => fake.grandchildPid());
+      const grandchild = await eventually(() => fake.grandchildPid());
       expect(alive(grandchild)).toBe(true);
 
       controller.abort();
       const result = await running;
 
       expect(result.status).toBe("failed");
-      await waitFor(() => !alive(grandchild));
+      await eventually(() => !alive(grandchild));
     });
 
     it("is ended with Forgequor: a detached claude does not get Forgequor's Ctrl-C", async () => {
       const fake = createFakeCli({ stdout: [], hang: true });
       const running = createClaudeRunner({ env: fake.env }).run(step(), () => {});
-      const grandchild = await waitFor(() => fake.grandchildPid());
+      const grandchild = await eventually(() => fake.grandchildPid());
 
       killAllProcessGroups();
 
       expect((await running).status).toBe("failed");
-      await waitFor(() => !alive(grandchild));
+      await eventually(() => !alive(grandchild));
     });
 
     it("does not start claude at all when already cancelled", async () => {

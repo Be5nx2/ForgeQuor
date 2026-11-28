@@ -6,6 +6,7 @@ import { killAllProcessGroups } from "../../src/process-group.js";
 import { createCodexRunner } from "../../src/runner/codex.js";
 import type { RunnerEvent, StepRequest } from "../../src/runner/runner.js";
 import { createFakeCli, type FakeCliScript } from "../harness/fake-cli.js";
+import { eventually } from "../harness/wait.js";
 
 const line = (o: unknown) => JSON.stringify(o);
 const THREAD = "01a-thread";
@@ -230,14 +231,6 @@ describe("Codex Runner", () => {
   });
 
   describe("cancelling a Step", () => {
-    async function waitFor<T>(read: () => T | null | false): Promise<T> {
-      for (let i = 0; i < 300; i++) {
-        const value = read();
-        if (value) return value;
-        await new Promise((r) => setTimeout(r, 20));
-      }
-      throw new Error("timed out waiting");
-    }
     const alive = (pid: number) => {
       try {
         process.kill(pid, 0);
@@ -251,25 +244,25 @@ describe("Codex Runner", () => {
       const s = setup({ stdout: [], hang: true });
       const controller = new AbortController();
       const running = createCodexRunner({ env: s.env }).run({ ...step(), signal: controller.signal }, () => {});
-      const grandchild = await waitFor(() => s.fake.grandchildPid());
+      const grandchild = await eventually(() => s.fake.grandchildPid());
       expect(alive(grandchild)).toBe(true);
 
       controller.abort();
       const result = await running;
 
       expect(result.status).toBe("failed");
-      await waitFor(() => !alive(grandchild));
+      await eventually(() => !alive(grandchild));
     });
 
     it("is ended with Forgequor: a detached codex does not get Forgequor's Ctrl-C", async () => {
       const s = setup({ stdout: [], hang: true });
       const running = createCodexRunner({ env: s.env }).run(step(), () => {});
-      const grandchild = await waitFor(() => s.fake.grandchildPid());
+      const grandchild = await eventually(() => s.fake.grandchildPid());
 
       killAllProcessGroups();
       await running;
 
-      await waitFor(() => !alive(grandchild));
+      await eventually(() => !alive(grandchild));
     });
 
     it("does not start when already cancelled", async () => {

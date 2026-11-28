@@ -14,6 +14,7 @@ import { createTestDatabase } from "../harness/database.js";
 import { createFakeCodeHost } from "../harness/fake-codehost.js";
 import { createFakeRunner } from "../harness/fake-runner.js";
 import { createRepoWithBareRemote, type TempRemote, type TempRepo } from "../harness/git.js";
+import { until } from "../harness/wait.js";
 
 /** Read-only Steps that run side by side, through the Forge core, with small test Workflows. */
 
@@ -165,10 +166,10 @@ const instructionsOf = (step: { instructions: string }) => step.instructions.rep
 function meetingOf(n: number, then: (step: { cwd: string; instructions: string }) => ReturnType<Parameters<typeof runner.use>[0]> = () => {}) {
   let release!: () => void;
   const together = new Promise<void>((r) => (release = r));
-  const timedOut = new Promise<"never met">((r) => setTimeout(() => r("never met"), 4000));
+  // No timer: Agents that never overlap wait for each other for good, and the test's own timeout reports it.
   return async (step: { cwd: string; instructions: string }) => {
     if (runner.steps.length >= n) release();
-    if ((await Promise.race([together.then(() => "met"), timedOut])) !== "met") return { status: "failed" as const, error: "The Steps never ran at the same time." };
+    await together;
     return then(step);
   };
 }
@@ -255,7 +256,7 @@ describe("read-only Steps whose needs are met", () => {
       return { status: "failed", error: "killed" };
     });
     const started = await forge.startRun({ projectId: project.id, workflow: "fanout", task: "Look around." });
-    for (let i = 0; i < 200 && runner.steps.length < 2; i++) await new Promise((r) => setTimeout(r, 10));
+    await until(() => expect(runner.steps).toHaveLength(2));
     expect(runner.steps).toHaveLength(2);
 
     await forge.abandonRun(started.id);
@@ -330,7 +331,7 @@ describe("a Run's slot", () => {
     });
 
     const first = await forge.startRun({ projectId: project.id, workflow: "fanout", task: "First." });
-    for (let i = 0; i < 200 && runner.steps.length < 2; i++) await new Promise((r) => setTimeout(r, 10));
+    await until(() => expect(runner.steps).toHaveLength(2));
     expect(runner.steps).toHaveLength(2);
     // Two Steps of one Run are in flight, yet a second Run still has a slot, and only the third has to queue.
     const second = await forge.startRun({ projectId: project.id, workflow: "fanout", task: "Second." });

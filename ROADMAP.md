@@ -39,7 +39,7 @@ Small fixes found by dogfooding (Dogfood Notes triaged with `/dogfood-triage`).
   - Spec: `docs/specs/m4-comfort.md` (Quota Reading); Dogfood Note #3
   - Blocked by: none
   - Acceptance: the Codex Runner gains `readQuota()` that starts `codex app-server`, sends `initialize`, `initialized` then `account/rateLimits/read`, and maps `rateLimits.primary` (300 min) and `secondary` (10080 min) to the five-hour and weekly windows (`usedPercent`, `resetsAt` in epoch seconds); it costs no Quota and times out cleanly; a failure leaves the last reading and is logged, never disturbing a Step; the session-file reading after a Step stays as a fallback; unit tests on a recorded answer, plus one real call in the smoke tests.
-- [ ] `pol-03` **Stable timing tests**: the full suite passes on the first run, every run, so a red run always means a real bug.
+- [x] `pol-03` **Stable timing tests**: the full suite passes on the first run, every run, so a red run always means a real bug.
   - Spec: none (found while orchestrating, 2026-11-28)
   - Blocked by: none
   - Acceptance: the tests seen failing at random under a full run, then passing on a rerun, are made deterministic (injected clock and `every`, awaited idle points instead of sleeps or real timers, no shared state between files): at least `tests/forge/quota.test.ts` ("asks once more when a Step ends while a reading is under way"), `tests/forge/feature-art.test.ts` ("sends back Asset Requests…"), `tests/forge/parallel-steps.test.ts`, `tests/store/frozen-definitions.test.ts`; the one full run where every test hung about 10 minutes is explained (a lock, a leaked server or process, a database contention) and prevented; the full suite passes 5 runs in a row; tests keep testing through the public interfaces.

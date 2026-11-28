@@ -1,9 +1,10 @@
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createCodexRunner } from "../../src/runner/codex.js";
 import { parseRateLimits } from "../../src/runner/codex-quota.js";
+import { until } from "../harness/wait.js";
 
 const READ_AT = new Date("2026-11-28T10:00:00Z");
 
@@ -69,13 +70,15 @@ describe("parseRateLimits", () => {
 function fakeAppServer(body: string) {
   const dir = mkdtempSync(join(tmpdir(), "forgequor-fake-appserver-"));
   const bin = join(dir, "codex");
+  const script = join(dir, "server.cjs");
+  // A shell records the pid and becomes node (same pid): the pid is known as soon as the process exists, however long node takes to start.
+  writeFileSync(bin, `#!/bin/sh\necho $$ > ${JSON.stringify(join(dir, "pid"))}\nexec node ${JSON.stringify(script)} "$@"\n`);
   writeFileSync(
-    bin,
-    `#!/usr/bin/env node
+    script,
+    `
 const fs = require("node:fs");
 const log = (m) => fs.appendFileSync(${JSON.stringify(join(dir, "seen.log"))}, JSON.stringify(m) + "\\n");
 fs.writeFileSync(${JSON.stringify(join(dir, "args.json"))}, JSON.stringify(process.argv.slice(2)));
-fs.writeFileSync(${JSON.stringify(join(dir, "pid"))}, String(process.pid));
 const send = (o) => process.stdout.write(JSON.stringify(o) + "\\n");
 const ANSWER = ${JSON.stringify(ANSWER)};
 let buf = "";
@@ -96,7 +99,8 @@ process.stdin.on("data", (c) => {
     env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
     seen: (): string[] => readFileSync(join(dir, "seen.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l)),
     args: (): string[] => JSON.parse(readFileSync(join(dir, "args.json"), "utf8")),
-    pid: () => Number(readFileSync(join(dir, "pid"), "utf8")),
+    /** The server's pid; null when it was stopped before it ran at all (a loaded machine can be slower than the short wait of a test). */
+    pid: (): number | null => (existsSync(join(dir, "pid")) ? Number(readFileSync(join(dir, "pid"), "utf8")) : null),
   };
 }
 
@@ -108,6 +112,9 @@ const alive = (pid: number) => {
     return false;
   }
 };
+
+/** Waits until the fake server's process is gone (what only the operating system can tell). */
+const stopped = (fake: { pid: () => number | null }) => until(() => expect(fake.pid() === null || !alive(fake.pid()!)).toBe(true));
 
 const HAPPY = `
 if (m.method === "initialize") send({ id: m.id, result: { userAgent: "fake" } });
@@ -121,7 +128,7 @@ describe("Codex Runner readQuota", () => {
     expect(reading).toEqual(parseRateLimits(ANSWER, READ_AT));
     expect(fake.args()).toEqual(["app-server"]);
     expect(fake.seen()).toEqual(["initialize", "initialized", "account/rateLimits/read"]);
-    await vi.waitFor(() => expect(alive(fake.pid())).toBe(false));
+    await stopped(fake);
   });
 
   it("waits for the initialize answer before it sends anything else", async () => {
@@ -140,10 +147,11 @@ if (m.method === "account/rateLimits/read") send({ ...ANSWER, id: m.id });
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const started = Date.now();
     expect(await createCodexRunner({ env: fake.env, quotaTimeoutMs: 400 }).readQuota!()).toBeNull();
-    expect(Date.now() - started).toBeLessThan(3000);
+    // The default wait is 15 s: this only has to tell the short wait asked for from the default.
+    expect(Date.now() - started).toBeLessThan(10_000);
     expect(error).toHaveBeenCalled();
     error.mockRestore();
-    await vi.waitFor(() => expect(alive(fake.pid())).toBe(false));
+    await stopped(fake);
   });
 
   it("gives nothing when the server answers with an error", async () => {
