@@ -5,6 +5,7 @@ All notable changes to Forgequor. Format: [Keep a Changelog](https://keepachange
 ## [Unreleased]
 
 ### Added
+- Asset Gate in the Run detail pattern: the gallery shows each Asset at real size and magnified (pixel-sharp) with its Asset Checks, a Verdict and required Feedback per rejected Asset, and its version history; the Gate bar summarises ("3 Assets to judge") and sends the Verdicts ("Send 3 Verdicts", "Approve all") with the rail visible (ui-09).
 - Project selector in the sidebar (All Projects plus each Project, a native select so the keyboard works): the choice is the `?project=` query parameter, kept across navigation and refresh, and narrows the Runs home (Gate cards, merge cards, All Runs), the sidebar Gate count and the Project New Run preselects; with no Project registered the Runs home leads to Projects. Open Gates now carry their `projectId` (ui-06).
 - Conversation and Spec Gates in the Run detail pattern: the Griller chat shows its rounds, questions and recommended answers with the answer box and "Confirm summary" in the panel; the spec renders as a document with its Feedback field beside it; the Gate bar keeps the summary and actions (ui-08).
 - Projects as the mockup: a list of Projects (each with its own URL, `/projects/:id`) beside the selected Project's form (Checks, Setup, slots, Art Direction, Skill Packs) with one Save that applies only what changed, Discard, and "+ Register Project"; the missing-tool warning banner shows above it (ui-11).

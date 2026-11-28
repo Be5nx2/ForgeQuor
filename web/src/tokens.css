@@ -98,6 +98,7 @@ code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
 .chip[data-s="ok"]      { color: var(--st-ok); }
 .chip[data-s="bad"]     { color: var(--st-bad); }
 .chip[data-s="idle"]    { color: var(--st-idle); }
+.chip[data-s="warn"]    { color: var(--highlight); }
 
 /* Runner chip (which Runner and model ran a Step) */
 .runner { font: 500 var(--fs-xs)/1 var(--font-mono); color: var(--text-muted); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.2rem 0.4rem; }
