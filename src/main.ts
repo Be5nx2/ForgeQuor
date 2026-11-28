@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createGhCodeHost } from "./codehost/gh.js";
 import { createForge } from "./forge/forge.js";
@@ -75,6 +75,8 @@ const forge = createForge({
   checkTimeoutMs: minutesAsMs("FORGEQUOR_CHECK_TIMEOUT_MINUTES"),
   // Archived Runs are deleted after FORGEQUOR_ARCHIVE_DAYS days (default 60).
   archiveDays: archiveDays(),
+  // Dogfood Exports go to FORGEQUOR_DOGFOOD_FOLDER (relative to the Forgequor checkout), default docs/dogfood/.
+  dogfoodExportFolder: resolve(root, process.env.FORGEQUOR_DOGFOOD_FOLDER ?? join("docs", "dogfood")),
 });
 const POLL_MS = Number(process.env.FORGEQUOR_PR_POLL_SECONDS ?? 60) * 1000;
 // Runs that were Running restart their Step, Queued Runs start, Approved Runs are followed again.

@@ -5,6 +5,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import {
   AssetNotFoundError,
   GateError,
+  DogfoodExportError,
   DogfoodNoteNotFoundError,
   DogfoodNoteTransitionError,
   InvalidInputError,
@@ -274,6 +275,23 @@ export async function createServer(deps: {
       if (e instanceof InvalidInputError) return reply.code(400).send({ error: e.message });
       if (e instanceof DogfoodNoteNotFoundError) return reply.code(404).send({ error: e.message });
       if (e instanceof DogfoodNoteTransitionError) return reply.code(409).send({ error: e.message });
+      throw e;
+    }
+  });
+  /**
+   * POST /api/dogfood-notes/export  body: { ids: number[] }  writes the chosen notes as one Markdown file in the export folder
+   * and answers `{ fileName, path, content }` for download. Changes no status. 400 for an empty selection or a bad ID, 404 for
+   * an unknown note, 500 with the reason when the folder cannot be written.
+   */
+  app.post<{ Body: { ids?: unknown } }>("/api/dogfood-notes/export", async (req, reply) => {
+    const { ids } = req.body ?? {};
+    if (!Array.isArray(ids)) return reply.code(400).send({ error: "ids is required." });
+    try {
+      return await deps.forge.exportDogfoodNotes(ids as number[]);
+    } catch (e) {
+      if (e instanceof InvalidInputError) return reply.code(400).send({ error: e.message });
+      if (e instanceof DogfoodNoteNotFoundError) return reply.code(404).send({ error: e.message });
+      if (e instanceof DogfoodExportError) return reply.code(500).send({ error: e.message });
       throw e;
     }
   });

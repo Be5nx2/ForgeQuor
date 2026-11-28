@@ -18,7 +18,7 @@ Milestones are specified one at a time with `/to-spec`, then split into items wi
   - Spec: `docs/specs/dogfood-notes.md`
   - Blocked by: `dogfood-01`
   - Acceptance: each note shows nature, target, text, date and origin; filters by status, nature and target; the badge counts `new` notes and updates after a change; a note can go `new` → `triaged` (with an optional free-text reference) or `dismissed`, and back to `new`; triaged and dismissed notes stay listed; only status and reference ever change; Forge core tests cover filters, the count, allowed transitions and the kept reference.
-- [ ] `dogfood-03` **Export selected notes**: the human selects notes in the Inbox and clicks **Export** to get one Markdown file, written in `docs/dogfood/` and offered for download.
+- [x] `dogfood-03` **Export selected notes**: the human selects notes in the Inbox and clicks **Export** to get one Markdown file, written in `docs/dogfood/` and offered for download.
   - Spec: `docs/specs/dogfood-notes.md`
   - Blocked by: `dogfood-02`
   - Acceptance: checkboxes per note plus "select all" for the current filter; the file is named `export_forgequor_<date>_<time>.md`; it has a header with the export date and note count, then one section per target with notes ordered by date, each showing ID, date, nature, target, origin as text, triage reference when present, and the text verbatim; the folder is configurable, defaults to `docs/dogfood/` and is created when missing; exporting changes no status; an empty selection and an unwritable folder give clear errors; Forge core tests cover content, grouping, ordering and file writing in a temporary folder.

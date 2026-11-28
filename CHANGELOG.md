@@ -5,6 +5,7 @@ All notable changes to Forgequor. Format: [Keep a Changelog](https://keepachange
 ## [Unreleased]
 
 ### Added
+- Export selected notes: tick notes in the Inbox (or select all shown) and **Export** writes one Markdown Dogfood Export, `export_forgequor_<date>_<time>.md`, with a header and a section per target, into `docs/dogfood/` (`FORGEQUOR_DOGFOOD_FOLDER`, created when missing, git-ignored) and offers it for download; no status changes; `POST /api/dogfood-notes/export` (dogfood-03).
 - Review notes in the Dogfood Inbox: an Inbox tab lists the notes newest first with status, nature and target filters and a badge counting the new ones; a note can be triaged (with an optional reference), dismissed, or brought back to new; `PUT /api/dogfood-notes/:id/status` (dogfood-02).
 - Jot a Dogfood Note: a floating **+ Note** button on every tab opens a popup (nature, target pre-selected from the tab, text) and records the note with its tab, Run or Project and date; `POST` and `GET /api/dogfood-notes`; glossary entries for Dogfood Note, Inbox and Export (dogfood-01).
 - `tests/acceptance/comfort.ba.ts`: M4 BA scenarios, archiving of an abandoned Run (worktree, branches, pull request, history kept), a Claude Quota reading after a Step, Workflow validation and the Team seats (m4-11).
