@@ -35,7 +35,7 @@ Small fixes found by dogfooding (Dogfood Notes triaged with `/dogfood-triage`).
   - Spec: `docs/specs/m4-comfort.md` (Quota bars); Dogfood Note #3
   - Blocked by: none
   - Acceptance: one gauge per window (five-hour, week) with a clear label, the percent used and the reset time apart; the gauge colour follows the status system (orange from a threshold, red when exhausted); an unknown reading stays greyed "unknown" with its age; same data and refresh as today; checked in a browser at 1440 px.
-- [ ] `pol-02` **Codex Quota read on demand**: the Codex bar is filled at startup and every 5 minutes like Claude's, without waiting for a Codex Step.
+- [x] `pol-02` **Codex Quota read on demand**: the Codex bar is filled at startup and every 5 minutes like Claude's, without waiting for a Codex Step.
   - Spec: `docs/specs/m4-comfort.md` (Quota Reading); Dogfood Note #3
   - Blocked by: none
   - Acceptance: the Codex Runner gains `readQuota()` that starts `codex app-server`, sends `initialize`, `initialized` then `account/rateLimits/read`, and maps `rateLimits.primary` (300 min) and `secondary` (10080 min) to the five-hour and weekly windows (`usedPercent`, `resetsAt` in epoch seconds); it costs no Quota and times out cleanly; a failure leaves the last reading and is logged, never disturbing a Step; the session-file reading after a Step stays as a fallback; unit tests on a recorded answer, plus one real call in the smoke tests.
