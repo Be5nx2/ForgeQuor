@@ -71,6 +71,12 @@ export interface Forge {
   subscribe(listener: (update: RunUpdate) => void): () => void;
   registerProject(input: { path: string }): Promise<Project>;
   listProjects(): Promise<Project[]>;
+  /**
+   * Deletes the Archived Runs of one Project, or of every Project when none is given, whatever their age, with everything that
+   * belongs to them; active and finished-but-not-Archived Runs are never touched. Returns how many were deleted. The daily
+   * purge is unchanged. Throws "No Project N." for an unknown Project.
+   */
+  purgeArchivedRuns(projectId?: number): Promise<number>;
   /** Replaces a Project's ordered Check commands (blank ones are dropped). Applies to Runs started afterwards. */
   setChecks(projectId: number, checks: string[]): Promise<Project>;
   /** Replaces a Project's ordered setup commands (blank ones are dropped). A failing one opens an Escalation and the Developer never starts. */
@@ -231,7 +237,8 @@ export interface ForgeDeps {
 }
 
 const COLUMNS =
-  "id, name, local_path, remote_owner, remote_name, default_branch, checks, setup, max_concurrent_runs, art_direction_path, art_folder, skill_packs";
+  "id, name, local_path, remote_owner, remote_name, default_branch, checks, setup, max_concurrent_runs, art_direction_path, art_folder, skill_packs, " +
+  "(SELECT count(*) FROM runs WHERE runs.project_id = projects.id AND runs.archived_at IS NOT NULL) AS archived_runs";
 
 function toProject(r: Record<string, any>): Project {
   return {
@@ -247,6 +254,7 @@ function toProject(r: Record<string, any>): Project {
     artDirectionPath: r.art_direction_path,
     artFolder: r.art_folder,
     skillPacks: r.skill_packs,
+    archivedRuns: Number(r.archived_runs),
   };
 }
 
@@ -968,6 +976,17 @@ export function createForge(deps: ForgeDeps): Forge {
     async listProjects() {
       const { rows } = await pool.query(`SELECT ${COLUMNS} FROM projects ORDER BY id`);
       return rows.map(toProject);
+    },
+
+    async purgeArchivedRuns(projectId) {
+      if (projectId !== undefined) {
+        const { rows } = await pool.query("SELECT 1 FROM projects WHERE id = $1", [projectId]);
+        if (!rows[0]) throw new Error(`No Project ${projectId}.`);
+      }
+      const { rowCount } = await pool.query("DELETE FROM runs WHERE archived_at IS NOT NULL AND ($1::int IS NULL OR project_id = $1)", [projectId ?? null]);
+      const n = rowCount ?? 0;
+      console.log(`Purge: ${n} archived Run${n === 1 ? "" : "s"} deleted (requested${projectId === undefined ? "" : ` for Project ${projectId}`}).`);
+      return n;
     },
 
     async setChecks(projectId, checks) {

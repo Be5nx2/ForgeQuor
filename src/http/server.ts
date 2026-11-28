@@ -45,6 +45,18 @@ export async function createServer(deps: {
     }
   });
 
+  app.post<{ Body: { projectId?: unknown } }>("/api/archived-runs/purge", async (req, reply) => {
+    const projectId = req.body?.projectId;
+    if (projectId !== undefined && (typeof projectId !== "number" || !Number.isInteger(projectId) || projectId < 1)) {
+      return reply.code(400).send({ error: "projectId must be a Project number." });
+    }
+    try {
+      return { deleted: await deps.forge.purgeArchivedRuns(projectId as number | undefined) };
+    } catch (e: any) {
+      return reply.code(/^No Project/.test(e.message) ? 404 : 500).send({ error: e.message });
+    }
+  });
+
   app.put<{ Params: { id: string }; Body: { checks?: unknown } }>("/api/projects/:id/checks", async (req, reply) => {
     const checks = req.body?.checks;
     if (!Array.isArray(checks) || checks.some((c) => typeof c !== "string")) {
